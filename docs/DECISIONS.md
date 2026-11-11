@@ -256,7 +256,7 @@ those is reasonable and needs a new entry.
 
 ## D14 — Scopes for processes and services
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Add an issuable `processes:read` scope for `GET /processes`.
 Process lists reveal user names, running software and resource use, so
@@ -269,7 +269,7 @@ registry and spec gain one entry; this is a non-breaking addition (D8).
 
 ## D15 — systemd access through godbus/dbus
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Read systemd unit state over the system D-Bus with
 `github.com/godbus/dbus/v5` (pure Go, the library underneath
@@ -281,7 +281,7 @@ larger go-systemd dependency for one call.
 
 ## D16 — Vendor GPU metrics as optional tools
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** GPU inventory comes from PCI and DRM in sysfs. Metrics come
 from vendor sources when present: NVIDIA via `nvidia-smi
@@ -292,7 +292,7 @@ metrics. NVML (cgo) is not used.
 
 ## D17 — Server-Sent Events for the event stream
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** `GET /api/v1/events/stream` (`metrics:read`) sends events as
 SSE with a heartbeat every 15 seconds. Each subscriber has a bounded

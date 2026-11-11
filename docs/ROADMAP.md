@@ -81,7 +81,7 @@ revoked; missing sensors and permissions are reported, not fatal.
 **Status: implemented, awaiting review.** Every milestone below is done,
 verified with tests and against a real WSL2 host (systemd, NVIDIA GPU via
 `nvidia-smi`; no USB, DMI or sensors, all reported with reasons). D14–D17
-are proposed and need approval.
+accepted.
 
 | # | Milestone | Depends on |
 |---|---|---|
