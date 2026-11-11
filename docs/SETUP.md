@@ -42,7 +42,7 @@ programs, run the agent separately:
 
 | Key | Action |
 |---|---|
-| `1`–`9`, `tab`, `←`/`→`, click a tab | Switch screen (Overview, Hardware, Health, Storage, Network, Processes, Services, Events, API Access) |
+| `1`–`9`, `0`, `,`, `tab`, `←`/`→`, click a tab | Switch screen (1 Overview, 2 Hardware, 3 Performance, 4 Health, 5 Storage, 6 Network, 7 Processes, 8 Services, 9 Events, 0 API Access, `,` Settings) |
 | `r` | Refresh now |
 | `?` | Help |
 | `q`, `Ctrl-C` | Quit |
@@ -50,6 +50,16 @@ programs, run the agent separately:
 | `n` / `o` / `x` (API Access) | Create / rotate / revoke a key |
 | `s` / `/` / `k` (Processes) | Change sort / search / show kernel threads |
 | `f` (Services) | Failed services only / all |
+| `t` (Performance) | Chart range: 1h, 6h, 24h, 7d |
+| `v` / `m` (Events) | Minimum severity: all, warning, critical / load older events |
+| `+` / `-` (Settings) | Change this session's refresh interval |
+| `↑`/`↓`, `enter`, `w`, `d`, `esc` (Settings) | Select / edit a health threshold / save / reset to the file / discard edits |
+
+Performance charts come from the agent's metric history (raw samples for
+recent ranges, 1-minute or 1-hour aggregates for longer ones). Health
+thresholds can be changed only over the local socket. A save shows the
+changes and asks for confirmation; the override persists in the database
+until reset.
 
 Rotation and revocation ask you to type the key ID. A new key is shown once.
 It is erased from the screen when you press Enter and cannot be shown again.

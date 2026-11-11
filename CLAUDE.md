@@ -209,8 +209,8 @@ Visual language:
 
 Navigation: Overview, Hardware, Performance, Health, Storage, Network,
 Processes, Services, Events / Logs, API Access, Settings. Screens without
-an implementation are hidden, not shown empty (Performance and Settings,
-as of Phase 2).
+an implementation are hidden, not shown empty (all are implemented as of
+Phase 3).
 
 Text from the API (process names, device strings, descriptions) is
 untrusted: never render it without the sanitization in `sanitize.go`.
