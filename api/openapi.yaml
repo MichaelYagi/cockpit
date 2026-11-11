@@ -1306,7 +1306,7 @@ components:
       additionalProperties: false
       required: [id, name, status, availability, findings]
       properties:
-        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health] }
+        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health, services, network_errors] }
         name: { type: string }
         status: { $ref: "#/components/schemas/HealthStatus" }
         availability:
@@ -1352,7 +1352,7 @@ components:
         time: { $ref: "#/components/schemas/Timestamp" }
         type:
           type: string
-          enum: [finding.raised, finding.resolved, collector.degraded, key.created, key.rotated, key.revoked]
+          enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked]
         severity: { type: string, enum: [info, warning, critical] }
         subject: { type: string }
         message: { type: string }

@@ -159,8 +159,9 @@ func newEnv(t *testing.T, logOut io.Writer) env {
 	snap := fixedSnapshot{testSnapshot()}
 	h := health.New(snap, health.Options{Confirm: 1, Now: fixedNow, Publish: func(e core.Event) { evLog.Publish(e) },
 		Thresholds: health.Thresholds{StorageWarnPct: 50, StorageCriticalPct: 95, MemWarnAvailablePct: 10, MemCriticalAvailablePct: 5,
-			CPUWarnCelsius: 85, CPUCriticalCelsius: 95, MemWarnPressurePct: 5, MemCriticalPressurePct: 20, DiskWarnPercentageUsed: 90}})
-	h.Evaluate() // "/" is 52.6% full: one warning finding and one event
+			CPUWarnCelsius: 85, CPUCriticalCelsius: 95, MemWarnPressurePct: 5, MemCriticalPressurePct: 20, DiskWarnPercentageUsed: 90,
+			NetWarnErrorsPerMin: 10, NetCriticalErrorsPerMin: 100}})
+	h.Evaluate() // "/" is 52.6% full and backup.service failed: two warnings, two events
 	for i := 0; i < 5; i++ {
 		evLog.Publish(core.Event{Type: core.EventCollectorDegraded, Severity: core.SeverityInfo, Subject: "collector:test", Message: "test event"})
 	}
@@ -433,7 +434,7 @@ func TestEventsPagination(t *testing.T) {
 		}
 		cursor = *page.NextCursor
 	}
-	if len(all) != 6 { // 1 health finding + 5 test events
+	if len(all) != 7 { // 2 health findings + 5 test events
 		t.Errorf("paged %d events", len(all))
 	}
 }

@@ -36,6 +36,8 @@ type Options struct {
 	// Settings resolves configuration for a collector. Nil uses the
 	// descriptor defaults with the collector enabled.
 	Settings func(collector.Descriptor) Settings
+	// Publish receives collector degraded/recovered events. Optional.
+	Publish func(core.Event)
 }
 
 // Reader gives read-only access to the latest snapshot.

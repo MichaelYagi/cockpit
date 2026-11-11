@@ -109,6 +109,13 @@ type Health struct {
 	Memory         MemoryHealth         `yaml:"memory"`
 	Storage        StorageHealth        `yaml:"storage"`
 	Disk           DiskHealth           `yaml:"disk"`
+	Network        NetworkHealth        `yaml:"network"`
+}
+
+// NetworkHealth thresholds: interface errors per minute.
+type NetworkHealth struct {
+	WarnErrorsPerMinute     float64 `yaml:"warn_errors_per_minute"`
+	CriticalErrorsPerMinute float64 `yaml:"critical_errors_per_minute"`
 }
 
 // CPUTemperatureHealth thresholds apply only when the sensor does not
@@ -159,6 +166,7 @@ func Defaults() Config {
 				WarnPressurePercent: 5, CriticalPressurePercent: 20},
 			Storage: StorageHealth{WarnPercent: 85, CriticalPercent: 95},
 			Disk:    DiskHealth{WarnPercentageUsed: 90},
+			Network: NetworkHealth{WarnErrorsPerMinute: 10, CriticalErrorsPerMinute: 100},
 		},
 		Collection: Collection{
 			Defaults: CollectorSettings{Interval: 2 * time.Second, Timeout: time.Second},

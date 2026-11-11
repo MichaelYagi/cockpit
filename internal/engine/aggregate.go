@@ -120,6 +120,8 @@ type aggregator struct {
 	prevCPUAt time.Time
 	prevNet   map[string]core.NetInterface
 	prevNetAt time.Time
+
+	degraded map[string]bool // "collector|capability" currently degraded
 }
 
 func newAggregator(e *Engine, probes []map[core.Capability]core.CapabilityStatus) *aggregator {
@@ -181,12 +183,14 @@ func (a *aggregator) run(ctx context.Context) {
 
 func (a *aggregator) apply(o outcome) {
 	r := o.runner
+	before := a.caps[r.desc.ID]
 	if o.failed != "" {
 		a.caps[r.desc.ID] = allStatus(r.desc, core.TemporarilyUnavailable, o.failed)
 	} else {
 		a.caps[r.desc.ID] = normalize(r.desc, o.result.Status)
 	}
 	caps := a.caps[r.desc.ID]
+	a.transitions(r, before, caps)
 	at := o.result.CollectedAt.UTC()
 	if at.IsZero() {
 		at = a.e.opts.Now().UTC()
@@ -404,4 +408,30 @@ func sec[T any](a *aggregator, s section) core.Section[T] {
 		out.Data = d
 	}
 	return out
+}
+
+// transitions publishes an event when a capability that was available
+// stops being available, or comes back. Capabilities that were never
+// available (missing hardware) produce no events.
+func (a *aggregator) transitions(r *runner, before, after map[core.Capability]core.CapabilityStatus) {
+	if a.e.opts.Publish == nil {
+		return
+	}
+	for _, c := range r.desc.Capabilities {
+		key := r.desc.ID + "|" + string(c)
+		was, now := before[c].Availability, after[c].Availability
+		switch {
+		case was == core.Available && now != core.Available:
+			if a.degraded == nil {
+				a.degraded = map[string]bool{}
+			}
+			a.degraded[key] = true
+			a.e.opts.Publish(core.Event{Time: a.e.opts.Now().UTC(), Type: core.EventCollectorDegraded, Severity: core.SeverityWarning,
+				Subject: "collector:" + r.desc.ID, Message: string(c) + " is " + string(now) + ": " + after[c].Reason})
+		case now == core.Available && a.degraded[key]:
+			delete(a.degraded, key)
+			a.e.opts.Publish(core.Event{Time: a.e.opts.Now().UTC(), Type: core.EventCollectorRecovered, Severity: core.SeverityInfo,
+				Subject: "collector:" + r.desc.ID, Message: string(c) + " is available again"})
+		}
+	}
 }

@@ -137,6 +137,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		Logger:   log.With("component", "engine"),
 		Now:      o.Now,
 		Settings: CollectorSettings(cfg.Collection),
+		Publish:  publish,
 	})
 	if err != nil {
 		return fmt.Errorf("collectors: %w", err)
@@ -304,5 +305,6 @@ func Thresholds(h config.Health) health.Thresholds {
 		MemWarnPressurePct: h.Memory.WarnPressurePercent, MemCriticalPressurePct: h.Memory.CriticalPressurePercent,
 		StorageWarnPct: h.Storage.WarnPercent, StorageCriticalPct: h.Storage.CriticalPercent,
 		DiskWarnPercentageUsed: h.Disk.WarnPercentageUsed,
+		NetWarnErrorsPerMin:    h.Network.WarnErrorsPerMinute, NetCriticalErrorsPerMin: h.Network.CriticalErrorsPerMinute,
 	}
 }

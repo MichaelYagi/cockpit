@@ -45,6 +45,13 @@ func healthy() *core.Snapshot {
 		DiskHealth: core.Section[core.DiskHealthList]{Meta: ok(t0), Data: &core.DiskHealthList{
 			{Device: "nvme0n1", Protocol: "NVMe", Passed: ptr(true), PercentageUsed: ptr(3), CriticalWarning: ptr(0), MediaErrors: ptr(uint64(0))},
 		}},
+		Services: core.Section[core.Services]{Meta: ok(t0), Data: &core.Services{
+			{Name: "ssh.service", ActiveState: "active", SubState: "running"},
+		}},
+		Network: core.Section[[]core.NetInterfaceMetrics]{Meta: ok(t0), Data: &[]core.NetInterfaceMetrics{
+			{NetInterface: core.NetInterface{Name: "eth0", RxErrors: 5}},
+			{NetInterface: core.NetInterface{Name: "lo", Loopback: true, RxErrors: 999}},
+		}},
 	}
 }
 
@@ -54,6 +61,7 @@ var defaultThresholds = Thresholds{
 	MemWarnPressurePct: 5, MemCriticalPressurePct: 20,
 	StorageWarnPct: 85, StorageCriticalPct: 95,
 	DiskWarnPercentageUsed: 90,
+	NetWarnErrorsPerMin:    10, NetCriticalErrorsPerMin: 100,
 }
 
 func newEval(t *testing.T, s *core.Snapshot, confirm int) (*Evaluator, *src, *[]core.Event) {
@@ -79,7 +87,7 @@ func check(t *testing.T, r *Report, id string) CheckResult {
 func TestAllHealthy(t *testing.T) {
 	e, _, evs := newEval(t, healthy(), 1)
 	r := e.Evaluate()
-	if r.Status != StatusOK || len(r.Checks) != 4 {
+	if r.Status != StatusOK || len(r.Checks) != 6 {
 		t.Fatalf("report %+v", r)
 	}
 	for _, c := range r.Checks {
@@ -309,5 +317,48 @@ func TestRunStopsOnCancel(t *testing.T) {
 	<-done
 	if e.Current().Status != StatusOK {
 		t.Error("Run did not evaluate")
+	}
+}
+
+func TestFailedService(t *testing.T) {
+	s := healthy()
+	*s.Services.Data = append(*s.Services.Data, core.Service{Name: "backup.service", Description: "Nightly backup", ActiveState: "failed", SubState: "failed"})
+	e, _, evs := newEval(t, s, 1)
+	c := check(t, e.Evaluate(), CheckServices)
+	if c.Status != StatusWarning || len(c.Findings) != 1 || c.Findings[0].Subject != "service:backup.service" ||
+		!strings.Contains(c.Findings[0].Recommendation, "journalctl -u backup.service") {
+		t.Errorf("%+v", c)
+	}
+	if len(*evs) != 1 {
+		t.Errorf("events %v", *evs)
+	}
+}
+
+func TestNetworkErrorRate(t *testing.T) {
+	now := t0
+	source := &src{s: healthy()}
+	e := New(source, Options{Thresholds: defaultThresholds, Confirm: 1, Now: func() time.Time { return now }})
+	if c := check(t, e.Evaluate(), CheckNetworkErrors); c.Status != StatusOK {
+		t.Fatalf("errors accumulated before the first evaluation must not count: %+v", c)
+	}
+	step := func(errs uint64, after time.Duration) CheckResult {
+		now = now.Add(after)
+		s := healthy()
+		(*s.Network.Data)[0].RxErrors = errs
+		(*s.Network.Data)[1].RxErrors = errs * 100 // loopback never counts
+		source.set(s)
+		return check(t, e.Evaluate(), CheckNetworkErrors)
+	}
+	if c := step(25, time.Minute); c.Status != StatusWarning || c.Findings[0].Evidence["errors_per_minute"] != "20.0" {
+		t.Errorf("20/min: %+v", c)
+	}
+	if c := step(25+500, time.Minute); c.Status != StatusCritical {
+		t.Errorf("500/min: %+v", c)
+	}
+	if c := step(525, time.Minute); c.Status != StatusOK {
+		t.Errorf("errors stopped rising: %+v", c)
+	}
+	if c := step(3, time.Minute); c.Status != StatusOK {
+		t.Errorf("counter reset must not count: %+v", c)
 	}
 }
