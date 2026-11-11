@@ -41,8 +41,10 @@ One binary, `cockpit`, with subcommands (D2):
                     └────────────────────────────┘     └──────────────────────────┘
 ```
 
-**Embedded agent.** If `cockpit tui` cannot reach an agent socket, it may
-start an agent in-process. That agent listens only on a private Unix socket
+**Embedded agent.** If `cockpit tui` cannot reach an agent on the default
+socket (and no `--socket` or `--url` was given), it starts an agent
+in-process. Its logs go to `<state dir>/embedded-agent.log`, its socket is
+`<runtime dir>/tui-<pid>.sock`, and it stops when the TUI exits. That agent listens only on a private Unix socket
 (no TCP), and the TUI connects through `pkg/client` exactly as it would to
 a separate agent. Only `internal/cli` contains the code that starts it.
 
@@ -111,7 +113,10 @@ type Subscriber interface {
 - Each collection cycle builds a **new immutable snapshot** and publishes
   it with `atomic.Pointer`. Readers never lock and never see partial
   updates.
-- Handlers read the current snapshot. They never trigger collection.
+- Handlers read the current snapshot. They never trigger collection. Rates,
+  uptime and staleness are computed from timestamps at read time.
+- The TUI polls (default every second); it never overlaps requests for the
+  same resource. SSE arrives in Phase 2.
   Expensive on-demand data (e.g. processes, Phase 2) goes through an engine
   method with a short cache.
 - Event subscribers each get a bounded queue. If a subscriber falls behind,
@@ -183,9 +188,8 @@ defaults.
   in a shared directory such as `/tmp` is refused.
 - No hot reload in the MVP.
 
-Current schema (Phase 0) with defaults. Run `cockpit config check` to print
-the effective configuration. Sections marked *Phase 1* are planned and are
-rejected by the strict decoder until implemented.
+Current schema with defaults. Run `cockpit config check` to print the
+effective configuration.
 
 ```yaml
 agent:
@@ -202,15 +206,22 @@ api:
   tls:
     cert_file: ""
     key_file: ""
-  # rate_limit: { per_key_rps: 20, burst: 40 }      # Phase 1
+  rate_limit:                  # TCP only; the socket is never limited
+    per_key_rps: 20
+    per_key_burst: 40
+    global_rps: 200
+    global_burst: 400
 collection:
   defaults: { interval: 2s, timeout: 1s }
   collectors:
     linux.smart: { interval: 1h, timeout: 30s }
-# health:                                           # Phase 1
-#   storage:  { warn_percent: 85, critical_percent: 95 }
-#   memory:   { warn_available_percent: 10, critical_available_percent: 5 }
-#   cpu_temperature: { warn_celsius: 85, critical_celsius: 95 }
+health:
+  interval: 5s
+  confirm: 2                   # evaluations a change must hold (anti-flapping)
+  cpu_temperature: { warn_celsius: 85, critical_celsius: 95 }   # used only without hardware limits
+  memory: { warn_available_percent: 10, critical_available_percent: 5, warn_pressure_percent: 5, critical_pressure_percent: 20 }
+  storage: { warn_percent: 85, critical_percent: 95 }
+  disk: { warn_percentage_used: 90 }
 logging:
   level: info
   format: text                 # text | json
@@ -226,8 +237,8 @@ tui:
   cross-compiles for Linux, macOS, and Windows on every change.
 - Local admin transport is behind a listener abstraction: Unix sockets on
   Linux/macOS, named pipes with ACLs on Windows later.
-- Linux sources: `/proc` and `/sys` (via `prometheus/procfs` and direct
-  reads), `statfs`, later systemd D-Bus and netlink where needed.
+- Linux sources: `/proc` and `/sys` (hand-written parsers, D13), `statfs`,
+  later systemd D-Bus and netlink where needed.
   `smartctl --json` is an optional external dependency. Parsing
   human-readable command output is not used.
 

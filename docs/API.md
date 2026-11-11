@@ -196,8 +196,17 @@ Browser clients (future web UI) cannot set headers on `EventSource`; they
 will need a separately designed short-lived ticket. Keys in query strings
 remain forbidden.
 
-## 11. Client SDK and examples
+## 11. Rate limits
+
+TCP requests are limited globally, per key, and (for failed
+authentication) per client IP. A limited request gets `429` with
+`code: rate_limited` and a `Retry-After` header in seconds. The Unix
+socket is not limited. Defaults are in `docs/SECURITY.md` §9.
+
+## 12. Client SDK and examples
 
 `pkg/client` is the Go SDK and the only way the TUI talks to the agent. It
-supports Unix-socket, TCP and TLS transports. Documentation includes `curl`
-and Python examples. Response semantics do not change within `v1`.
+supports Unix-socket, TCP and TLS transports, never follows redirects, and
+refuses to send a key over plain HTTP to a non-loopback host. `curl` and
+Python examples are in `docs/SETUP.md`. Response semantics do not change
+within `v1`.
