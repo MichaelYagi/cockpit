@@ -209,7 +209,16 @@ func TestUnitsVerify(t *testing.T) {
 		paths = append(paths, p)
 	}
 	out, err := exec.Command("systemd-analyze", append([]string{"verify", "--man=no"}, paths...)...).CombinedOutput()
-	if err != nil || len(bytes.TrimSpace(out)) > 0 {
+	if err != nil {
 		t.Errorf("systemd-analyze verify: %v\n%s", err, out)
+	}
+	// verify also loads the host's units and may warn about them; only
+	// messages about our units count.
+	for _, line := range strings.Split(string(out), "\n") {
+		for _, u := range units {
+			if strings.Contains(line, u) {
+				t.Errorf("systemd-analyze verify: %s", line)
+			}
+		}
 	}
 }
