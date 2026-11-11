@@ -129,6 +129,7 @@ pkg/
   client/                    # public Go SDK (Unix socket, TCP, TLS)
   collectorsdk/              # public extension collector contract (D23)
 custom/                      # custom.Main: build cockpit with extension collectors
+examples/collector/          # example extension build (own module; make examples)
 deploy/                      # systemd units, sysusers.d entry, install/uninstall scripts (+ tests)
 docs/
 ```
@@ -252,7 +253,8 @@ During implementation:
 - No plugin sandbox or dynamic third-party code loading in the MVP.
 - Keep secrets and real host identifiers out of logs, fixtures, test
   snapshots and error messages.
-- Run `make check` (gofmt, vet, staticcheck, race tests, cross-compile)
+- Run `make check` (gofmt, vet, staticcheck, race tests, cross-compile,
+  example extension build)
   and `make vuln`.
 
 Before completing a task:

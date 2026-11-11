@@ -6,7 +6,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 
 export CGO_ENABLED ?= 0
 
-.PHONY: all build fmt fmt-check vet lint test test-race test-integration cross vuln check clean
+.PHONY: all build fmt fmt-check vet lint test test-race test-integration cross vuln examples check clean
 
 all: check build
 
@@ -45,7 +45,12 @@ cross:
 vuln:
 	$(GO) tool govulncheck $(PKG)
 
-check: fmt-check vet lint test-race cross
+# The example extension is a separate module (examples/collector) that
+# builds against this checkout.
+examples:
+	cd examples/collector && $(GO) vet ./... && $(GO) test ./... && $(GO) build -o /dev/null .
+
+check: fmt-check vet lint test-race cross examples
 
 clean:
 	rm -rf bin

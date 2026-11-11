@@ -312,7 +312,14 @@ privileges and can read whatever the agent can, including the key
 database. Build in only code you would trust as a dependency. There is no
 sandbox, and a Go interface is not a security boundary.
 
-A complete, tested example lives in `examples/collector/` (4D).
+A complete, tested example lives in `examples/collector/`. It is a
+separate module that reports kernel file handle use and the context
+switch rate, with fixture-based tests. `make examples` (part of
+`make check` and CI) vets, tests and builds it against this checkout:
+
+```sh
+cd examples/collector && CGO_ENABLED=0 go build -o cockpit . && ./cockpit tui
+```
 
 ## 9. Future extension model
 

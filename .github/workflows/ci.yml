@@ -26,6 +26,8 @@ jobs:
         run: make test-race
       - name: test (integration, non-root)
         run: make test-integration
+      - name: example extension build
+        run: make examples
       - name: govulncheck
         run: make vuln
       - name: build
