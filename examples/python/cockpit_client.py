@@ -43,11 +43,13 @@ def main():
     if not key:
         sys.exit("Set COCKPIT_API_KEY")
 
+    print("host:")
     try:
-        system = get("/system", key)["system"]["data"]
-        print(f"host: {system['hostname']} ({system['os']['pretty_name']})")
+        system = section(get("/system", key)["system"])
+        if system:
+            print(f"  {system['hostname']} ({system['os']['pretty_name']})")
     except SystemExit as e:  # a metrics-only key cannot read /system
-        print(f"host: unknown ({e})")
+        print(f"  unknown ({e})")
 
     health = get("/health", key)
     print(f"health: {health['status']}")

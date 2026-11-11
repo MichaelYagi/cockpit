@@ -110,7 +110,7 @@ func TestClientExamples(t *testing.T) {
 			t.Skip("python3 not installed")
 		}
 		out := runExample(t, url, key, "python3", "python/cockpit_client.py")
-		for _, want := range []string{"host: ", "health: ", "cpu_temperature", "cpu:", "memory:"} {
+		for _, want := range []string{"host:", "health: ", "cpu_temperature", "cpu:", "memory:"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("python output missing %q:\n%s", want, out)
 			}
