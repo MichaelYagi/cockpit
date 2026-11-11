@@ -16,6 +16,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # runs the TypeScript client example directly
       - name: gofmt
         run: make fmt-check
       - name: go vet

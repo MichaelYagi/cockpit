@@ -1,0 +1,36 @@
+name: release
+
+# Publishes a GitHub release for a pushed version tag (D26): Linux amd64
+# and arm64 archives with the binary, deploy/ and docs, plus SHA256SUMS.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: checks
+        run: make fmt-check vet lint test-race
+      - name: build archives
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: make dist VERSION="$VERSION"
+      - name: release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          awk -v v="$VERSION" '$0 ~ "^## "v" " {on=1; next} on && /^## / {exit} on {print}' CHANGELOG.md > dist/NOTES.md
+          test -s dist/NOTES.md || { echo "CHANGELOG.md has no section for $VERSION"; exit 1; }
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: gh release create "$VERSION" dist/*.tar.gz dist/SHA256SUMS --verify-tag --title "Cockpit $VERSION" --notes-file dist/NOTES.md

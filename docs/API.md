@@ -262,6 +262,22 @@ socket is not limited. Defaults are in `docs/SECURITY.md` §9.
 
 `pkg/client` is the Go SDK and the only way the TUI talks to the agent. It
 supports Unix-socket, TCP and TLS transports, never follows redirects, and
-refuses to send a key over plain HTTP to a non-loopback host. `curl` and
-Python examples are in `docs/SETUP.md`. Response semantics do not change
-within `v1`.
+refuses to send a key over plain HTTP to a non-loopback host. Examples:
+
+- **Go:** `go doc -all github.com/MichaelYagi/cockpit/pkg/client`. The
+  `Example…` functions cover TCP and socket clients, metrics, history and
+  the event stream.
+- **Python:** `examples/python/cockpit_client.py` (standard library only).
+- **TypeScript:** `examples/typescript/cockpit-client.ts` (no
+  dependencies; Node 23.6+ runs it directly).
+- **curl:** `docs/SETUP.md`.
+
+The Python and TypeScript examples run in CI against a live agent, so
+they stay in step with the API.
+
+**Versioning (D26).** Releases are tagged `vX.Y.Z`. `pkg/client`,
+`pkg/apiv1` and `pkg/collectorsdk` follow semantic versioning: while the
+version is `0.x`, a minor release may break them, and `CHANGELOG.md` lists
+every such change. From `v1.0.0` on they break only with a major version.
+The REST API is versioned separately: `/api/v1` only gains fields and
+endpoints (§1), whatever the package versions.

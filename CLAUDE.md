@@ -129,7 +129,10 @@ pkg/
   client/                    # public Go SDK (Unix socket, TCP, TLS)
   collectorsdk/              # public extension collector contract (D23)
 custom/                      # custom.Main: build cockpit with extension collectors
-examples/collector/          # example extension build (own module; make examples)
+examples/
+  collector/                 # example extension build (own module; make examples)
+  python/, typescript/       # dependency-free API clients, run against a live agent in tests
+CHANGELOG.md                 # release notes; semver policy for pkg/* (D26)
 deploy/                      # systemd units, sysusers.d entry, install/uninstall scripts (+ tests)
 docs/
 ```
@@ -264,7 +267,8 @@ Before completing a task:
 - List tests run and their results.
 - Identify limitations and follow-up work.
 - Never claim a command or test passed unless it was actually run.
-- Update docs in the same change as the behavior they describe.
+- Update docs in the same change as the behavior they describe, and
+  `CHANGELOG.md` for user-visible changes.
 
 ## MVP acceptance criteria
 

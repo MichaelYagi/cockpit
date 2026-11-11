@@ -78,6 +78,24 @@ The agent refuses to start if these directories are more permissive than
 shown or owned by another user. `cockpit config check` prints the effective
 configuration and paths.
 
+## Installing a release
+
+Each release (`vX.Y.Z` on GitHub) has Linux amd64 and arm64 archives and a
+`SHA256SUMS` file:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf cockpit_v0.4.0_linux_amd64.tar.gz && cd cockpit_v0.4.0_linux_amd64
+./cockpit                      # try it in user mode, or install the service:
+sudo ./deploy/install.sh       # finds ./cockpit next to deploy/
+```
+
+Maintainers cut a release by renaming the `CHANGELOG.md` heading from
+"unreleased" to the date, then pushing a tag: `git tag v0.4.0 && git push
+origin v0.4.0`. The release workflow runs the checks, builds with
+`make dist`, and publishes the archives with the changelog section as
+notes.
+
 ## System service
 
 To keep monitoring when nobody is logged in, install the agent as a
