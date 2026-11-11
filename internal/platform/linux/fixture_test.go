@@ -57,6 +57,7 @@ func env(root string) collector.Env {
 		EtcRoot:  filepath.Join(root, "etc"),
 		DevRoot:  filepath.Join(root, "dev"),
 		RunRoot:  filepath.Join(root, "run"),
+		UsrRoot:  filepath.Join(root, "usr"),
 		Now:      func() time.Time { return fixedNow },
 	}
 }

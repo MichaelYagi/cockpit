@@ -10,6 +10,7 @@ const (
 	Serial     = "serial"
 	WWN        = "wwn"
 	Cmdline    = "cmdline"
+	UUID       = "uuid"
 )
 
 // Policy controls exposure of sensitive fields. The zero value exposes

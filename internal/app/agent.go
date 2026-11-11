@@ -274,6 +274,9 @@ func CollectorSettings(c config.Collection) func(collector.Descriptor) engine.Se
 		s := engine.Settings{Enabled: true, Interval: d.DefaultInterval, Timeout: d.DefaultTimeout}
 		if d.Class == collector.Sampler {
 			s.Interval, s.Timeout = c.Defaults.Interval, c.Defaults.Timeout
+			if s.Interval < d.MinInterval {
+				s.Interval, s.Timeout = d.MinInterval, max(s.Timeout, d.DefaultTimeout)
+			}
 		}
 		if o, ok := c.Collectors[d.ID]; ok {
 			if o.Enabled != nil {

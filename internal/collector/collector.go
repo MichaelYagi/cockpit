@@ -44,6 +44,9 @@ type Descriptor struct {
 	// Source is a short, non-sensitive description of where data comes
 	// from, shown to clients (e.g. "procfs", "sysfs/hwmon", "smartctl").
 	Source string
+	// MinInterval stops configuration from scheduling an expensive sampler
+	// (e.g. one that runs an external tool) more often than this.
+	MinInterval time.Duration
 }
 
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$`)
@@ -92,6 +95,7 @@ type Env struct {
 	EtcRoot  string
 	DevRoot  string
 	RunRoot  string // "/run"
+	UsrRoot  string // "/usr" (hardware ID databases)
 	Now      func() time.Time
 	Logger   *slog.Logger
 	Tools    ToolFinder
@@ -105,6 +109,7 @@ func DefaultEnv(logger *slog.Logger, tools ToolFinder) Env {
 		EtcRoot:  "/etc",
 		DevRoot:  "/dev",
 		RunRoot:  "/run",
+		UsrRoot:  "/usr",
 		Now:      time.Now,
 		Logger:   logger,
 		Tools:    tools,

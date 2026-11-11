@@ -113,6 +113,18 @@ func testSnapshot() *core.Snapshot {
 		}},
 		Sensors:    core.Section[core.Sensors]{Meta: core.SectionMeta{Status: core.Unsupported, Source: "sysfs/hwmon", Reason: "No hardware temperature sensors are exposed."}},
 		DiskHealth: core.Section[core.DiskHealthList]{Meta: core.SectionMeta{Status: core.NotConfigured, Source: "smartctl", Reason: "smartctl is not installed."}},
+		CPUInfo: core.Section[core.CPUInfo]{Meta: meta(), Data: &core.CPUInfo{Vendor: "AuthenticAMD", ModelName: "Test CPU", Family: "23",
+			Model: "113", Stepping: "0", Sockets: 1, Cores: 6, Threads: 12, Virtualization: "AMD-V", Flags: []string{"avx2"},
+			Caches: []core.CPUCache{{Level: 3, Type: "Unified", SizeBytes: 32 << 20, SharedBy: 12}}}},
+		Board: core.Section[core.BoardInfo]{Meta: meta(), Data: &core.BoardInfo{SystemVendor: "Vendor", ProductName: "Box", ChassisType: "Desktop", Serial: testSerial}},
+		MemoryModules: core.Section[core.MemoryModules]{Meta: core.SectionMeta{Status: core.PermissionDenied, Source: "sysfs/dmi",
+			Reason: "Reading memory module details requires root."}},
+		PCI: core.Section[core.PCIDevices]{Meta: meta(), Data: &core.PCIDevices{{Address: "0000:01:00.0", ClassCode: "0x030000",
+			ClassName: "VGA compatible controller", VendorID: "0x10de", DeviceID: "0x2504", Driver: "nvidia"}}},
+		USB: core.Section[core.USBDevices]{Meta: meta(), Data: &core.USBDevices{{Path: "1-2", VendorID: "046d", ProductID: "c52b",
+			Product: "Receiver", Serial: testSerial}}},
+		GPUs: core.Section[core.GPUs]{Meta: meta(), Data: &core.GPUs{{Vendor: "NVIDIA", Name: "RTX 3060", PCIAddress: "0000:01:00.0",
+			MemoryTotalBytes: ptr(uint64(12 << 30)), UtilizationPercent: ptr(7.0), MetricsSource: "nvidia-smi", UUID: testWWN}}},
 		Services: core.Section[core.Services]{Meta: meta(), Data: &core.Services{
 			{Name: "backup.service", Description: "Nightly backup", LoadState: "loaded", ActiveState: "failed", SubState: "failed"},
 			{Name: "ssh.service", Description: "OpenSSH", LoadState: "loaded", ActiveState: "active", SubState: "running"},
@@ -274,7 +286,8 @@ func TestContract(t *testing.T) {
 		{"hardware needs system scope", tcp, "GET", "/api/v1/hardware", []reqOpt{bearer(metricsKey)}, 403, apiv1.CodeInsufficientScope},
 		{"metrics", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"metrics subset", tcp, "GET", "/api/v1/metrics?sections=cpu,memory", []reqOpt{bearer(metricsKey)}, 200, ""},
-		{"metrics bad section", tcp, "GET", "/api/v1/metrics?sections=cpu,gpu", []reqOpt{bearer(metricsKey)}, 400, apiv1.CodeInvalidParameter},
+		{"metrics gpu", tcp, "GET", "/api/v1/metrics?sections=gpu", []reqOpt{bearer(metricsKey)}, 200, ""},
+		{"metrics bad section", tcp, "GET", "/api/v1/metrics?sections=cpu,tpu", []reqOpt{bearer(metricsKey)}, 400, apiv1.CodeInvalidParameter},
 		{"metrics needs metrics scope", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(systemKey)}, 403, apiv1.CodeInsufficientScope},
 		{"storage", tcp, "GET", "/api/v1/storage", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"services", tcp, "GET", "/api/v1/services", []reqOpt{bearer(systemKey)}, 200, ""},
@@ -711,5 +724,26 @@ func TestServicesFilterAndCounts(t *testing.T) {
 	d := r.Services.Data
 	if d.Total != 2 || d.Failed != 1 || d.Active != 1 || len(d.Items) != 1 || d.Items[0].Name != "backup.service" {
 		t.Errorf("%+v", d)
+	}
+}
+
+func TestHardwareDetails(t *testing.T) {
+	sock := router(t, newEnv(t, nil).d, Options{Listener: ListenerSocket})
+	var hw apiv1.HardwareResponse
+	_ = json.Unmarshal(do(t, sock, "GET", "/api/v1/hardware").body, &hw)
+	if c := hw.CPU.Data; c.Cores != 6 || c.LogicalCores != 12 || c.Virtualization != "AMD-V" || len(c.Caches) != 1 {
+		t.Errorf("cpu %+v", c)
+	}
+	if hw.MemoryModules.Status != "permission_denied" || hw.MemoryModules.Reason == "" || hw.MemoryModules.Data != nil {
+		t.Errorf("memory modules %+v", hw.MemoryModules)
+	}
+	if b := hw.Board.Data; b.ProductName != "Box" || strings.Join(b.Redacted, ",") != "serial" {
+		t.Errorf("board %+v", b)
+	}
+	if g := (*hw.GPUs.Data)[0]; g.Name != "RTX 3060" || strings.Join(g.Redacted, ",") != "uuid" || g.UUID != "" {
+		t.Errorf("gpu %+v", g)
+	}
+	if u := (*hw.USBDevices.Data)[0]; strings.Join(u.Redacted, ",") != "serial" {
+		t.Errorf("usb %+v", u)
 	}
 }

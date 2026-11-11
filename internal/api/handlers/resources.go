@@ -93,9 +93,42 @@ func (h *Resources) Hardware(w http.ResponseWriter, r *http.Request) {
 	s := h.Snapshots.Current()
 	httpx.WriteJSON(w, http.StatusOK, apiv1.HardwareResponse{
 		Meta: h.meta(now),
-		CPU: derived(s.CPU, now, func(v *core.CPUMetrics) *apiv1.CPUInventory {
-			return &apiv1.CPUInventory{ModelName: v.ModelName, LogicalCores: v.LogicalCores}
+		CPU:  h.cpuInventory(s, now),
+		MemoryModules: section(s.MemoryModules, now, func(v *core.MemoryModules) *[]apiv1.MemoryModule {
+			out := make([]apiv1.MemoryModule, 0, len(*v))
+			for _, m := range *v {
+				mm := apiv1.MemoryModule{Locator: m.Locator, SizeBytes: m.SizeBytes, Type: m.Type, SpeedMTs: m.SpeedMTs,
+					Manufacturer: m.Manufacturer, PartNumber: m.PartNumber}
+				h.Policy.Field(redact.Serial, m.Serial, &mm.Serial, &mm.Redacted)
+				out = append(out, mm)
+			}
+			return &out
 		}),
+		Board: section(s.Board, now, func(v *core.BoardInfo) *apiv1.Board {
+			b := &apiv1.Board{SystemVendor: v.SystemVendor, ProductName: v.ProductName, BoardVendor: v.BoardVendor, BoardName: v.BoardName,
+				BIOSVendor: v.BIOSVendor, BIOSVersion: v.BIOSVersion, BIOSDate: v.BIOSDate, ChassisType: v.ChassisType}
+			h.Policy.Field(redact.Serial, v.Serial, &b.Serial, &b.Redacted)
+			return b
+		}),
+		PCIDevices: section(s.PCI, now, func(v *core.PCIDevices) *[]apiv1.PCIDevice {
+			out := make([]apiv1.PCIDevice, 0, len(*v))
+			for _, d := range *v {
+				out = append(out, apiv1.PCIDevice{Address: d.Address, ClassCode: d.ClassCode, ClassName: d.ClassName, VendorID: d.VendorID,
+					DeviceID: d.DeviceID, VendorName: d.VendorName, DeviceName: d.DeviceName, Driver: d.Driver})
+			}
+			return &out
+		}),
+		USBDevices: section(s.USB, now, func(v *core.USBDevices) *[]apiv1.USBDevice {
+			out := make([]apiv1.USBDevice, 0, len(*v))
+			for _, d := range *v {
+				u := apiv1.USBDevice{Path: d.Path, VendorID: d.VendorID, ProductID: d.ProductID, Manufacturer: d.Manufacturer,
+					Product: d.Product, SpeedMbps: d.SpeedMbps}
+				h.Policy.Field(redact.Serial, d.Serial, &u.Serial, &u.Redacted)
+				out = append(out, u)
+			}
+			return &out
+		}),
+		GPUs: section(s.GPUs, now, h.gpus),
 		Memory: derived(s.Memory, now, func(v *core.MemoryMetrics) *apiv1.MemoryInventory {
 			return &apiv1.MemoryInventory{TotalBytes: v.TotalBytes, SwapTotalBytes: v.SwapTotalBytes}
 		}),
@@ -110,6 +143,42 @@ func (h *Resources) Hardware(w http.ResponseWriter, r *http.Request) {
 			return &out
 		}),
 	})
+}
+
+// cpuInventory prefers the detailed CPU collector and falls back to what
+// the CPU metrics collector knows.
+func (h *Resources) cpuInventory(s *core.Snapshot, now time.Time) apiv1.Section[apiv1.CPUInventory] {
+	if s.CPUInfo.Data != nil || s.CPU.Data == nil {
+		return derived(s.CPUInfo, now, func(v *core.CPUInfo) *apiv1.CPUInventory {
+			inv := &apiv1.CPUInventory{ModelName: v.ModelName, LogicalCores: v.Threads, Vendor: v.Vendor, Family: v.Family,
+				Model: v.Model, Stepping: v.Stepping, Sockets: v.Sockets, Cores: v.Cores, MaxFrequencyMHz: v.MaxFrequencyMHz,
+				Virtualization: v.Virtualization, Hypervisor: v.Hypervisor, Flags: v.Flags, Caches: []apiv1.CPUCache{}}
+			if inv.Flags == nil {
+				inv.Flags = []string{}
+			}
+			for _, c := range v.Caches {
+				inv.Caches = append(inv.Caches, apiv1.CPUCache{Level: c.Level, Type: c.Type, SizeBytes: c.SizeBytes, SharedBy: c.SharedBy})
+			}
+			return inv
+		})
+	}
+	return derived(s.CPU, now, func(v *core.CPUMetrics) *apiv1.CPUInventory {
+		return &apiv1.CPUInventory{ModelName: v.ModelName, LogicalCores: v.LogicalCores, Cores: v.LogicalCores, Sockets: 1,
+			Caches: []apiv1.CPUCache{}, Flags: []string{}}
+	})
+}
+
+func (h *Resources) gpus(v *core.GPUs) *[]apiv1.GPU {
+	out := make([]apiv1.GPU, 0, len(*v))
+	for _, g := range *v {
+		a := apiv1.GPU{Vendor: g.Vendor, Name: g.Name, PCIAddress: g.PCIAddress, Driver: g.Driver, DriverVersion: g.DriverVersion,
+			MemoryTotalBytes: g.MemoryTotalBytes, MemoryUsedBytes: g.MemoryUsedBytes, UtilizationPercent: g.UtilizationPercent,
+			TemperatureCelsius: g.TemperatureCelsius, PowerWatts: g.PowerWatts, PowerLimitWatts: g.PowerLimitWatts,
+			FanPercent: g.FanPercent, MetricsSource: g.MetricsSource}
+		h.Policy.Field(redact.UUID, g.UUID, &a.UUID, &a.Redacted)
+		out = append(out, a)
+	}
+	return &out
 }
 
 func (h *Resources) blockDevices(v *core.BlockDevices) *[]apiv1.BlockDevice {
@@ -252,6 +321,9 @@ func (h *Resources) Metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if want["sensors"] {
 		out.Sensors = ptrTo(section(s.Sensors, now, sensors))
+	}
+	if want["gpu"] {
+		out.GPU = ptrTo(section(s.GPUs, now, h.gpus))
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

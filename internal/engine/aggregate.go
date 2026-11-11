@@ -23,6 +23,12 @@ const (
 	secSensors
 	secDiskHealth
 	secServices
+	secCPUInfo
+	secPCI
+	secUSB
+	secBoard
+	secMemoryModules
+	secGPUs
 	numSections
 )
 
@@ -39,6 +45,12 @@ var sectionCaps = [numSections][]core.Capability{
 	secSensors:        {core.CapSensorsThermal, core.CapSensorsFan},
 	secDiskHealth:     {core.CapStorageSMART},
 	secServices:       {core.CapServicesSystemd},
+	secCPUInfo:        {core.CapHardwareCPU},
+	secPCI:            {core.CapHardwarePCI},
+	secUSB:            {core.CapHardwareUSB},
+	secBoard:          {core.CapHardwareBoard},
+	secMemoryModules:  {core.CapHardwareMemory},
+	secGPUs:           {core.CapGPUDevices},
 }
 
 func sectionOf(r core.Record) (section, bool) {
@@ -63,6 +75,18 @@ func sectionOf(r core.Record) (section, bool) {
 		return secDiskHealth, true
 	case core.Services:
 		return secServices, true
+	case *core.CPUInfo:
+		return secCPUInfo, true
+	case core.PCIDevices:
+		return secPCI, true
+	case core.USBDevices:
+		return secUSB, true
+	case *core.BoardInfo:
+		return secBoard, true
+	case core.MemoryModules:
+		return secMemoryModules, true
+	case core.GPUs:
+		return secGPUs, true
 	}
 	return 0, false
 }
@@ -231,6 +255,24 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 	case core.Services:
 		c := append(core.Services(nil), v...)
 		return &c
+	case *core.CPUInfo:
+		c := *v
+		return &c
+	case core.PCIDevices:
+		c := append(core.PCIDevices(nil), v...)
+		return &c
+	case core.USBDevices:
+		c := append(core.USBDevices(nil), v...)
+		return &c
+	case *core.BoardInfo:
+		c := *v
+		return &c
+	case core.MemoryModules:
+		c := append(core.MemoryModules(nil), v...)
+		return &c
+	case core.GPUs:
+		c := append(core.GPUs(nil), v...)
+		return &c
 	}
 	return nil
 }
@@ -337,6 +379,12 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.Sensors = sec[core.Sensors](a, secSensors)
 	snap.DiskHealth = sec[core.DiskHealthList](a, secDiskHealth)
 	snap.Services = sec[core.Services](a, secServices)
+	snap.CPUInfo = sec[core.CPUInfo](a, secCPUInfo)
+	snap.PCI = sec[core.PCIDevices](a, secPCI)
+	snap.USB = sec[core.USBDevices](a, secUSB)
+	snap.Board = sec[core.BoardInfo](a, secBoard)
+	snap.MemoryModules = sec[core.MemoryModules](a, secMemoryModules)
+	snap.GPUs = sec[core.GPUs](a, secGPUs)
 
 	for _, r := range a.e.runners {
 		caps := make(map[core.Capability]core.CapabilityStatus, len(a.caps[r.desc.ID]))

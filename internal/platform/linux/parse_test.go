@@ -82,5 +82,10 @@ func FuzzParsers(f *testing.F) {
 		_, _ = parseProcStat(b)
 		_, _ = parseBootTime(b)
 		_ = parsePasswd(b)
+		_ = parseCPUInfo(b)
+		_, _ = parseSMBIOSMemory(b)
+		_ = parseNvidiaCSV(b)
+		_ = countCPUList(string(b))
+		_ = parseSize(string(b))
 	})
 }

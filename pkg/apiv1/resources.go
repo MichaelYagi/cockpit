@@ -47,14 +47,108 @@ type HardwareResponse struct {
 	Meta
 	CPU               Section[CPUInventory]                `json:"cpu"`
 	Memory            Section[MemoryInventory]             `json:"memory"`
+	MemoryModules     Section[[]MemoryModule]              `json:"memory_modules"`
+	Board             Section[Board]                       `json:"board"`
 	BlockDevices      Section[[]BlockDevice]               `json:"block_devices"`
 	NetworkInterfaces Section[[]NetworkInterfaceInventory] `json:"network_interfaces"`
+	PCIDevices        Section[[]PCIDevice]                 `json:"pci_devices"`
+	USBDevices        Section[[]USBDevice]                 `json:"usb_devices"`
+	GPUs              Section[[]GPU]                       `json:"gpus"`
 }
 
 // CPUInventory describes the processor.
 type CPUInventory struct {
-	ModelName    string `json:"model_name"`
-	LogicalCores int    `json:"logical_cores"`
+	ModelName       string     `json:"model_name"`
+	LogicalCores    int        `json:"logical_cores"`
+	Vendor          string     `json:"vendor"`
+	Family          string     `json:"family"`
+	Model           string     `json:"model"`
+	Stepping        string     `json:"stepping"`
+	Sockets         int        `json:"sockets"`
+	Cores           int        `json:"cores"`
+	Caches          []CPUCache `json:"caches"`
+	MaxFrequencyMHz *float64   `json:"max_frequency_mhz"`
+	Virtualization  string     `json:"virtualization"`
+	Hypervisor      bool       `json:"hypervisor"`
+	Flags           []string   `json:"flags"`
+}
+
+// CPUCache is one cache level.
+type CPUCache struct {
+	Level     int    `json:"level"`
+	Type      string `json:"type"`
+	SizeBytes uint64 `json:"size_bytes"`
+	SharedBy  int    `json:"shared_by"`
+}
+
+// MemoryModule is one installed DIMM. Serial is sensitive (D9).
+type MemoryModule struct {
+	Locator      string   `json:"locator"`
+	SizeBytes    uint64   `json:"size_bytes"`
+	Type         string   `json:"type"`
+	SpeedMTs     int      `json:"speed_mts"`
+	Manufacturer string   `json:"manufacturer"`
+	PartNumber   string   `json:"part_number"`
+	Serial       string   `json:"serial,omitempty"`
+	Redacted     []string `json:"redacted,omitempty"`
+}
+
+// Board is system, board and firmware identity. Serial is sensitive.
+type Board struct {
+	SystemVendor string   `json:"system_vendor"`
+	ProductName  string   `json:"product_name"`
+	BoardVendor  string   `json:"board_vendor"`
+	BoardName    string   `json:"board_name"`
+	BIOSVendor   string   `json:"bios_vendor"`
+	BIOSVersion  string   `json:"bios_version"`
+	BIOSDate     string   `json:"bios_date"`
+	ChassisType  string   `json:"chassis_type"`
+	Serial       string   `json:"serial,omitempty"`
+	Redacted     []string `json:"redacted,omitempty"`
+}
+
+// PCIDevice is one PCI function.
+type PCIDevice struct {
+	Address    string `json:"address"`
+	ClassCode  string `json:"class_code"`
+	ClassName  string `json:"class_name"`
+	VendorID   string `json:"vendor_id"`
+	DeviceID   string `json:"device_id"`
+	VendorName string `json:"vendor_name"`
+	DeviceName string `json:"device_name"`
+	Driver     string `json:"driver"`
+}
+
+// USBDevice is one USB device. Serial is sensitive.
+type USBDevice struct {
+	Path         string   `json:"path"`
+	VendorID     string   `json:"vendor_id"`
+	ProductID    string   `json:"product_id"`
+	Manufacturer string   `json:"manufacturer"`
+	Product      string   `json:"product"`
+	SpeedMbps    *float64 `json:"speed_mbps"`
+	Serial       string   `json:"serial,omitempty"`
+	Redacted     []string `json:"redacted,omitempty"`
+}
+
+// GPU is one graphics device. Metric fields are null without a metrics
+// source. UUID is sensitive.
+type GPU struct {
+	Vendor             string   `json:"vendor"`
+	Name               string   `json:"name"`
+	PCIAddress         string   `json:"pci_address"`
+	Driver             string   `json:"driver"`
+	DriverVersion      string   `json:"driver_version"`
+	MemoryTotalBytes   *uint64  `json:"memory_total_bytes"`
+	MemoryUsedBytes    *uint64  `json:"memory_used_bytes"`
+	UtilizationPercent *float64 `json:"utilization_percent"`
+	TemperatureCelsius *float64 `json:"temperature_celsius"`
+	PowerWatts         *float64 `json:"power_watts"`
+	PowerLimitWatts    *float64 `json:"power_limit_watts"`
+	FanPercent         *float64 `json:"fan_percent"`
+	MetricsSource      string   `json:"metrics_source"`
+	UUID               string   `json:"uuid,omitempty"`
+	Redacted           []string `json:"redacted,omitempty"`
 }
 
 // MemoryInventory describes installed memory.
@@ -98,10 +192,11 @@ type MetricsResponse struct {
 	Filesystems    *Section[[]Filesystem]       `json:"filesystems,omitempty"`
 	Network        *Section[[]NetworkInterface] `json:"network,omitempty"`
 	Sensors        *Section[[]Sensor]           `json:"sensors,omitempty"`
+	GPU            *Section[[]GPU]              `json:"gpu,omitempty"`
 }
 
 // MetricSections are the valid values of ?sections=.
-var MetricSections = []string{"cpu", "memory", "memory_pressure", "filesystems", "network", "sensors"}
+var MetricSections = []string{"cpu", "memory", "memory_pressure", "filesystems", "network", "sensors", "gpu"}
 
 // CPUMetrics is current CPU utilization.
 type CPUMetrics struct {
