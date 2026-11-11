@@ -209,9 +209,30 @@ A newly created key is printed once: on stdout by `cockpit keys create`
 uses the alternate screen, so the key does not remain in terminal
 scrollback, and the key is erased from memory when the dialog closes.
 
-## 13. Plugins
+## 13. Extensions
 
-The MVP compiles trusted collectors into the binary. It does not load
-shared libraries or run third-party plugin binaries. Any future extension
-mechanism needs its own security design first (trust and installation,
-least privilege, signing, version checks, resource limits).
+Cockpit never loads code at runtime: no shared libraries, Go plugins,
+scripts or plugin binaries. Third-party collectors (D23) are Go code
+compiled into a custom build with `custom.Main`.
+
+- **Trust.** Extension code runs in the agent process with the agent's
+  privileges. It can read everything the agent can, including the key
+  database. Treat it like any dependency: review it, pin its version, and
+  build only what you trust. A Go interface is not a sandbox.
+- **What the agent enforces.** The ID and capability namespace
+  (`custom.<name>`); the SDK major version, so an incompatible collector
+  stops the build from starting; interval and timeout bounds; per-call
+  deadlines and panic recovery; and the generic-metric rules (names, units,
+  at most 8 labels of 128 bytes each, finite values, at most 500 series per
+  collector, D22). Metrics that break these rules are dropped and
+  reported, never fatal.
+- **What it cannot enforce.** It can't stop extension code from leaking
+  goroutines, using memory or reading files. It also can't stop secrets
+  being put into metric names, labels or status reasons. Those go to every
+  `metrics:read` client, so the collector guide forbids them.
+- **Display.** Labels, names and reasons are untrusted text in the TUI
+  (sanitized, including map keys) and in Markdown reports (escaped).
+
+Runtime loading would need its own security design first: trust and
+installation, least privilege, signing, version checks and resource
+limits. It is not planned.

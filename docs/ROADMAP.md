@@ -128,7 +128,13 @@ adjust thresholds, and exports a redacted diagnostic report.
 
 ## Phase 4 — Extensibility
 
-**Status: in progress.** Decisions D22–D26 accepted.
+**Status: implemented, awaiting review.** Decisions D22–D26 accepted.
+Every milestone below is done and tested. Verified live on WSL2: the
+example extension build, containers (cgroup v2, none running), UPS
+through a fake upsd, and the Python and TypeScript clients. No ZFS pool,
+battery, Intel GPU, real UPS or running containers were available here,
+so those parsers are fixture-tested only. The `v0.4.0` tag is pushed
+after review.
 
 | # | Milestone | Depends on |
 |---|---|---|
@@ -140,7 +146,7 @@ adjust thresholds, and exports a redacted diagnostic report.
 | 4F ✓ | ZFS, batteries and UPS (D25): `linux.zfs`, `linux.power`, `linux.ups` (opt-in), health checks for pools and UPS, Storage and Overview additions | — |
 | 4G ✓ | More GPU metrics: Intel (`i915`/`xe`) frequency and power from sysfs; utilization reported unavailable where it needs perf privileges (extends D16) | — |
 | 4H ✓ | SDKs and releases (D26): `pkg/client` examples as Go example tests, stability policy, `CHANGELOG.md`, Python and TypeScript examples (no dependencies) run in CI against a live agent, release workflow with checksums, tag `v0.4.0` | 4C |
-| 4I | Docs, spec and security review; check the extension trust model and the new data for sensitive fields | all |
+| 4I ✓ | Docs, spec and security review; check the extension trust model and the new data for sensitive fields | all |
 
 **Exit criteria:** someone can build Cockpit with their own collector
 without forking, its metrics appear in the API, TUI and history with the
