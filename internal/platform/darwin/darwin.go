@@ -16,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -139,9 +140,7 @@ func memory(r *collector.Result) {
 	// Reclaimable pages, where this macOS version reports them.
 	pages := uint64(free)
 	for _, name := range reclaimable {
-		if n, err := unix.SysctlUint32(name); err == nil {
-			pages += uint64(n)
-		}
+		pages += sysctlCount(name)
 	}
 	s := &core.MemoryStats{TotalBytes: total, AvailableBytes: min(total, pages*uint64(page)), FreeBytes: uint64(free) * uint64(page)}
 	// struct xsw_usage { u_int64_t xsu_total, xsu_avail, xsu_used; ... }
@@ -257,7 +256,7 @@ func network(r *collector.Result) {
 		return
 	}
 	stats := map[int]ifStats{}
-	raw, serr := unix.SysctlRaw("net.route", 0, 0, unix.NET_RT_IFLIST2, 0)
+	raw, serr := ifList()
 	for _, s := range parseIfList(raw) {
 		stats[s.index] = s
 	}
@@ -284,6 +283,25 @@ func network(r *collector.Result) {
 		r.Status[core.CapNetworkThroughput] = portable.Available()
 	}
 	r.Records = append(r.Records, out)
+}
+
+// sysctlCount reads a page counter that is 32-bit on some macOS
+// versions and 64-bit on others; missing counters are 0.
+func sysctlCount(name string) uint64 {
+	if n, err := unix.SysctlUint32(name); err == nil {
+		return uint64(n)
+	}
+	if n, err := unix.SysctlUint64(name); err == nil {
+		return n
+	}
+	return 0
+}
+
+// ifList fetches the RTM_IFINFO2 messages for every interface, by MIB
+// {CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0}: x/sys only takes sysctl
+// names, and "net.route" does not resolve by name.
+func ifList() ([]byte, error) {
+	return syscall.RouteRIB(syscall.NET_RT_IFLIST2, 0) //lint:ignore SA1019 the replacement (x/net/route) would be a new dependency for one call
 }
 
 func cstr(b []byte) string {

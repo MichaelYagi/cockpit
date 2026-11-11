@@ -39,8 +39,7 @@ func TestRealValues(t *testing.T) {
 		t.Errorf("load %+v", load)
 	}
 	for _, name := range append([]string{"vm.page_free_count"}, reclaimable...) {
-		n, err := unix.SysctlUint32(name)
-		t.Logf("%s = %d (%v)", name, n, err)
+		t.Logf("%s = %d", name, sysctlCount(name))
 	}
 	if st := got["darwin.memory"].Status[core.CapMemoryUsage]; st.Availability != core.Available {
 		t.Fatalf("memory %+v", st)
@@ -61,6 +60,8 @@ func TestRealValues(t *testing.T) {
 		t.Errorf("no root filesystem in %+v", fss)
 	}
 	nets := got["darwin.network"].Records[0].(core.NetInterfaces)
+	raw, err := ifList()
+	t.Logf("NET_RT_IFLIST2: %d bytes, %d interfaces, err %v", len(raw), len(parseIfList(raw)), err)
 	if st := got["darwin.network"].Status[core.CapNetworkThroughput]; st.Availability != core.Available {
 		t.Fatalf("throughput %+v", st)
 	}
