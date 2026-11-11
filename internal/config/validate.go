@@ -3,12 +3,15 @@ package config
 import (
 	"fmt"
 	"net"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/MichaelYagi/cockpit/internal/core"
 	"github.com/MichaelYagi/cockpit/internal/netaddr"
 )
 
@@ -89,6 +92,7 @@ func validate(c *Config, p *Paths, v *validator) {
 	if d.Timeout <= 0 || d.Timeout > d.Interval {
 		v.add("collection.defaults.timeout", "must be positive and no longer than the interval (got %s)", d.Timeout)
 	}
+	validateFilesystems(v, c.Collection.Filesystems)
 	for id, o := range c.Collection.Collectors {
 		field := "collection.collectors." + id
 		if !collectorIDPattern.MatchString(id) {
@@ -195,5 +199,39 @@ func validateHealth(v *validator, h Health) {
 	ordered("health.network", h.Network.WarnErrorsPerMinute, h.Network.CriticalErrorsPerMinute, 0.1, 1e6, true)
 	if h.Disk.WarnPercentageUsed < 1 || h.Disk.WarnPercentageUsed > 100 {
 		v.add("health.disk.warn_percentage_used", "must be between 1 and 100")
+	}
+}
+
+var fsTypePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+const maxFilterEntries = 64
+
+func validateFilesystems(v *validator, f Filesystems) {
+	const base = "collection.filesystems."
+	for name, list := range map[string][]string{"exclude_types": f.ExcludeTypes, "include_types": f.IncludeTypes, "exclude_mount_points": f.ExcludeMountPoints} {
+		if len(list) > maxFilterEntries {
+			v.add(base+name, "at most %d entries (got %d)", maxFilterEntries, len(list))
+		}
+	}
+	for _, t := range f.ExcludeTypes {
+		if !fsTypePattern.MatchString(t) {
+			v.add(base+"exclude_types", "%q is not a filesystem type name", t)
+		}
+	}
+	for _, t := range f.IncludeTypes {
+		switch {
+		case !fsTypePattern.MatchString(t):
+			v.add(base+"include_types", "%q is not a filesystem type name", t)
+		case core.IsNetworkFilesystem(t):
+			v.add(base+"include_types", "%q is a network filesystem; these are never inspected because an unreachable server can block collection", t)
+		case slices.Contains(f.ExcludeTypes, t):
+			v.add(base+"include_types", "%q is also in exclude_types", t)
+		}
+	}
+	for _, p := range f.ExcludeMountPoints {
+		pat := strings.TrimSuffix(p, "/**")
+		if _, err := path.Match(pat, ""); err != nil || !strings.HasPrefix(p, "/") {
+			v.add(base+"exclude_mount_points", "%q must be an absolute path or glob pattern", p)
+		}
 	}
 }

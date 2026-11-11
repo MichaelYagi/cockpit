@@ -102,6 +102,16 @@ type Env struct {
 	// SMARTResultsDir holds results written by the privileged SMART helper
 	// (D20); empty when no helper is configured.
 	SMARTResultsDir string
+	// Filesystems adjusts which mounts are reported (Q5).
+	Filesystems FilesystemFilter
+}
+
+// FilesystemFilter adjusts the filesystem collector's built-in skip list.
+// Network filesystems are always skipped.
+type FilesystemFilter struct {
+	ExcludeTypes       []string // skipped in addition to the built-in list
+	IncludeTypes       []string // reported although built-in skipped (e.g. tmpfs)
+	ExcludeMountPoints []string // path.Match patterns; "/dir/**" matches below dir
 }
 
 // DefaultEnv returns the production environment.

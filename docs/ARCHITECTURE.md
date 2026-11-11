@@ -191,7 +191,8 @@ defaults.
 - The socket's parent directory must be private (`0700` user mode, `0750`
   system mode) and owned by the agent's user. A custom `api.socket.path`
   in a shared directory such as `/tmp` is refused.
-- No hot reload in the MVP.
+- No hot reload. Health thresholds can be changed at runtime over the
+  admin socket (D19); everything else needs a restart.
 
 Current schema with defaults. Run `cockpit config check` to print the
 effective configuration.
@@ -217,9 +218,13 @@ api:
     global_rps: 200
     global_burst: 400
 collection:
-  defaults: { interval: 2s, timeout: 1s }
-  collectors:
+  defaults: { interval: 2s, timeout: 1s }   # samplers; inventory collectors keep their own
+  collectors:                  # per-collector overrides, e.g.
     linux.smart: { interval: 1h, timeout: 30s }
+  filesystems:                 # Q5; excluded mounts leave the API, history and health
+    exclude_types: []          # added to the built-in pseudo/in-memory list
+    include_types: []          # e.g. [tmpfs]; network filesystems cannot be included
+    exclude_mount_points: []   # path.Match globs; "/dir/**" matches below /dir
 health:
   interval: 5s
   confirm: 2                   # evaluations a change must hold (anti-flapping)
@@ -227,6 +232,11 @@ health:
   memory: { warn_available_percent: 10, critical_available_percent: 5, warn_pressure_percent: 5, critical_pressure_percent: 20 }
   storage: { warn_percent: 85, critical_percent: 95 }
   disk: { warn_percentage_used: 90 }
+  network: { warn_errors_per_minute: 10, critical_errors_per_minute: 100 }
+  # Thresholds can be overridden at runtime over the socket (D19).
+history:                       # D18
+  enabled: true
+  retention: { raw: 24h, minute: 168h, hour: 2160h }
 logging:
   level: info
   format: text                 # text | json

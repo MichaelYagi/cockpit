@@ -254,13 +254,32 @@ Unavailable data is reported with a reason, never as an error:
 |---|---|---|
 | Temperatures, fans | No hwmon/thermal sensors (VMs, containers, WSL) | Nothing; this is expected |
 | Disk health | `smartctl` not installed | Install smartmontools 7.0+ |
-| Disk health | Permission denied | Reading SMART data needs elevated privileges; a least-privilege option is planned for Phase 3 |
+| Disk health | Permission denied | Reading SMART data needs raw device access; in system mode enable the SMART helper (see System service) |
+| Disk health | Results more than 3 hours old | The SMART helper stopped running: `systemctl status cockpit-smart.timer` |
 | Memory pressure | Kernel without PSI (before 4.20, or `psi=0`) | Memory utilization is still checked |
 | GPU metrics | `nvidia-smi` not installed (NVIDIA) or no metrics source (e.g. Intel) | Install the NVIDIA driver utilities; the GPU is still listed |
 | Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
 | Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
 | Services | Not running systemd | Nothing; other features still work |
 | Processes (partial) | `/proc` mounted with `hidepid` | Run the agent with access to other users' processes, if appropriate |
+
+## Choosing filesystems
+
+Pseudo and in-memory filesystems (`proc`, `tmpfs`, `squashfs`, container
+overlays, …) are skipped, and network filesystems (NFS, SMB, sshfs, Ceph, …)
+are never inspected because a hung server can block collection. Adjust the
+rest in the configuration file:
+
+```yaml
+collection:
+  filesystems:
+    exclude_types: [fuse.mergerfs]
+    include_types: [tmpfs]                       # e.g. to watch /dev/shm
+    exclude_mount_points: ["/snap/**", "/mnt/[de]"]
+```
+
+Excluded filesystems disappear from the API, the TUI, history and the
+storage health check. Changes need an agent restart.
 
 ## Configuration reference
 

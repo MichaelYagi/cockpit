@@ -102,7 +102,14 @@ SMART) are reported, not fatal.
 
 ## Phase 3 — History and operational polish
 
-**Status: in progress.**
+**Status: implemented, awaiting review.** Every milestone below is done,
+verified with tests and against a real WSL2 host: history and charts, a
+real diagnostic report checked for leaks, and the agent run under the
+unit's seccomp and memory restrictions in a transient systemd unit. The
+units pass `systemd-analyze verify`; nothing was installed system-wide,
+so the full system service has not been run as root here. D18–D21 are
+implemented as written (D20 and D21 with the clarifications noted there)
+and await acceptance.
 
 | # | Milestone | Depends on |
 |---|---|---|
@@ -140,7 +147,7 @@ adjust thresholds, and exports a redacted diagnostic report.
 |---|---|---|---|
 | Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. **Phase 3 done (D20):** `cockpit-smart.timer` runs `cockpit smart-helper` as root hourly and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
 | Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 2 | Still prints help. Launching the TUI is now reasonable since it can embed an agent. |
-| Q5 | Should the filesystem skip lists become configurable? | 3 | Yes, with the history work. |
+| Q5 | Should the filesystem skip lists become configurable? | 3 | **Done (Phase 3):** `collection.filesystems` with `exclude_types`, `include_types` and `exclude_mount_points`. Network filesystems stay excluded. |
 | Q6 | Should a dedicated scope cover network addresses, routes and DNS? | 3 | No for now: documented as visible with `metrics:read`. Revisit with fleet mode. |
 | Q7 | Should command lines ever be exposed (behind a new scope)? | 3+ | Not until there is a clear need; they often contain secrets. |
 | Q3 | Default TCP port | 0.6 | `7878` (avoids 9090, used by Red Hat Cockpit) |

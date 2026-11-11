@@ -48,6 +48,7 @@ if [ ! -x "$binary" ]; then
 	exit 1
 fi
 case $prefix in
+*[!A-Za-z0-9/._-]*) echo "--prefix may contain only letters, digits and / . _ -" >&2; exit 2 ;;
 /*) ;;
 *) echo "--prefix must be an absolute path" >&2; exit 2 ;;
 esac

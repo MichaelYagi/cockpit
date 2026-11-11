@@ -166,6 +166,17 @@ func TestInstallRefusesWithoutRootOrBinary(t *testing.T) {
 	if err == nil || !strings.Contains(string(out), "must run as root") {
 		t.Errorf("non-root install: %v %s", err, out)
 	}
+	bin := filepath.Join(t.TempDir(), "cockpit")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, prefix := range []string{"relative", "/opt/a|b", "/opt/a&b"} {
+		cmd := exec.Command("sh", "install.sh", "--binary", bin, "--prefix", prefix)
+		cmd.Env = append(os.Environ(), "DESTDIR="+t.TempDir())
+		if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "--prefix") {
+			t.Errorf("prefix %q accepted: %s", prefix, out)
+		}
+	}
 	cmd := exec.Command("sh", "install.sh", "--binary", "/nonexistent")
 	cmd.Env = append(os.Environ(), "DESTDIR="+t.TempDir())
 	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "make build") {

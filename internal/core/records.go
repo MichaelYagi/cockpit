@@ -202,3 +202,14 @@ func (NetInterfaces) isRecord()   {}
 func (BlockDevices) isRecord()    {}
 func (Sensors) isRecord()         {}
 func (DiskHealthList) isRecord()  {}
+
+// networkFilesystemTypes can block for a long time when a server is
+// unreachable, so they are never inspected.
+var networkFilesystemTypes = map[string]bool{
+	"nfs": true, "nfs4": true, "cifs": true, "smb3": true, "smbfs": true,
+	"fuse.sshfs": true, "ceph": true, "glusterfs": true, "fuse.glusterfs": true, "afs": true,
+}
+
+// IsNetworkFilesystem reports whether fsType is a network filesystem that
+// collectors skip (statfs on a hung server can block indefinitely).
+func IsNetworkFilesystem(fsType string) bool { return networkFilesystemTypes[fsType] }

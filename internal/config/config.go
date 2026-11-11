@@ -76,8 +76,23 @@ func (t TLS) Enabled() bool { return t.CertFile != "" || t.KeyFile != "" }
 
 // Collection configures collector scheduling.
 type Collection struct {
-	Defaults   CollectorSettings            `yaml:"defaults"`
-	Collectors map[string]CollectorOverride `yaml:"collectors"`
+	Defaults    CollectorSettings            `yaml:"defaults"`
+	Collectors  map[string]CollectorOverride `yaml:"collectors"`
+	Filesystems Filesystems                  `yaml:"filesystems"`
+}
+
+// Filesystems adjusts which mounts are monitored (Q5). Excluded mounts
+// are left out of the API, history and the storage health check.
+type Filesystems struct {
+	// ExcludeTypes are skipped in addition to the built-in pseudo and
+	// in-memory types.
+	ExcludeTypes []string `yaml:"exclude_types,omitempty"`
+	// IncludeTypes are reported although skipped by default (e.g. tmpfs,
+	// squashfs, overlay). Network filesystems cannot be included.
+	IncludeTypes []string `yaml:"include_types,omitempty"`
+	// ExcludeMountPoints are glob patterns (path.Match); "/dir/**" also
+	// matches everything below /dir.
+	ExcludeMountPoints []string `yaml:"exclude_mount_points,omitempty"`
 }
 
 // CollectorSettings are the defaults applied to every collector.
