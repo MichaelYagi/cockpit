@@ -122,26 +122,7 @@ func validate(c *Config, p *Paths, v *validator) {
 		v.add("api.rate_limit.per_key_rps", "must not exceed global_rps")
 	}
 
-	h := c.Health
-	inRange(v, "health.interval", h.Interval, time.Second, 10*time.Minute)
-	if h.Confirm < 1 || h.Confirm > 20 {
-		v.add("health.confirm", "must be between 1 and 20 (got %d)", h.Confirm)
-	}
-	ordered := func(field string, warn, crit, lo, hi float64, rising bool) {
-		if warn < lo || warn > hi || crit < lo || crit > hi {
-			v.add(field, "thresholds must be between %g and %g", lo, hi)
-		}
-		if rising && warn >= crit {
-			v.add(field, "warning threshold %g must be below critical %g", warn, crit)
-		}
-		if !rising && warn <= crit {
-			v.add(field, "warning threshold %g must be above critical %g", warn, crit)
-		}
-	}
-	ordered("health.cpu_temperature", h.CPUTemperature.WarnCelsius, h.CPUTemperature.CriticalCelsius, 20, 150, true)
-	ordered("health.memory.available_percent", h.Memory.WarnAvailablePercent, h.Memory.CriticalAvailablePercent, 0, 100, false)
-	ordered("health.memory.pressure_percent", h.Memory.WarnPressurePercent, h.Memory.CriticalPressurePercent, 0, 100, true)
-	ordered("health.storage", h.Storage.WarnPercent, h.Storage.CriticalPercent, 1, 100, true)
+	validateHealth(v, c.Health)
 	hr := c.History.Retention
 	inRange(v, "history.retention.raw", hr.Raw, time.Hour, 7*24*time.Hour)
 	inRange(v, "history.retention.minute", hr.Minute, 24*time.Hour, 90*24*time.Hour)
@@ -149,10 +130,7 @@ func validate(c *Config, p *Paths, v *validator) {
 	if hr.Minute < hr.Raw || hr.Hour < hr.Minute {
 		v.add("history.retention", "coarser resolutions must be kept at least as long as finer ones")
 	}
-	ordered("health.network", h.Network.WarnErrorsPerMinute, h.Network.CriticalErrorsPerMinute, 0.1, 1e6, true)
-	if h.Disk.WarnPercentageUsed < 1 || h.Disk.WarnPercentageUsed > 100 {
-		v.add("health.disk.warn_percentage_used", "must be between 1 and 100")
-	}
+
 }
 
 func validateTCP(v *validator, api API) {
@@ -183,5 +161,39 @@ func inRange(v *validator, field string, d, lo, hi time.Duration) {
 func absPath(v *validator, field, p string) {
 	if p != "" && !filepath.IsAbs(p) {
 		v.add(field, "must be an absolute path (got %q)", p)
+	}
+}
+
+// ValidateHealth checks health settings with the same rules as the
+// configuration file. It is used for runtime settings changes (D19).
+func ValidateHealth(h Health) error {
+	var v validator
+	validateHealth(&v, h)
+	return v.err()
+}
+
+func validateHealth(v *validator, h Health) {
+	inRange(v, "health.interval", h.Interval, time.Second, 10*time.Minute)
+	if h.Confirm < 1 || h.Confirm > 20 {
+		v.add("health.confirm", "must be between 1 and 20 (got %d)", h.Confirm)
+	}
+	ordered := func(field string, warn, crit, lo, hi float64, rising bool) {
+		if warn < lo || warn > hi || crit < lo || crit > hi {
+			v.add(field, "thresholds must be between %g and %g", lo, hi)
+		}
+		if rising && warn >= crit {
+			v.add(field, "warning threshold %g must be below critical %g", warn, crit)
+		}
+		if !rising && warn <= crit {
+			v.add(field, "warning threshold %g must be above critical %g", warn, crit)
+		}
+	}
+	ordered("health.cpu_temperature", h.CPUTemperature.WarnCelsius, h.CPUTemperature.CriticalCelsius, 20, 150, true)
+	ordered("health.memory.available_percent", h.Memory.WarnAvailablePercent, h.Memory.CriticalAvailablePercent, 0, 100, false)
+	ordered("health.memory.pressure_percent", h.Memory.WarnPressurePercent, h.Memory.CriticalPressurePercent, 0, 100, true)
+	ordered("health.storage", h.Storage.WarnPercent, h.Storage.CriticalPercent, 1, 100, true)
+	ordered("health.network", h.Network.WarnErrorsPerMinute, h.Network.CriticalErrorsPerMinute, 0.1, 1e6, true)
+	if h.Disk.WarnPercentageUsed < 1 || h.Disk.WarnPercentageUsed > 100 {
+		v.add("health.disk.warn_percentage_used", "must be between 1 and 100")
 	}
 }

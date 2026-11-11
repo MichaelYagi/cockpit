@@ -143,6 +143,17 @@ func unknownChecks(reason string) []CheckResult {
 	return out
 }
 
+// SetThresholds replaces the thresholds and confirmation count; they apply
+// from the next evaluation.
+func (e *Evaluator) SetThresholds(t Thresholds, confirm int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.opts.Thresholds = t
+	if confirm >= 1 {
+		e.opts.Confirm = confirm
+	}
+}
+
 // Current returns the latest report. It never returns nil.
 func (e *Evaluator) Current() *Report { return e.report.Load() }
 

@@ -589,3 +589,40 @@ type HistorySeriesInfo struct {
 
 // HistoryResolutions are the valid values of ?resolution=.
 var HistoryResolutions = []string{"auto", "raw", "1m", "1h"}
+
+// ---- /settings (socket only, D19) ----
+
+// SettingsResponse is GET, PUT and DELETE /settings.
+type SettingsResponse struct {
+	Health    HealthSettings `json:"health"`
+	Source    string         `json:"source"` // configuration | override
+	UpdatedAt *time.Time     `json:"updated_at"`
+}
+
+// UpdateSettingsRequest is the body of PUT /settings. All fields are
+// required: it replaces the health thresholds.
+type UpdateSettingsRequest struct {
+	Health HealthSettings `json:"health"`
+}
+
+// HealthSettings are the editable health thresholds.
+type HealthSettings struct {
+	Confirm        int                    `json:"confirm"`
+	CPUTemperature WarnCritical           `json:"cpu_temperature_celsius"`
+	MemAvailable   WarnCritical           `json:"memory_available_percent"`
+	MemPressure    WarnCritical           `json:"memory_pressure_percent"`
+	Storage        WarnCritical           `json:"storage_used_percent"`
+	NetworkErrors  WarnCritical           `json:"network_errors_per_minute"`
+	Disk           DiskEnduranceThreshold `json:"disk"`
+}
+
+// WarnCritical is a threshold pair.
+type WarnCritical struct {
+	Warn     float64 `json:"warn"`
+	Critical float64 `json:"critical"`
+}
+
+// DiskEnduranceThreshold is the NVMe endurance warning level.
+type DiskEnduranceThreshold struct {
+	WarnPercentageUsed int `json:"warn_percentage_used"`
+}

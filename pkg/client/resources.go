@@ -203,3 +203,27 @@ func (c *Client) History(ctx context.Context, q HistoryQuery) (*apiv1.HistoryRes
 func (c *Client) HistorySeries(ctx context.Context) (*apiv1.HistorySeriesList, error) {
 	return get[apiv1.HistorySeriesList](ctx, c, "/metrics/history/series")
 }
+
+// Settings returns the effective health thresholds (Unix socket only).
+func (c *Client) Settings(ctx context.Context) (*apiv1.SettingsResponse, error) {
+	return get[apiv1.SettingsResponse](ctx, c, "/settings")
+}
+
+// UpdateSettings replaces the health thresholds (Unix socket only).
+func (c *Client) UpdateSettings(ctx context.Context, h apiv1.HealthSettings) (*apiv1.SettingsResponse, error) {
+	var out apiv1.SettingsResponse
+	if err := c.do(ctx, "PUT", "/settings", apiv1.UpdateSettingsRequest{Health: h}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ResetSettings returns to the configuration file's thresholds (Unix
+// socket only).
+func (c *Client) ResetSettings(ctx context.Context) (*apiv1.SettingsResponse, error) {
+	var out apiv1.SettingsResponse
+	if err := c.do(ctx, "DELETE", "/settings", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

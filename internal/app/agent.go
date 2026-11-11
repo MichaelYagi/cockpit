@@ -32,6 +32,7 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/history"
 	"github.com/MichaelYagi/cockpit/internal/netaddr"
 	"github.com/MichaelYagi/cockpit/internal/platform"
+	"github.com/MichaelYagi/cockpit/internal/settings"
 	"github.com/MichaelYagi/cockpit/internal/storage/sqlite"
 	"github.com/MichaelYagi/cockpit/pkg/apiv1"
 )
@@ -159,6 +160,11 @@ func Run(ctx context.Context, o Options) (err error) {
 		Publish:    publish,
 		Wait:       eng.Ready(),
 	})
+	settingsSvc := settings.New(db, cfg.Health, func(h config.Health) { evaluator.SetThresholds(Thresholds(h), h.Confirm) },
+		o.Now, publish, log.With("component", "settings"))
+	if err := settingsSvc.Load(ctx); err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
 	bg.Add(1)
 	go func() { defer bg.Done(); evaluator.Run(bgCtx, cfg.Health.Interval) }()
 
@@ -180,7 +186,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	deps := api.Deps{
 		Logger: log.With("component", "api"), Verifier: verifier, Status: status, SpecJSON: specJSON, Now: o.Now,
 		Snapshots: eng, Health: evaluator, Events: eventLog, Keys: keys,
-		Subscriber: eventLog, KeyChecker: keys, Processes: eng,
+		Subscriber: eventLog, KeyChecker: keys, Processes: eng, Settings: settingsSvc,
 		Stats: middleware.NewStats(o.Now),
 		Listeners: func() []apiv1.Listener {
 			if l := listeners.Load(); l != nil {

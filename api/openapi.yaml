@@ -552,6 +552,64 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/settings:
+    get:
+      operationId: getSettings
+      tags: [keys]
+      summary: Effective health thresholds
+      description: Unix socket only (D19).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      operationId: updateSettings
+      tags: [keys]
+      summary: Replace health thresholds
+      description: Validated like the configuration file, stored, applied immediately and recorded as a settings.changed event. Unix socket only (D19).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSettingsRequest" }
+      responses:
+        "200":
+          description: Applied.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    delete:
+      operationId: resetSettings
+      tags: [keys]
+      summary: Return to the configuration file's thresholds
+      description: Unix socket only (D19).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "200":
+          description: Reset.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
 components:
   securitySchemes:
     apiKey:
@@ -1618,6 +1676,41 @@ components:
               unit: { type: string }
               first: { $ref: "#/components/schemas/Timestamp" }
               last: { $ref: "#/components/schemas/Timestamp" }
+    HealthSettings:
+      type: object
+      additionalProperties: false
+      required: [confirm, cpu_temperature_celsius, memory_available_percent, memory_pressure_percent, storage_used_percent, network_errors_per_minute, disk]
+      properties:
+        confirm: { type: integer, minimum: 1, maximum: 20, description: Consecutive evaluations before a finding is raised or cleared. }
+        cpu_temperature_celsius: { type: object, additionalProperties: false, required: [warn, critical], properties: { warn: { type: number }, critical: { type: number } } }
+        memory_available_percent:
+          description: Warning when available memory falls below warn; critical below critical.
+          type: object
+          additionalProperties: false
+          required: [warn, critical]
+          properties: { warn: { type: number }, critical: { type: number } }
+        memory_pressure_percent: { type: object, additionalProperties: false, required: [warn, critical], properties: { warn: { type: number }, critical: { type: number } } }
+        storage_used_percent: { type: object, additionalProperties: false, required: [warn, critical], properties: { warn: { type: number }, critical: { type: number } } }
+        network_errors_per_minute: { type: object, additionalProperties: false, required: [warn, critical], properties: { warn: { type: number }, critical: { type: number } } }
+        disk:
+          type: object
+          additionalProperties: false
+          required: [warn_percentage_used]
+          properties: { warn_percentage_used: { type: integer, minimum: 1, maximum: 100 } }
+    SettingsResponse:
+      type: object
+      additionalProperties: false
+      required: [health, source, updated_at]
+      properties:
+        health: { $ref: "#/components/schemas/HealthSettings" }
+        source: { type: string, enum: [configuration, override] }
+        updated_at: { type: [string, "null"], format: date-time }
+    UpdateSettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [health]
+      properties:
+        health: { $ref: "#/components/schemas/HealthSettings" }
     Scope:
       type: string
       enum: [system:read, metrics:read, processes:read, admin]

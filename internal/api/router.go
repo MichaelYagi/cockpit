@@ -67,6 +67,8 @@ type Deps struct {
 	Processes handlers.ProcessSource
 	// History is nil when metric history is disabled.
 	History handlers.HistorySource
+	// Settings manages runtime settings (socket only).
+	Settings handlers.SettingsService
 	// Event streaming (D17).
 	Subscriber      handlers.Subscriber
 	KeyChecker      handlers.KeyChecker
@@ -95,6 +97,7 @@ func Routes(d Deps) []Route {
 	res := &handlers.Resources{Snapshots: d.Snapshots, MachineID: machineID, Policy: d.Redaction, Now: d.Now}
 	keys := &handlers.Keys{Service: d.Keys, Now: d.Now, Logger: d.Logger}
 	hist := &handlers.History{Source: d.History, MachineID: machineID, Now: d.Now, Logger: d.Logger}
+	set := &handlers.Settings{Service: d.Settings, Logger: d.Logger}
 	if d.Streams == nil {
 		d.Streams = handlers.NewStreamLimits()
 	}
@@ -136,6 +139,9 @@ func Routes(d Deps) []Route {
 		{Method: post, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.Create},
 		{Method: del, Path: "/keys/{id}", Scope: adm, SocketOnly: true, Handler: keys.Revoke},
 		{Method: post, Path: "/keys/{id}/rotate", Scope: adm, SocketOnly: true, Handler: keys.Rotate},
+		{Method: get, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Get},
+		{Method: http.MethodPut, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Put},
+		{Method: del, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Delete},
 	}
 }
 
