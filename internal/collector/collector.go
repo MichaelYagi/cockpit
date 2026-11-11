@@ -130,3 +130,10 @@ type Collector interface {
 	Collect(ctx context.Context) Result
 	Close(ctx context.Context) error
 }
+
+// ProcessLister is implemented by collectors that can list processes on
+// demand. Process lists are sampled only when a client asks (with a short
+// cache in the engine), never on a schedule.
+type ProcessLister interface {
+	ListProcesses(ctx context.Context) (core.ProcessList, core.CapabilityStatus)
+}

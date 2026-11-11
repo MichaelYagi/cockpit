@@ -183,6 +183,10 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 			_, err := c.Events(ctx, EventsQuery{Limit: 10, Cursor: "5", Severity: "warning", Since: exp})
 			return err
 		},
+		func() error {
+			_, err := c.Processes(ctx, ProcessesQuery{Sort: "memory", Order: "asc", Search: "ng", Limit: 5, KernelThreads: true})
+			return err
+		},
 		func() error { _, err := c.ListKeys(ctx); return err },
 		func() error {
 			_, err := c.CreateKey(ctx, apiv1.CreateAPIKeyRequest{Name: "n", Scopes: []string{"metrics:read"}, ExpiresAt: &exp})
@@ -199,7 +203,7 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 	if len(paths) != len(calls) {
 		t.Errorf("requests %v", paths)
 	}
-	if paths[3] != "GET /api/v1/metrics?sections=cpu%2Cmemory" {
+	if paths[3] != "GET /api/v1/metrics?sections=cpu%2Cmemory" || !strings.Contains(paths[9], "kernel_threads=true") {
 		t.Errorf("metrics query %q", paths[3])
 	}
 }

@@ -63,7 +63,7 @@ func TestParseNetDevRejectsGarbageCounters(t *testing.T) {
 
 // Fuzz every parser: they must never panic on arbitrary input.
 func FuzzParsers(f *testing.F) {
-	for _, seed := range []string{procStat, netDev, "MemTotal: 1 kB\n", "some avg10=1 avg60=2 avg300=3 total=4\n",
+	for _, seed := range []string{procStatFixture, netDev, "MemTotal: 1 kB\n", "some avg10=1 avg60=2 avg300=3 total=4\n",
 		"22 1 8:1 / / rw - ext4 /dev/sda1 rw\n", "1 2 3 4/5 6", "ID=x\n", "1.0 2.0", `\040\`} {
 		f.Add([]byte(seed))
 	}
@@ -79,5 +79,8 @@ func FuzzParsers(f *testing.F) {
 		_, _ = parseMountinfo(b)
 		_ = unescapeOctal(string(b))
 		_, _, _ = parseSmartctl(b, 0)
+		_, _ = parseProcStat(b)
+		_, _ = parseBootTime(b)
+		_ = parsePasswd(b)
 	})
 }

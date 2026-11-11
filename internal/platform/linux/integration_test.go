@@ -5,6 +5,7 @@ package linux
 import (
 	"context"
 	"log/slog"
+	"os"
 	"os/exec"
 	"testing"
 
@@ -56,6 +57,22 @@ func TestRealHost(t *testing.T) {
 			}
 		}
 		_ = c.Close(context.Background())
+	}
+	// The agent's own process must be listed.
+	for _, c := range Collectors(e) {
+		if pl, ok := c.(interface {
+			ListProcesses(context.Context) (core.ProcessList, core.CapabilityStatus)
+		}); ok {
+			list, st := pl.ListProcesses(context.Background())
+			found := false
+			for _, p := range list.Processes {
+				found = found || p.PID == os.Getpid()
+			}
+			if st.Availability != core.Available || !found {
+				t.Errorf("own process not listed (%d processes, %+v)", len(list.Processes), st)
+			}
+			t.Logf("listed %d processes, partial=%v", len(list.Processes), list.Partial)
+		}
 	}
 	// The basics must work on any supported Linux without root.
 	must := map[string]core.Capability{"linux.cpu": core.CapCPUUsage, "linux.memory": core.CapMemoryUsage, "linux.system": core.CapSystemIdentity}

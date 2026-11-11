@@ -749,7 +749,7 @@ func (m *Model) modalView(w int) string {
 	case modalCreateScopes:
 		title = "New API key · scopes"
 		lines = []string{"Select what the key may read (space toggles):", ""}
-		desc := []string{"system identity and hardware inventory", "metrics, storage, network, sensors, health, events"}
+		desc := []string{"system identity and hardware inventory", "metrics, storage, network, sensors, health, events", "process list (users and resource use)"}
 		for i, s := range issuableScopes {
 			box := "[ ]"
 			if m.scopeOn[i] {

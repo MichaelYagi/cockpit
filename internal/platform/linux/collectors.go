@@ -268,5 +268,6 @@ func Collectors(env collector.Env) []collector.Collector {
 		newBlockDevices(env),
 		newSensors(env),
 		newSMART(env),
+		newProcesses(env),
 	}
 }

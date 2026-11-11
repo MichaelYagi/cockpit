@@ -125,3 +125,35 @@ func (c *Client) RevokeKey(ctx context.Context, id string) (*apiv1.APIKey, error
 	}
 	return &out.APIKey, nil
 }
+
+// ProcessesQuery selects, sorts and pages processes. Zero values use the
+// server defaults (sort by CPU, kernel threads hidden, 50 per page).
+type ProcessesQuery struct {
+	Sort          string // cpu | memory | pid | name
+	Order         string // asc | desc
+	Search        string
+	Limit         int
+	Cursor        string
+	KernelThreads bool
+}
+
+// Processes lists processes. Requires processes:read over TCP.
+func (c *Client) Processes(ctx context.Context, q ProcessesQuery) (*apiv1.ProcessesResponse, error) {
+	v := url.Values{}
+	for k, s := range map[string]string{"sort": q.Sort, "order": q.Order, "search": q.Search, "cursor": q.Cursor} {
+		if s != "" {
+			v.Set(k, s)
+		}
+	}
+	if q.Limit > 0 {
+		v.Set("limit", strconv.Itoa(q.Limit))
+	}
+	if q.KernelThreads {
+		v.Set("kernel_threads", "true")
+	}
+	path := "/processes"
+	if len(v) > 0 {
+		path += "?" + v.Encode()
+	}
+	return get[apiv1.ProcessesResponse](ctx, c, path)
+}

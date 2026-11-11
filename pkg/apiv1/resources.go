@@ -362,3 +362,40 @@ type RequestStats struct {
 	AuthFailures uint64 `json:"auth_failures"`
 	RateLimited  uint64 `json:"rate_limited"`
 }
+
+// ---- /processes ----
+
+// ProcessesResponse is GET /processes. Command lines are never included
+// (D9); "redacted" says so explicitly.
+type ProcessesResponse struct {
+	Meta
+	Status        string     `json:"status"`
+	Reason        string     `json:"reason,omitempty"`
+	CollectedAt   *time.Time `json:"collected_at"`
+	WindowSeconds float64    `json:"window_seconds"`
+	Partial       bool       `json:"partial"`
+	Total         int        `json:"total"`
+	Items         []Process  `json:"items"`
+	NextCursor    *string    `json:"next_cursor"`
+	Redacted      []string   `json:"redacted"`
+}
+
+// Process is one process.
+type Process struct {
+	PID           int        `json:"pid"`
+	PPID          int        `json:"ppid"`
+	Name          string     `json:"name"`
+	User          string     `json:"user"`
+	UID           int        `json:"uid"`
+	State         string     `json:"state"`
+	Threads       int        `json:"threads"`
+	CPUPercent    *float64   `json:"cpu_percent"`
+	MemoryPercent float64    `json:"memory_percent"`
+	RSSBytes      uint64     `json:"rss_bytes"`
+	VirtualBytes  uint64     `json:"virtual_bytes"`
+	StartedAt     *time.Time `json:"started_at"`
+	KernelThread  bool       `json:"kernel_thread"`
+}
+
+// ProcessSorts are the valid values of ?sort= for /processes.
+var ProcessSorts = []string{"cpu", "memory", "pid", "name"}

@@ -64,6 +64,7 @@ type Deps struct {
 	Stats *middleware.Stats
 	// Listeners reports open listeners for the admin part of /status.
 	Listeners func() []apiv1.Listener
+	Processes handlers.ProcessSource
 	// Event streaming (D17).
 	Subscriber      handlers.Subscriber
 	KeyChecker      handlers.KeyChecker
@@ -110,7 +111,7 @@ func Routes(d Deps) []Route {
 		return st
 	}
 	get, post, del := http.MethodGet, http.MethodPost, http.MethodDelete
-	sys, met, adm := auth.ScopeSystemRead, auth.ScopeMetricsRead, auth.ScopeAdmin
+	sys, met, prc, adm := auth.ScopeSystemRead, auth.ScopeMetricsRead, auth.ScopeProcessesRead, auth.ScopeAdmin
 	return []Route{
 		{Method: get, Path: "/livez", Public: true, Handler: handlers.Livez},
 		{Method: get, Path: "/openapi.json", Public: true, Handler: handlers.OpenAPI(d.SpecJSON)},
@@ -124,6 +125,7 @@ func Routes(d Deps) []Route {
 		{Method: get, Path: "/health", Scope: met, Handler: handlers.Health(d.Health, machineID, d.Now)},
 		{Method: get, Path: "/events", Scope: met, Handler: handlers.Events(d.Events, machineID, d.Now)},
 		{Method: get, Path: "/events/stream", Scope: met, Handler: stream.ServeHTTP},
+		{Method: get, Path: "/processes", Scope: prc, Handler: handlers.Processes(d.Processes, machineID, d.Now)},
 		{Method: get, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.List},
 		{Method: post, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.Create},
 		{Method: del, Path: "/keys/{id}", Scope: adm, SocketOnly: true, Handler: keys.Revoke},

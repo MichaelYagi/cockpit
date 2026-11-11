@@ -51,6 +51,8 @@ type Engine struct {
 	current atomic.Pointer[core.Snapshot]
 	results chan outcome
 
+	procs processState
+
 	mu      sync.Mutex // guards started/closed
 	started bool
 	cancel  context.CancelFunc

@@ -59,7 +59,7 @@ const (
 )
 
 // issuableScopes are the scopes a key can be created with (D8).
-var issuableScopes = []string{"system:read", "metrics:read"}
+var issuableScopes = []string{"system:read", "metrics:read", "processes:read"}
 
 const historyLen = 120
 
@@ -102,7 +102,7 @@ type Model struct {
 	modal         modal
 	input         string
 	scopeCursor   int
-	scopeOn       [2]bool
+	scopeOn       [3]bool
 	pendingAction string // "revoke" | "rotate"
 	pendingID     string
 	revealed      *apiv1.CreatedAPIKey
@@ -118,7 +118,7 @@ func New(api API, opts Options) *Model {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [2]bool{false, true}}
+	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [3]bool{false, true, false}}
 }
 
 type tickMsg time.Time
@@ -401,9 +401,9 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 	case modalCreateScopes:
 		switch s {
 		case "up", "k":
-			m.scopeCursor = 0
+			m.scopeCursor = max(0, m.scopeCursor-1)
 		case "down", "j":
-			m.scopeCursor = 1
+			m.scopeCursor = min(len(issuableScopes)-1, m.scopeCursor+1)
 		case "space":
 			m.scopeOn[m.scopeCursor] = !m.scopeOn[m.scopeCursor]
 		case "enter":
