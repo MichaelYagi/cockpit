@@ -138,7 +138,7 @@ adjust thresholds, and exports a redacted diagnostic report.
 
 | # | Question | Needed by | Current recommendation |
 |---|---|---|---|
-| Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. Phase 3: a root-owned systemd timer runs `smartctl --json` and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
+| Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. **Phase 3 done (D20):** `cockpit-smart.timer` runs `cockpit smart-helper` as root hourly and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
 | Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 2 | Still prints help. Launching the TUI is now reasonable since it can embed an agent. |
 | Q5 | Should the filesystem skip lists become configurable? | 3 | Yes, with the history work. |
 | Q6 | Should a dedicated scope cover network addresses, routes and DNS? | 3 | No for now: documented as visible with `metrics:read`. Revisit with fleet mode. |

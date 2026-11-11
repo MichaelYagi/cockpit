@@ -391,3 +391,14 @@ func TestReportCommand(t *testing.T) {
 		t.Errorf("no agent: %d %s", code, errOut)
 	}
 }
+
+func TestSMARTHelperCommand(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "smart")
+	code, _, errOut := run(t, "", "smart-helper", "--dir", dir, "--group", "no-such-group-for-cockpit-tests")
+	if code != ExitError || !strings.Contains(errOut, "no-such-group-for-cockpit-tests") {
+		t.Errorf("unknown group: %d %s", code, errOut)
+	}
+	if code, _, _ := run(t, "", "smart-helper", "extra"); code != ExitUsage {
+		t.Errorf("extra argument exit %d", code)
+	}
+}

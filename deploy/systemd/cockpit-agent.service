@@ -1,0 +1,59 @@
+# Cockpit monitoring agent (system mode). Installed by deploy/install.sh.
+# Not related to the Red Hat Cockpit web console (cockpit.service).
+[Unit]
+Description=Cockpit monitoring agent
+Documentation=https://github.com/MichaelYagi/cockpit/blob/main/docs/SETUP.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=cockpit-monitor
+Group=cockpit-monitor
+ExecStart=/usr/local/bin/cockpit agent --mode system
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# Directories (D1). The state directory holds the database and key hashes;
+# the runtime directory holds the admin socket, reachable by the
+# cockpit-monitor group (D3).
+StateDirectory=cockpit-monitor
+StateDirectoryMode=0700
+RuntimeDirectory=cockpit-monitor
+RuntimeDirectoryMode=0750
+ConfigurationDirectory=cockpit-monitor
+ConfigurationDirectoryMode=0750
+UMask=0027
+
+# Hardening. The agent only reads /proc, /sys and D-Bus, runs optional
+# read-only tools (smartctl, nvidia-smi) and listens on a Unix socket and
+# loopback TCP.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+# Read-only rather than hidden, so /home filesystem capacity stays visible.
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

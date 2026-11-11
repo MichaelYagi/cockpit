@@ -352,6 +352,10 @@ which runs `smartctl --json` for each disk and writes the results to
 `cockpit-monitor`). The agent stays unprivileged and reads these files;
 results older than 3 hours are treated as stale. Without the helper, the
 agent falls back to running `smartctl` itself (Phase 1 behavior).
+Because `/var/lib/cockpit-monitor` belongs to the agent's user, the helper
+creates `smart/` itself (not through `StateDirectory=`, which would chown
+it), refuses a symlink or a directory not owned by root or writable by
+others, and writes only relative to the opened directory.
 
 **Why.** Resolves Q1 without giving the long-running, network-facing
 agent elevated privileges.

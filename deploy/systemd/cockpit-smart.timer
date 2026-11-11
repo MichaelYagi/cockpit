@@ -1,0 +1,13 @@
+# Hourly SMART collection for cockpit-agent (D20).
+[Unit]
+Description=Hourly Cockpit SMART helper
+Documentation=https://github.com/MichaelYagi/cockpit/blob/main/docs/SETUP.md
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

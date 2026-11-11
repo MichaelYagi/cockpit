@@ -52,8 +52,8 @@ decision entry before deviating from one.
 | Item | Value |
 |---|---|
 | Module | `github.com/MichaelYagi/cockpit` |
-| Executable | `cockpit` (`agent`, `tui`, `keys`, `report`, `config check`, `version`) |
-| systemd unit | `cockpit-agent.service` |
+| Executable | `cockpit` (`agent`, `tui`, `keys`, `report`, `smart-helper`, `config check`, `version`) |
+| systemd units | `cockpit-agent.service`, `cockpit-smart.service` / `.timer` (D20) |
 | System config / data / runtime | `/etc/cockpit-monitor/`, `/var/lib/cockpit-monitor/`, `/run/cockpit-monitor/` |
 | User-mode dirs | `$XDG_{CONFIG,STATE,RUNTIME}_HOME/cockpit-monitor/` |
 | Env prefix | `COCKPIT_` |
@@ -126,6 +126,7 @@ internal/
 pkg/
   apiv1/                     # public wire types matching the spec
   client/                    # public Go SDK (Unix socket, TCP, TLS)
+deploy/                      # systemd units, sysusers.d entry, install/uninstall scripts (+ tests)
 docs/
 ```
 

@@ -76,6 +76,81 @@ The agent refuses to start if these directories are more permissive than
 shown or owned by another user. `cockpit config check` prints the effective
 configuration and paths.
 
+## System service
+
+To keep monitoring when nobody is logged in, install the agent as a
+hardened systemd service running as the unprivileged `cockpit-monitor`
+user:
+
+```sh
+make build
+sudo ./deploy/install.sh                  # binary to /usr/local/bin, units to /etc/systemd/system
+sudo ./deploy/install.sh --smart-helper   # also enable the hourly SMART helper (needs smartmontools)
+sudo usermod -aG cockpit-monitor "$USER"  # admin socket access; log in again afterwards
+cockpit tui --mode system
+cockpit keys list --mode system
+```
+
+`install.sh` accepts `--prefix DIR` (default `/usr/local`) and `--no-start`.
+It installs:
+
+| Path | Contents | Mode |
+|---|---|---|
+| `/usr/local/bin/cockpit` | The binary | `0755` |
+| `/etc/systemd/system/cockpit-agent.service` | The agent (`cockpit agent --mode system`) | `0644` |
+| `/etc/systemd/system/cockpit-smart.{service,timer}` | SMART helper, hourly (D20) | `0644` |
+| `/etc/sysusers.d/cockpit-monitor.conf` | The `cockpit-monitor` user and group | `0644` |
+
+systemd creates the directories when the agent starts:
+
+| Path | Contents | Mode |
+|---|---|---|
+| `/etc/cockpit-monitor/config.yaml` | Optional configuration | `0750` dir |
+| `/var/lib/cockpit-monitor/` | Database, machine ID, lock | `0700` dir, `0600` files |
+| `/var/lib/cockpit-monitor/smart/` | SMART helper results | `0750` dir, `0640` files, `root:cockpit-monitor` |
+| `/run/cockpit-monitor/agent.sock` | Admin socket | `0750` dir, `0660` socket, group `cockpit-monitor` |
+
+Membership of the `cockpit-monitor` group gives full local admin access,
+including key management. Grant it as you would `sudo`.
+
+The unit applies systemd hardening: no capabilities, `NoNewPrivileges`, a
+read-only file system apart from its own directories, read-only home
+directories, a system-call filter and restricted address families
+(`systemd-analyze security cockpit-agent.service` rates it about 1.9,
+"OK"). Process listing and GPU metrics keep working.
+
+**SMART helper (D20).** Disk health needs raw device access, which the
+agent deliberately lacks. `cockpit-smart.timer` runs `cockpit smart-helper`
+as root once an hour (and two minutes after boot) with only the
+capabilities `smartctl` needs and no network. It writes one file per disk
+to `/var/lib/cockpit-monitor/smart/`, and the agent reads them. Results
+older than three hours are reported as stale. Without the helper, the
+agent runs `smartctl` itself, which usually reports `permission_denied`.
+Run it now with `sudo systemctl start cockpit-smart.service`; check it with
+`systemctl list-timers cockpit-smart.timer` and
+`journalctl -u cockpit-smart.service`. The helper refuses to write if its
+directory is a symlink, is not owned by root or is writable by others;
+remove the directory and run it again.
+
+**WSL.** `nvidia-smi` lives in `/usr/lib/wsl/lib`, which is not on a
+service's `PATH`. Add it with a drop-in:
+
+```sh
+sudo systemctl edit cockpit-agent.service
+# [Service]
+# Environment=PATH=/usr/lib/wsl/lib:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+**Upgrade.** Build the new version and run `sudo ./deploy/install.sh`
+again. It replaces the binary and units, reloads systemd and restarts the
+agent. Data, keys and history in `/var/lib/cockpit-monitor` are kept, and
+database migrations run on start. Local unit changes belong in drop-ins
+(`systemctl edit`), which upgrades do not overwrite.
+
+**Uninstall.** `sudo ./deploy/uninstall.sh` stops and removes the units and
+binary but keeps data, configuration and the user. `--purge` also deletes
+them, including every API key; this cannot be undone.
+
 ## Diagnostic reports
 
 ```sh

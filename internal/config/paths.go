@@ -20,6 +20,9 @@ type Paths struct {
 // (108 bytes including the terminating NUL).
 const maxSocketPath = 107
 
+// SystemPaths returns the system-mode default locations.
+func SystemPaths() Paths { return defaultPaths(ModeSystem, nil, "") }
+
 // defaultPaths returns the mode's default locations. env looks up
 // environment variables; home is the user's home directory.
 func defaultPaths(mode Mode, env func(string) (string, bool), home string) Paths {

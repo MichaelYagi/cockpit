@@ -99,6 +99,9 @@ type Env struct {
 	Now      func() time.Time
 	Logger   *slog.Logger
 	Tools    ToolFinder
+	// SMARTResultsDir holds results written by the privileged SMART helper
+	// (D20); empty when no helper is configured.
+	SMARTResultsDir string
 }
 
 // DefaultEnv returns the production environment.

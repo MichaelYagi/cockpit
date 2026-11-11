@@ -140,6 +140,9 @@ func Run(ctx context.Context, o Options) (err error) {
 
 	// 3. Collectors and engine.
 	env := collector.DefaultEnv(log.With("component", "collector"), pathTools{})
+	if paths.Mode == config.ModeSystem {
+		env.SMARTResultsDir = SMARTResultsDir(paths) // written by cockpit-smart.service (D20)
+	}
 	eng, err := engine.New(o.Collectors(env), engine.Options{
 		Logger:   log.With("component", "engine"),
 		Now:      o.Now,
