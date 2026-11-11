@@ -2026,7 +2026,7 @@ components:
         health: { $ref: "#/components/schemas/HealthSettings" }
     Scope:
       type: string
-      enum: [system:read, metrics:read, processes:read, admin]
+      enum: [system:read, metrics:read, network:read, processes:read, admin]
     APIKey:
       type: object
       additionalProperties: false
@@ -2061,8 +2061,8 @@ components:
         scopes:
           type: array
           minItems: 1
-          description: Keys may hold system:read, metrics:read and processes:read; never admin.
-          items: { type: string, enum: [system:read, metrics:read, processes:read] }
+          description: Keys may hold system:read, metrics:read, network:read and processes:read; never admin.
+          items: { type: string, enum: [system:read, metrics:read, network:read, processes:read] }
         expires_at: { type: string, format: date-time }
     CreatedAPIKey:
       type: object

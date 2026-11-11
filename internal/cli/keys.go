@@ -22,7 +22,7 @@ Usage:
   cockpit keys rotate ID [--yes]
   cockpit keys revoke ID [--yes]
 
-Scopes: system:read, metrics:read, processes:read
+Scopes: system:read, metrics:read, network:read, processes:read
 --expires accepts a duration (e.g. 720h) or an RFC 3339 time.
 
 "create" and "rotate" print the new key alone on standard output so it can

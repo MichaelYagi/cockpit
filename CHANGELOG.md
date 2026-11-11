@@ -6,6 +6,15 @@ release may change `pkg/client`, `pkg/apiv1` or `pkg/collectorsdk`, and
 every such change is listed here under **Breaking**. The REST API keeps
 its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
+## v0.5.0 — unreleased
+
+### Changed
+
+- **New `network:read` scope (D27).** Interface addresses, routes and DNS
+  now need it. Existing keys with `metrics:read` were migrated to include
+  it, so nothing changes on upgrade. New keys must request it
+  (`cockpit keys create --scope network:read`).
+
 ## v0.4.0 — 2026-11-11
 
 The first tagged release. It contains everything from Phases 1–4.

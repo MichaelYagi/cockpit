@@ -1105,3 +1105,15 @@ func TestIntelGPULines(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkWithoutNetworkScope(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 120, 40)
+	m.network = &apiv1.NetworkResponse{
+		Interfaces: avail([]apiv1.NetworkInterface{{Name: "eth0", Addresses: []string{}, Redacted: []string{"addresses"}}}),
+		Routes:     missing[[]apiv1.Route]("permission_denied", "Requires the network:read scope."),
+		DNS:        missing[apiv1.DNS]("permission_denied", "Requires the network:read scope."),
+	}
+	if out := strings.Join(m.netConfigLines(80), "\n"); !strings.Contains(out, "network:read scope") || strings.Contains(out, "routes:") {
+		t.Errorf("%s", out)
+	}
+}

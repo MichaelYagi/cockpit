@@ -36,12 +36,14 @@ Keys are never accepted in URLs or query strings.
 | *(public)* | `GET /livez`, `GET /openapi.json` |
 | `system:read` | `/status`, `/system`, `/hardware`, `/services`, `/report` (metric parts need `metrics:read` too) |
 | `metrics:read` | `/metrics`, `/metrics/history…`, `/storage`, `/network`, `/sensors`, `/health`, `/events`, `/events/stream` |
+| `network:read` | Interface addresses, routes and DNS inside `/network`, `/metrics` and `/report` (D27). Without it they are withheld: addresses become `[]` and appear in `redacted`, and routes and DNS report `permission_denied` |
 | `processes:read` | `/processes` (D14), `/containers` (D24) |
 | `admin` | `/keys…`, `/settings`, privileged fields in `/status` and `/report` |
 
 No scope implies another (D8). Keys may hold `system:read`,
-`metrics:read` and `processes:read`; `admin` is reserved for the socket
-principal.
+`metrics:read`, `network:read` and `processes:read`; `admin` is reserved
+for the socket principal. `network:read` narrows data inside routes that
+need `metrics:read`. It does not open a route by itself.
 
 ## 4. Endpoints
 
@@ -174,6 +176,9 @@ default (D9). The containing object lists what was withheld:
 ```json
 { "name": "eth0", "mtu": 1500, "redacted": ["mac_address"] }
 ```
+
+Addresses withheld for lack of `network:read` (D27) are listed the same
+way: `"addresses": [], "redacted": ["mac_address", "addresses"]`.
 
 ## 7. Errors
 

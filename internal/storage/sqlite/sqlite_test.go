@@ -172,3 +172,44 @@ func migrationCount(t *testing.T) int {
 	}
 	return len(entries)
 }
+
+// D27: keys that had metrics:read before network:read existed keep access
+// to addresses, routes and DNS.
+func TestNetworkScopeMigration(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "m.db")
+	d, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, scopes := range map[string]string{
+		"aaaaaaaaaaaa": "metrics:read",
+		"bbbbbbbbbbbb": "metrics:read processes:read system:read",
+		"cccccccccccc": "system:read",
+		"dddddddddddd": "metrics:read network:read", // already migrated
+	} {
+		if _, err := d.db.ExecContext(ctx, "INSERT INTO api_keys (id, name, hash, scopes, created_at) VALUES (?, ?, ?, ?, 0)", id, id, []byte{1}, scopes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.db.ExecContext(ctx, "PRAGMA user_version = 4"); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	if d, err = Open(ctx, path); err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	want := map[string]string{
+		"aaaaaaaaaaaa": "metrics:read network:read",
+		"bbbbbbbbbbbb": "metrics:read network:read processes:read system:read",
+		"cccccccccccc": "system:read",
+		"dddddddddddd": "metrics:read network:read",
+	}
+	for id, w := range want {
+		var got string
+		if err := d.db.QueryRowContext(ctx, "SELECT scopes FROM api_keys WHERE id = ?", id).Scan(&got); err != nil || got != w {
+			t.Errorf("%s: %q (%v), want %q", id, got, err, w)
+		}
+	}
+}

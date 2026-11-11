@@ -67,7 +67,9 @@ func invalid(format string, args ...any) error {
 
 // IssuableScopes are the scopes a key may hold in Phase 1. admin is
 // reserved for the local socket principal (D3, D8).
-func IssuableScopes() []Scope { return []Scope{ScopeSystemRead, ScopeMetricsRead, ScopeProcessesRead} }
+func IssuableScopes() []Scope {
+	return []Scope{ScopeSystemRead, ScopeMetricsRead, ScopeNetworkRead, ScopeProcessesRead}
+}
 
 // MaxActiveKeys bounds the number of usable keys.
 const MaxActiveKeys = 1000
