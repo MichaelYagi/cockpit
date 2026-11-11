@@ -22,6 +22,9 @@ type Fake struct {
 	ProbePanics bool
 	// CloseErr is returned by Close.
 	CloseErr error
+	// CollectFunc, if set, implements Collect. Otherwise Collect returns
+	// the probe statuses and no records.
+	CollectFunc func(ctx context.Context) collector.Result
 
 	closed atomic.Bool
 }
@@ -65,6 +68,9 @@ func (f *Fake) Probe(ctx context.Context) map[core.Capability]core.CapabilitySta
 }
 
 func (f *Fake) Collect(ctx context.Context) collector.Result {
+	if f.CollectFunc != nil {
+		return f.CollectFunc(ctx)
+	}
 	return collector.Result{CollectedAt: time.Now(), Status: f.Probe(ctx)}
 }
 

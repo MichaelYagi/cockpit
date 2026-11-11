@@ -106,7 +106,11 @@ func Run(ctx context.Context, o Options) (err error) {
 
 	// 2. Collectors and engine.
 	env := collector.DefaultEnv(log.With("component", "collector"), pathTools{})
-	eng, err := engine.New(o.Collectors(env), log.With("component", "engine"))
+	eng, err := engine.New(o.Collectors(env), engine.Options{
+		Logger:   log.With("component", "engine"),
+		Now:      o.Now,
+		Settings: CollectorSettings(cfg.Collection),
+	})
 	if err != nil {
 		return fmt.Errorf("collectors: %w", err)
 	}
@@ -200,4 +204,31 @@ func (pathTools) Find(name string) (string, bool) {
 	}
 	abs, err := filepath.Abs(p)
 	return abs, err == nil
+}
+
+// CollectorSettings resolves the effective schedule for a collector.
+// collection.defaults applies to samplers; inventory collectors keep their
+// own (much longer) defaults. A per-collector override always wins.
+func CollectorSettings(c config.Collection) func(collector.Descriptor) engine.Settings {
+	return func(d collector.Descriptor) engine.Settings {
+		s := engine.Settings{Enabled: true, Interval: d.DefaultInterval, Timeout: d.DefaultTimeout}
+		if d.Class == collector.Sampler {
+			s.Interval, s.Timeout = c.Defaults.Interval, c.Defaults.Timeout
+		}
+		if o, ok := c.Collectors[d.ID]; ok {
+			if o.Enabled != nil {
+				s.Enabled = *o.Enabled
+			}
+			if o.Interval > 0 {
+				s.Interval = o.Interval
+			}
+			if o.Timeout > 0 {
+				s.Timeout = o.Timeout
+			}
+		}
+		if s.Interval > 0 && s.Timeout > s.Interval {
+			s.Timeout = s.Interval
+		}
+		return s
+	}
 }

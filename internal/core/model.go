@@ -11,9 +11,11 @@ import (
 type SectionMeta struct {
 	Status      Availability
 	CollectedAt time.Time // zero if never collected
-	Stale       bool      // last good data is older than 2× the collector interval
-	Source      string    // non-sensitive origin, e.g. "procfs"
-	Reason      string    // safe explanation when not available
+	// StaleAfter is when the data becomes stale (CollectedAt + 2× the
+	// collector interval). Zero means it never goes stale (inventory).
+	StaleAfter time.Time
+	Source     string // non-sensitive origin, e.g. "procfs"
+	Reason     string // safe explanation when not available
 }
 
 // Section pairs data with its metadata. Data is nil when nothing has been
