@@ -164,20 +164,17 @@ func Authenticate(v auth.Verifier, limits *Limits, stats *Stats, logger *slog.Lo
 				next.ServeHTTP(w, r) // socket requests are already authenticated
 				return
 			}
-			var ipLimit *rate.Limiter
-			if limits != nil {
-				ipLimit = limits.authFail.get(clientIP(r))
-				if ipLimit.Tokens() < 1 {
-					rateLimited(w, r, retryAfter(authFailRPS), stats)
-					return
-				}
-			}
+			// Failed attempts are limited per client IP. The key is always
+			// verified first, so a flood of bad keys from one local process
+			// (all loopback clients share 127.0.0.1) can never lock out a
+			// client presenting a valid key.
 			fail := func(code, msg, challenge string) {
 				if stats != nil {
 					stats.authFailures.Add(1)
 				}
-				if ipLimit != nil {
-					ipLimit.Allow() // consume a token for the failed attempt
+				if limits != nil && !limits.authFail.get(clientIP(r)).Allow() {
+					rateLimited(w, r, retryAfter(authFailRPS), stats)
+					return
 				}
 				w.Header().Set("WWW-Authenticate", challenge)
 				httpx.WriteError(w, r, http.StatusUnauthorized, code, msg)

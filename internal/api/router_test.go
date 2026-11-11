@@ -515,6 +515,10 @@ func TestRateLimits(t *testing.T) {
 		t.Fatalf("auth failures not limited: %d", last.status)
 	}
 	spec.CheckResponse(t, last.req, last.status, last.header, last.body)
+	// A valid key from the same IP is never locked out by others' failures.
+	if r := do(t, tcp, "GET", "/api/v1/metrics", bearer(metricsKey)); r.status != 200 {
+		t.Errorf("valid key locked out by failed attempts: %d", r.status)
+	}
 	// A different client IP is unaffected.
 	r := do(t, tcp, "GET", "/api/v1/status", func(r *http.Request) { r.RemoteAddr = "127.0.0.2:1" })
 	if r.status != 401 {
