@@ -67,6 +67,20 @@ reported as passing only after it was actually run.
   `darwin/arm64`, `windows/amd64`, with `CGO_ENABLED=0`.
 - Permission-denied tests are skipped when running as root, since root
   bypasses file modes.
+- **Conformance suite** (`internal/collector/conformance`, Phase 5). Every
+  platform package runs it against its real collectors on the CI host, and
+  Linux also against an empty fixture tree. It checks:
+  - valid descriptors;
+  - a status for exactly the declared capabilities, with a safe,
+    control-character-free reason whenever a capability is not available;
+  - records whenever something is available;
+  - no panic and a prompt return on a cancelled context;
+  - a clean `Close`.
+
+  Its own test plants each kind of violation and checks that the suite
+  catches it. Adapted extension collectors run it too.
+- macOS and Windows CI jobs build, vet and run the platform, conformance,
+  TLS and SDK tests on real `macos-latest` and `windows-latest` runners.
 
 ## 5. Conventions
 

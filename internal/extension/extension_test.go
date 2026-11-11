@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MichaelYagi/cockpit/internal/collector/conformance"
 	"github.com/MichaelYagi/cockpit/internal/core"
 	"github.com/MichaelYagi/cockpit/pkg/collectorsdk"
 )
@@ -69,4 +70,17 @@ func TestAdaptRejects(t *testing.T) {
 			t.Errorf("%s: %v", want, err)
 		}
 	}
+}
+
+// Adapted extension collectors keep the platform contract too.
+func TestAdaptedConformance(t *testing.T) {
+	d := good()
+	d.Interval = time.Second
+	cs, err := Adapt([]collectorsdk.Collector{fake{d: d, r: collectorsdk.Result{
+		Metrics: []collectorsdk.Metric{{Name: "custom.demo.x", Kind: collectorsdk.Gauge, Unit: "count", Value: 1}},
+		Status:  map[string]collectorsdk.Status{"custom.demo.x": {Availability: collectorsdk.Available}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conformance.Run(t, cs)
 }
