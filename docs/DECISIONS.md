@@ -233,3 +233,24 @@ provide privilege without running the agent as root is an open question
 **Decision.** The revised architecture and documentation are the first
 Phase 0 commit. All documents use the name "Cockpit" and reflect D1–D11.
 Documentation is updated in the same change as any behavior it describes.
+
+## D13 — Hand-written /proc and /sys parsers instead of prometheus/procfs
+
+**Status:** Accepted (2026-11-11)
+
+**Decision.** Linux collectors parse `/proc` and `/sys` with small,
+hand-written pure functions (`internal/platform/linux/parse.go`) instead of
+depending on `github.com/prometheus/procfs`, which CLAUDE.md originally
+listed.
+
+**Why.** Phase 1 needs only a few simple formats (`stat`, `meminfo`,
+`loadavg`, `uptime`, `net/dev`, `mountinfo`, PSI, `os-release`, sysfs
+attributes). Each parser is 20–60 lines, is fuzz-tested, and lets every
+read error be classified per capability (missing, permission denied,
+malformed) without translating a library's errors. It also avoids a
+dependency.
+
+**Consequences.** If later phases need complex formats (per-process
+`/proc/[pid]` details, `/proc/net/*` socket tables), adopting procfs for
+those is reasonable and needs a new entry.
+

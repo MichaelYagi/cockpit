@@ -27,6 +27,8 @@ type Status struct {
 	Meta
 	Agent      Agent       `json:"agent"`
 	Collectors []Collector `json:"collectors"`
+	// API is present only for the admin principal (the local socket).
+	API *APIServerStatus `json:"api,omitempty"`
 }
 
 // Agent identifies the running agent.
@@ -75,6 +77,9 @@ type ErrorBody struct {
 // Error codes.
 const (
 	CodeInvalidRequest         = "invalid_request"
+	CodeInvalidParameter       = "invalid_parameter"
+	CodeInvalidCursor          = "invalid_cursor"
+	CodeRateLimited            = "rate_limited"
 	CodeInvalidHost            = "invalid_host"
 	CodeAuthenticationRequired = "authentication_required"
 	CodeInvalidCredentials     = "invalid_credentials"

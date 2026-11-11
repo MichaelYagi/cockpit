@@ -52,6 +52,12 @@ SQLite and Bubble Tea arrive in Phase 1.
 
 ## Phase 1 — MVP vertical slice
 
+**Status: implemented, awaiting review.** Every milestone below is done.
+The exit criteria were checked with automated tests and against the built
+binary on WSL2 (no sensors, no smartctl: both reported as unavailable with
+reasons). Every TUI screen was also rendered from live data and reviewed at
+80×24 and 120×40.
+
 | # | Milestone | Depends on |
 |---|---|---|
 | 1A | Engine: scheduler with jitter, timeouts, panic isolation, rate derivation, staleness, snapshot store | 0.4 |
@@ -108,8 +114,9 @@ revoked; missing sensors and permissions are reported, not fatal.
 
 | # | Question | Needed by | Current recommendation |
 |---|---|---|---|
-| Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 1B | Phase 1: agent runs `smartctl` directly and reports `permission_denied` when unprivileged. Phase 3 (with packaging): a small root-owned systemd timer runs `smartctl --json` and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
-| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 0.7 | Print help in Phase 0. Revisit once the TUI exists. |
+| Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. Phase 3: a root-owned systemd timer runs `smartctl --json` and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
+| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 2 | Still prints help. Launching the TUI is now reasonable since it can embed an agent. |
+| Q5 | Should the filesystem skip lists become configurable? | 3 | Yes, with the history work. |
 | Q3 | Default TCP port | 0.6 | `7878` (avoids 9090, used by Red Hat Cockpit) |
 
 ## Non-goals for the MVP

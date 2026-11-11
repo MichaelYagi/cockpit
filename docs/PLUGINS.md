@@ -88,7 +88,7 @@ type Result struct {
 ## 4. Capabilities
 
 Dotted identifiers: `system.identity`, `system.uptime`, `cpu.usage`,
-`cpu.load`, `cpu.frequency`, `memory.usage`, `memory.pressure`,
+`cpu.load`, `cpu.frequency` (not collected yet), `memory.usage`, `memory.pressure`,
 `storage.devices`, `storage.filesystems`, `storage.smart`,
 `network.interfaces`, `network.throughput`, `sensors.thermal`,
 `sensors.fan`, later `gpu.*`, `services.systemd`, `processes.list`.
@@ -101,20 +101,23 @@ A collector declares what it can **potentially** provide. `Probe` and each
 | ID | Phase | Capabilities | Sources |
 |---|---|---|---|
 | `linux.system` | 1 | `system.identity`, `system.uptime` | `/etc/os-release`, `uname(2)`, `/proc/uptime`, `/proc/sys/kernel/hostname` |
-| `linux.cpu` | 1 | `cpu.usage`, `cpu.load`, `cpu.frequency` | `/proc/stat`, `/proc/loadavg`, `/proc/cpuinfo`, `/sys/devices/system/cpu` |
+| `linux.cpu` | 1 | `cpu.usage`, `cpu.load` | `/proc/stat`, `/proc/loadavg`, `/proc/cpuinfo` |
 | `linux.memory` | 1 | `memory.usage`, `memory.pressure` | `/proc/meminfo`, `/proc/pressure/memory` |
 | `linux.filesystems` | 1 | `storage.filesystems` | `/proc/self/mountinfo`, `statfs(2)` |
 | `linux.blockdevices` | 1 | `storage.devices` | `/sys/block`, `/sys/class/nvme` |
 | `linux.network` | 1 | `network.interfaces`, `network.throughput` | `/sys/class/net`, `/proc/net/dev` |
 | `linux.sensors` | 1 | `sensors.thermal`, `sensors.fan` | `/sys/class/hwmon`, `/sys/class/thermal` |
-| `linux.smart` | 1 | `storage.smart` | `smartctl --json` (optional, ≥ 7.0) |
+| `linux.smart` | 1 | `storage.smart` | `smartctl --json` (optional, ≥ 7.0), hourly |
 | `linux.processes` | 2 | `processes.list` | `/proc/[pid]` |
 | `linux.systemd` | 2 | `services.systemd` | systemd D-Bus |
 | `linux.gpu.*` | 2+ | `gpu.*` | Vendor libraries/tools |
 
-Filesystem collection skips pseudo and read-only image filesystems
-(`proc`, `sysfs`, `cgroup2`, `squashfs`, `overlay` lower layers, …) by a
-configurable type list.
+Filesystem collection skips pseudo, in-memory and image filesystems
+(`proc`, `sysfs`, `cgroup2`, `tmpfs`, `squashfs`, `rootfs`, …), overlays
+other than the root filesystem, and network filesystems (`nfs`, `cifs`,
+`sshfs`, …) whose `statfs` can hang. Bind mounts of the same device are
+reported once, at the shortest mount point. The skip lists are fixed in
+Phase 1.
 
 ### External tools
 

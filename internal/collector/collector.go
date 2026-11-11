@@ -39,8 +39,11 @@ type Descriptor struct {
 	Version         string // semver of the collector
 	Capabilities    []core.Capability
 	Class           Class
-	DefaultInterval time.Duration
+	DefaultInterval time.Duration // for Inventory: refresh period, 0 = once
 	DefaultTimeout  time.Duration
+	// Source is a short, non-sensitive description of where data comes
+	// from, shown to clients (e.g. "procfs", "sysfs/hwmon", "smartctl").
+	Source string
 }
 
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$`)

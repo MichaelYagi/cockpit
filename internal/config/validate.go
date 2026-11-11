@@ -113,6 +113,38 @@ func validate(c *Config, p *Paths, v *validator) {
 	}
 
 	inRange(v, "tui.refresh", c.TUI.Refresh, 250*time.Millisecond, time.Minute)
+
+	rl := c.API.RateLimit
+	if rl.PerKeyRPS <= 0 || rl.PerKeyBurst < 1 || rl.GlobalRPS <= 0 || rl.GlobalBurst < 1 {
+		v.add("api.rate_limit", "rates must be positive and bursts at least 1")
+	}
+	if rl.PerKeyRPS > rl.GlobalRPS {
+		v.add("api.rate_limit.per_key_rps", "must not exceed global_rps")
+	}
+
+	h := c.Health
+	inRange(v, "health.interval", h.Interval, time.Second, 10*time.Minute)
+	if h.Confirm < 1 || h.Confirm > 20 {
+		v.add("health.confirm", "must be between 1 and 20 (got %d)", h.Confirm)
+	}
+	ordered := func(field string, warn, crit, lo, hi float64, rising bool) {
+		if warn < lo || warn > hi || crit < lo || crit > hi {
+			v.add(field, "thresholds must be between %g and %g", lo, hi)
+		}
+		if rising && warn >= crit {
+			v.add(field, "warning threshold %g must be below critical %g", warn, crit)
+		}
+		if !rising && warn <= crit {
+			v.add(field, "warning threshold %g must be above critical %g", warn, crit)
+		}
+	}
+	ordered("health.cpu_temperature", h.CPUTemperature.WarnCelsius, h.CPUTemperature.CriticalCelsius, 20, 150, true)
+	ordered("health.memory.available_percent", h.Memory.WarnAvailablePercent, h.Memory.CriticalAvailablePercent, 0, 100, false)
+	ordered("health.memory.pressure_percent", h.Memory.WarnPressurePercent, h.Memory.CriticalPressurePercent, 0, 100, true)
+	ordered("health.storage", h.Storage.WarnPercent, h.Storage.CriticalPercent, 1, 100, true)
+	if h.Disk.WarnPercentageUsed < 1 || h.Disk.WarnPercentageUsed > 100 {
+		v.add("health.disk.warn_percentage_used", "must be between 1 and 100")
+	}
 }
 
 func validateTCP(v *validator, api API) {

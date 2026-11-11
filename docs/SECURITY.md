@@ -114,8 +114,14 @@ if any key material appears.
 
 ## 9. Resource protection
 
-- Rate limiting per key and globally (`golang.org/x/time/rate`), `429` with
-  `Retry-After`.
+- Rate limiting on TCP (`golang.org/x/time/rate`), `429` with
+  `Retry-After`: global (default 200/s, burst 400), per key (20/s, burst
+  40), and failed authentication per client IP (1/s, burst 10). Keys are
+  always verified before the failure budget is consulted, so another
+  local process sending bad keys cannot lock out a valid key. Limiter
+  memory is bounded (4096 tracked IDs). The socket is not rate limited.
+- A storage failure while verifying a key returns `500`, never `401`, so
+  outages are not mistaken for revoked keys.
 - `ReadHeaderTimeout`, idle timeouts, and maximum header size on every
   server. Write deadlines are set per route, so SSE is not cut off.
 - Request body limit 64 KiB; bounded pagination and query ranges.
@@ -135,7 +141,24 @@ if any key material appears.
 - Never change firewall rules, services, kernel settings or system
   configuration.
 
-## 11. Plugins
+## 11. Files and modes
+
+| File | Mode | Notes |
+|---|---|---|
+| State directory | `0700` | Refused if more permissive or owned by another user |
+| `cockpit.db` (+ WAL) | `0600` | Key SHA-256 hashes and metadata only |
+| `machine-id`, `agent.lock` | `0600` | Not secret |
+| `embedded-agent.log` | `0600` | Same redaction as agent logs |
+| Runtime directory | `0700` user / `0750` system | Holds the socket |
+| `agent.sock` | `0600` user / `0660` system | Access = local admin |
+| TLS private key | must be `0600` | Agent refuses group/other access |
+
+A newly created key is printed once: on stdout by `cockpit keys create`
+(so it can be redirected to a file), or in a dialog in the TUI. The TUI
+uses the alternate screen, so the key does not remain in terminal
+scrollback, and the key is erased from memory when the dialog closes.
+
+## 12. Plugins
 
 The MVP compiles trusted collectors into the binary. It does not load
 shared libraries or run third-party plugin binaries. Any future extension

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MichaelYagi/cockpit/pkg/client"
 )
 
 func testEnv(home string, vars map[string]string) (Env, *bytes.Buffer, *bytes.Buffer) {
@@ -92,7 +94,7 @@ func TestTUIWithoutAgent(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "ckp")
 	defer os.RemoveAll(dir)
 	env, _, errb := testEnv("/h", nil)
-	code := Run(context.Background(), []string{"tui", "--socket", filepath.Join(dir, "missing.sock")}, env)
+	code := Run(context.Background(), []string{"tui", "--once", "--socket", filepath.Join(dir, "missing.sock")}, env)
 	if code != ExitError || !strings.Contains(errb.String(), "cockpit agent") {
 		t.Errorf("%d %s", code, errb)
 	}
@@ -100,7 +102,7 @@ func TestTUIWithoutAgent(t *testing.T) {
 
 func TestTUIRequiresKeyFromEnvForTCP(t *testing.T) {
 	env, _, errb := testEnv("/h", nil)
-	code := Run(context.Background(), []string{"tui", "--url", "http://127.0.0.1:7878"}, env)
+	code := Run(context.Background(), []string{"tui", "--once", "--url", "http://127.0.0.1:7878"}, env)
 	if code != ExitError || !strings.Contains(errb.String(), "COCKPIT_API_KEY") {
 		t.Errorf("%d %s", code, errb)
 	}
@@ -131,7 +133,7 @@ func TestAgentAndTUI(t *testing.T) {
 	}
 
 	tenv, tout, terr := testEnv(root, nil)
-	if code := Run(context.Background(), []string{"tui", "--socket", sock}, tenv); code != ExitOK {
+	if code := Run(context.Background(), []string{"tui", "--once", "--socket", sock}, tenv); code != ExitOK {
 		t.Errorf("tui exit %d: %s", code, terr)
 	}
 	if !strings.Contains(tout.String(), "Cockpit agent") || !strings.Contains(tout.String(), "machine:") {
@@ -149,5 +151,211 @@ func TestAgentAndTUI(t *testing.T) {
 	}
 	if !strings.Contains(aerr.String(), "agent stopped") {
 		t.Errorf("agent log missing clean stop:\n%s", aerr)
+	}
+}
+
+// startAgent runs "cockpit agent" in the background and returns its socket.
+func startAgent(t *testing.T) string {
+	t.Helper()
+	root, _ := os.MkdirTemp("", "ckp")
+	sock := filepath.Join(root, "run", "agent.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	aenv, _, aerr := testEnv(root, nil)
+	go func() {
+		done <- Run(ctx, []string{"agent", "--state-dir", filepath.Join(root, "state"), "--runtime-dir", filepath.Join(root, "run"), "--tcp-address", "127.0.0.1:0"}, aenv)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("agent did not stop")
+		}
+		os.RemoveAll(root)
+	})
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(sock); err == nil {
+			return sock
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("agent socket never appeared:\n%s", aerr)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func run(t *testing.T, stdin string, args ...string) (int, string, string) {
+	t.Helper()
+	env, out, errb := testEnv("/h", nil)
+	if stdin != "" {
+		env.Stdin = strings.NewReader(stdin)
+	}
+	code := Run(context.Background(), args, env)
+	return code, out.String(), errb.String()
+}
+
+func TestKeysCommandEndToEnd(t *testing.T) {
+	sock := startAgent(t)
+	c, err := client.NewUnix(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	// The socket accepts requests a moment before the agent records its
+	// listener list; wait until the TCP listener is reported.
+	var tcpAddr string
+	for deadline := time.Now().Add(5 * time.Second); tcpAddr == "" && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		st, err := c.Status(context.Background())
+		if err != nil || st.API == nil {
+			t.Fatalf("status %v %+v", err, st)
+		}
+		for _, l := range st.API.Listeners {
+			if l.Transport == "tcp" {
+				tcpAddr = l.Address
+			}
+		}
+	}
+	if tcpAddr == "" {
+		t.Fatal("TCP listener never reported")
+	}
+
+	code, out, errOut := run(t, "", "keys", "create", "--socket", sock, "--name", "ci-bot", "--scope", "metrics:read", "--expires", "24h")
+	if code != ExitOK {
+		t.Fatalf("create: %d %s", code, errOut)
+	}
+	key := strings.TrimSpace(out)
+	if !strings.HasPrefix(key, "ckp_") || strings.Count(out, "\n") != 1 {
+		t.Fatalf("stdout must contain only the key, got %q", out)
+	}
+	if strings.Contains(errOut, key) || !strings.Contains(errOut, "will not be shown again") {
+		t.Errorf("stderr: %s", errOut)
+	}
+	id := key[4:16]
+
+	tcp, err := client.NewTCP("http://"+tcpAddr, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tcp.Close()
+	if _, err := tcp.Metrics(context.Background()); err != nil {
+		t.Fatalf("new key rejected over TCP: %v", err)
+	}
+
+	code, out, _ = run(t, "", "keys", "list", "--socket", sock)
+	if code != ExitOK || !strings.Contains(out, id) || !strings.Contains(out, "ci-bot") || strings.Contains(out, key) {
+		t.Errorf("list: %d\n%s", code, out)
+	}
+
+	// Admin scope cannot be granted (D8).
+	code, _, errOut = run(t, "", "keys", "create", "--socket", sock, "--name", "x", "--scope", "admin")
+	if code != ExitError || !strings.Contains(errOut, "cannot be granted") {
+		t.Errorf("admin scope: %d %s", code, errOut)
+	}
+
+	// Revocation needs the ID retyped; a wrong answer changes nothing.
+	code, _, errOut = run(t, "wrong\n", "keys", "revoke", id, "--socket", sock)
+	if code != ExitError || !strings.Contains(errOut, "Cancelled") {
+		t.Errorf("wrong confirmation: %d %s", code, errOut)
+	}
+	if _, err := tcp.Metrics(context.Background()); err != nil {
+		t.Fatal("key revoked despite a wrong confirmation")
+	}
+	code, _, errOut = run(t, "", "keys", "revoke", id, "--socket", sock) // no stdin, no --yes
+	if code != ExitError || !strings.Contains(errOut, "--yes") {
+		t.Errorf("non-interactive revoke: %d %s", code, errOut)
+	}
+	code, _, errOut = run(t, id+"\n", "keys", "revoke", id, "--socket", sock)
+	if code != ExitOK || !strings.Contains(errOut, "Revoked") {
+		t.Fatalf("revoke: %d %s", code, errOut)
+	}
+	if _, err := tcp.Metrics(context.Background()); err == nil {
+		t.Error("revoked key still works")
+	}
+	code, _, errOut = run(t, "", "keys", "rotate", id, "--yes", "--socket", sock)
+	if code != ExitError || !strings.Contains(errOut, "active") {
+		t.Errorf("rotate revoked: %d %s", code, errOut)
+	}
+}
+
+func TestParseExpiry(t *testing.T) {
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	if got, err := parseExpiry("48h", now); err != nil || !got.Equal(now.Add(48*time.Hour)) {
+		t.Errorf("duration: %v %v", got, err)
+	}
+	if got, err := parseExpiry("2027-01-01T00:00:00Z", now); err != nil || got.Year() != 2027 {
+		t.Errorf("rfc3339: %v %v", got, err)
+	}
+	for _, bad := range []string{"-1h", "tomorrow", "0s"} {
+		if _, err := parseExpiry(bad, now); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestKeysUsage(t *testing.T) {
+	if code, _, _ := run(t, "", "keys"); code != ExitUsage {
+		t.Errorf("no subcommand: %d", code)
+	}
+	if code, _, _ := run(t, "", "keys", "explode"); code != ExitUsage {
+		t.Errorf("unknown subcommand: %d", code)
+	}
+	if code, _, _ := run(t, "", "keys", "create", "--socket", "/nonexistent.sock", "--name", "x"); code != ExitUsage {
+		t.Errorf("missing scope: %d", code)
+	}
+}
+
+func TestTUINeedsTerminal(t *testing.T) {
+	env, _, errb := testEnv("/h", nil)
+	if code := Run(context.Background(), []string{"tui"}, env); code != ExitUsage || !strings.Contains(errb.String(), "--once") {
+		t.Errorf("%d %s", code, errb)
+	}
+}
+
+// With no agent running on the default socket, the TUI starts an embedded
+// agent on a private socket, uses it through the API, and stops it on exit.
+func TestTUIEmbeddedAgent(t *testing.T) {
+	home, _ := os.MkdirTemp("", "ckp")
+	defer os.RemoveAll(home)
+	runtime := filepath.Join(home, "rt")
+	if err := os.MkdirAll(runtime, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env, out, errb := testEnv(home, map[string]string{"XDG_RUNTIME_DIR": runtime, "XDG_STATE_HOME": filepath.Join(home, "state")})
+	code := Run(context.Background(), []string{"tui", "--once"}, env)
+	if code != ExitOK {
+		t.Fatalf("exit %d: %s", code, errb)
+	}
+	if !strings.Contains(out.String(), "Cockpit agent") || !strings.Contains(out.String(), "linux.cpu") {
+		t.Errorf("summary:\n%s", out)
+	}
+	state := filepath.Join(home, "state", "cockpit-monitor")
+	if fi, err := os.Stat(filepath.Join(state, "embedded-agent.log")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("embedded log: %v", err)
+	}
+	// The private socket is gone and no TCP listener was opened.
+	entries, _ := os.ReadDir(filepath.Join(runtime, "cockpit-monitor"))
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sock") {
+			t.Errorf("socket left behind: %s", e.Name())
+		}
+	}
+	logs, _ := os.ReadFile(filepath.Join(state, "embedded-agent.log"))
+	if strings.Contains(string(logs), `"tcp":"127.0.0.1`) {
+		t.Error("embedded agent opened a TCP listener")
+	}
+}
+
+func TestTUIExplicitSocketDoesNotEmbed(t *testing.T) {
+	home, _ := os.MkdirTemp("", "ckp")
+	defer os.RemoveAll(home)
+	env, _, errb := testEnv(home, nil)
+	code := Run(context.Background(), []string{"tui", "--once", "--socket", filepath.Join(home, "none.sock")}, env)
+	if code != ExitError || !strings.Contains(errb.String(), "cockpit agent") {
+		t.Errorf("%d %s", code, errb)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "state", "cockpit-monitor")); err == nil {
+		t.Error("an embedded agent was started despite an explicit --socket")
 	}
 }

@@ -14,39 +14,22 @@ fleet dashboards through the API.
 
 ## Status
 
-**Phase 0 (foundation) is implemented.** The agent starts, serves
-`/api/v1/livez`, `/api/v1/openapi.json` and `/api/v1/status` over a Unix
-socket and loopback TCP, and shuts down cleanly. No metrics are collected
-yet; Linux collectors, API keys and the interactive TUI arrive in Phase 1.
-See [ROADMAP](docs/ROADMAP.md).
+**Phase 1 (MVP) is implemented and awaiting review.** On Linux, the agent
+collects CPU, memory (with PSI), filesystems, network, disks, sensors and
+SMART health; runs four health checks; serves the authenticated API; and
+manages API keys. The terminal UI shows Overview, Health, Storage, Network
+and API Access. See [SETUP](docs/SETUP.md) to get started and
+[ROADMAP](docs/ROADMAP.md) for what comes next.
 
-## Development quick start
-
-Requires Go 1.27.4 (pinned in `go.mod`; the `go` command downloads it if
-needed).
+## Quick start
 
 ```sh
-make build                    # builds bin/cockpit
-make check                    # gofmt, vet, staticcheck, race tests, cross-compile
-./bin/cockpit config check    # print effective configuration and paths
-./bin/cockpit agent           # run the agent in the foreground (Ctrl-C to stop)
-./bin/cockpit tui             # in another terminal: placeholder client over the socket
+make build
+./bin/cockpit tui                 # starts an embedded agent if none is running
+./bin/cockpit agent               # or run the agent on its own
+./bin/cockpit keys create --name grafana --scope metrics:read > grafana.key
+curl -H "Authorization: Bearer $(cat grafana.key)" http://127.0.0.1:7878/api/v1/health
 ```
-
-Talking to the agent directly:
-
-```sh
-# Unix socket: local administrator, no key needed
-curl --unix-socket "$XDG_RUNTIME_DIR/cockpit-monitor/agent.sock" http://localhost/api/v1/status
-
-# TCP: always needs an API key (key creation arrives in Phase 1)
-curl http://127.0.0.1:7878/api/v1/livez
-```
-
-User mode keeps state in `~/.local/state/cockpit-monitor/` and the socket in
-`$XDG_RUNTIME_DIR/cockpit-monitor/`. `--mode system` uses
-`/etc/cockpit-monitor/`, `/var/lib/cockpit-monitor/` and
-`/run/cockpit-monitor/`.
 
 ## Product goals
 
@@ -120,5 +103,6 @@ API like any other client.
 - [API contract](docs/API.md)
 - [Security model](docs/SECURITY.md)
 - [Collectors and plugins](docs/PLUGINS.md)
+- [Setup and usage](docs/SETUP.md)
 - [Testing strategy](docs/TESTING.md)
 - [Roadmap](docs/ROADMAP.md)

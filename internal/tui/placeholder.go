@@ -2,9 +2,6 @@
 //
 // It is an API client: it may import only pkg/client, pkg/apiv1 and UI
 // libraries. This is enforced by internal/archtest.
-//
-// Phase 0 provides a plain-text placeholder that proves the TUI reaches the
-// agent through the API. The Bubble Tea interface arrives in Phase 1.
 package tui
 
 import (
@@ -17,8 +14,9 @@ import (
 	"github.com/MichaelYagi/cockpit/pkg/client"
 )
 
-// RunPlaceholder fetches the agent status and prints a summary.
-func RunPlaceholder(ctx context.Context, c *client.Client, w io.Writer) error {
+// PrintSummary fetches the agent status and prints a plain-text summary
+// (cockpit tui --once).
+func PrintSummary(ctx context.Context, c *client.Client, w io.Writer) error {
 	st, err := c.Status(ctx)
 	if err != nil {
 		return err
@@ -27,7 +25,7 @@ func RunPlaceholder(ctx context.Context, c *client.Client, w io.Writer) error {
 	fmt.Fprintf(w, "  machine:  %s\n", st.MachineID)
 	fmt.Fprintf(w, "  uptime:   %s\n", (time.Duration(st.Agent.UptimeSeconds) * time.Second).String())
 	if len(st.Collectors) == 0 {
-		fmt.Fprintln(w, "  collectors: none yet (Linux collectors arrive in Phase 1)")
+		fmt.Fprintln(w, "  collectors: none")
 	}
 	for _, col := range st.Collectors {
 		fmt.Fprintf(w, "  collector %s %s\n", col.ID, col.Version)
@@ -39,7 +37,6 @@ func RunPlaceholder(ctx context.Context, c *client.Client, w io.Writer) error {
 			fmt.Fprintln(w, line)
 		}
 	}
-	fmt.Fprintln(w, "\nThe interactive terminal UI is not implemented yet (Phase 1).")
 	return nil
 }
 

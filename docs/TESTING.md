@@ -15,7 +15,8 @@ reported as passing only after it was actually run.
 | API integration | Handlers + middleware + real engine with fake collectors | `httptest`, over TCP **and** Unix socket |
 | Contract | Server responses and client requests match `api/openapi.yaml` | `kin-openapi` validation (test-only) |
 | Client | `pkg/client` | Against a spec-validating mock server |
-| TUI | Views and layouts | `teatest` golden output at several terminal sizes, against a mock API server |
+| TUI | Model, views and key flows | `Update` driven with messages from a fake API; rendered output checked for content, for fitting 80×24 … 220×60, and for never cutting a panel in half. `teatest` is not used (still an unreleased module) |
+| TUI (manual) | Real terminal | `cockpit tui` run under a pseudo-terminal (`script`) against a live agent; every screen rendered from live data and reviewed at 80×24 and 120×40 |
 | Platform | Real `/proc`, `/sys` | `//go:build linux && integration`; checks invariants only |
 | Architecture | Package boundaries | Test using `go list -deps` |
 
@@ -47,7 +48,9 @@ reported as passing only after it was actually run.
 - Rate limiting → `429` with `Retry-After`.
 - Oversized body, `limit` out of range, malformed timestamps → `400`/`413`.
 - Sensitive fields are omitted and listed in `redacted`.
-- Fuzz tests for key parsing and query parameter parsing.
+- Fuzz tests: `FuzzParsers` (every /proc, /sys and smartctl parser) and
+  `FuzzParseKey`. Run with `go test -fuzz=<name> -fuzztime=30s <pkg>`.
+- Failed authentication from one IP never locks out a valid key.
 - `govulncheck` and `staticcheck` in CI.
 
 ## 4. Platform testing

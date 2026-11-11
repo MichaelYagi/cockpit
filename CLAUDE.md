@@ -65,15 +65,17 @@ Never create system files, units or users named plain `cockpit`.
 ## Technology
 
 - Go **1.27.4**, pinned in `go.mod` (`toolchain` directive) (D10).
-- TUI: Bubble Tea v2 (`charm.land/bubbletea/v2`), Lip Gloss, Bubbles.
+- TUI: Bubble Tea v2 (`charm.land/bubbletea/v2`) and Lip Gloss v2. Bubbles
+  is not used yet (the few widgets needed are small).
 - HTTP: `github.com/go-chi/chi/v5`.
 - API contract: OpenAPI 3.1 in `api/openapi.yaml`, spec-first, hand-written
   types, no codegen; conformance tested with `kin-openapi` (D6).
 - Config: YAML via `go.yaml.in/yaml/v3`, strict decoding.
 - Logging: `log/slog`.
 - Persistence: SQLite via `modernc.org/sqlite`, `CGO_ENABLED=0` (D7).
-- Linux data: `github.com/prometheus/procfs`, direct sysfs reads,
-  `golang.org/x/sys/unix`.
+- Linux data: hand-written parsers for `/proc` and `/sys` (see D13),
+  `golang.org/x/sys/unix` for `statfs`, `smartctl --json` (optional).
+- Rate limiting: `golang.org/x/time/rate`.
 - Streaming: SSE (Phase 2). No WebSocket planned.
 - Service integration: systemd (`cockpit-agent.service`).
 
@@ -115,7 +117,7 @@ internal/
     middleware/              # request ID, recovery, logging, auth, scopes, rate limit, Host check
     handlers/                # thin handlers: decode → service → map → encode
     redact/                  # D9 sensitive-field policy
-  tui/                       # Bubble Tea app: theme/, components/, views/
+  tui/                       # Bubble Tea app: model.go (state, input), view.go, theme.go
 pkg/
   apiv1/                     # public wire types matching the spec
   client/                    # public Go SDK (Unix socket, TCP, TLS)

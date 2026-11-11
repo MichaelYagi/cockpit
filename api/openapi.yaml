@@ -1,19 +1,23 @@
 openapi: 3.1.0
 info:
   title: Cockpit API
-  version: "1.0.0-phase0"
+  version: "1.0.0"
   summary: Read-only machine monitoring API served by the Cockpit agent.
   description: |
     This document is the authoritative contract for the Cockpit API (D6).
 
     Transports:
     - Unix socket: callers are the local administrator; no API key is used.
+      Key management (`/api/v1/keys`) exists only on the socket.
     - TCP: every request except those marked public requires
-      `Authorization: Bearer ckp_...`, including from localhost.
+      `Authorization: Bearer ckp_...`, including from localhost. TCP
+      requests are rate limited.
 
     Every response carries an `X-Request-ID` header. Timestamps are UTC
     RFC 3339. Operations declare their required scope in `x-cockpit-scope`
-    (`public` means no authentication).
+    (`public` means no authentication). Fields marked
+    `x-cockpit-sensitive` are omitted by default and listed in the
+    containing object's `redacted` array (D9).
   license:
     name: TBD
 servers:
@@ -24,6 +28,12 @@ security:
 tags:
   - name: meta
     description: Liveness, specification and agent status.
+  - name: machine
+    description: Machine identity, inventory and live metrics.
+  - name: health
+    description: Health checks, findings and events.
+  - name: keys
+    description: API key management (Unix socket only).
 paths:
   /api/v1/livez:
     get:
@@ -42,7 +52,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Livez" }
               example: { status: ok }
-        "400": { $ref: "#/components/responses/InvalidHost" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/openapi.json:
     get:
@@ -59,17 +70,19 @@ paths:
           content:
             application/json:
               schema: { type: object }
-        "400": { $ref: "#/components/responses/InvalidHost" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/status:
     get:
       operationId: getStatus
       tags: [meta]
       summary: Agent status and collector capabilities
+      description: The `api` object (listeners, request counters, active clients) is included only for the admin principal (Unix socket).
       x-cockpit-scope: system:read
       responses:
         "200":
-          description: Agent status.
+          description: OK
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestID" }
           content:
@@ -85,15 +98,274 @@ paths:
                   started_at: "2026-11-11T15:00:00Z"
                   uptime_seconds: 1800
                 collectors:
-                  - id: unsupported.platform
+                  - id: linux.sensors
                     version: 1.0.0
                     capabilities:
-                      - name: cpu.usage
+                      - name: sensors.thermal
                         status: unsupported
-                        reason: Cockpit has no collectors for windows yet.
-        "400": { $ref: "#/components/responses/InvalidHost" }
+                        reason: No hardware temperature sensors are exposed.
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/system:
+    get:
+      operationId: getSystem
+      tags: [machine]
+      summary: Operating system and host identity
+      x-cockpit-scope: system:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/hardware:
+    get:
+      operationId: getHardware
+      tags: [machine]
+      summary: Hardware inventory
+      x-cockpit-scope: system:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HardwareResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/metrics:
+    get:
+      operationId: getMetrics
+      tags: [machine]
+      summary: Current metrics
+      description: Returns all sections unless `sections` selects a subset.
+      x-cockpit-scope: metrics:read
+      parameters:
+        - name: sections
+          in: query
+          required: false
+          description: Comma-separated list of sections to include.
+          schema:
+            type: string
+            pattern: "^(cpu|memory|memory_pressure|filesystems|network|sensors)(,(cpu|memory|memory_pressure|filesystems|network|sensors))*$"
+          example: cpu,memory
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetricsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/storage:
+    get:
+      operationId: getStorage
+      tags: [machine]
+      summary: Disks, filesystems and disk health
+      x-cockpit-scope: metrics:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StorageResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/network:
+    get:
+      operationId: getNetwork
+      tags: [machine]
+      summary: Network interfaces, counters and rates
+      x-cockpit-scope: metrics:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NetworkResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/sensors:
+    get:
+      operationId: getSensors
+      tags: [health]
+      summary: Temperatures, fans and voltages
+      x-cockpit-scope: metrics:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SensorsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Health checks and active findings
+      x-cockpit-scope: metrics:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      tags: [health]
+      summary: Recent events, newest first
+      description: In-memory log of the most recent events (Phase 1). Use `next_cursor` to page through older events.
+      x-cockpit-scope: metrics:read
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: severity
+          in: query
+          required: false
+          description: Minimum severity.
+          schema: { type: string, enum: [info, warning, critical] }
+        - name: since
+          in: query
+          required: false
+          description: Only events at or after this time (RFC 3339).
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/keys:
+    get:
+      operationId: listKeys
+      tags: [keys]
+      summary: List API keys (metadata only)
+      description: Never returns a key or its hash. Unix socket only.
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/APIKeyList" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      operationId: createKey
+      tags: [keys]
+      summary: Create an API key
+      description: The response contains the full key exactly once. It cannot be retrieved again. Unix socket only.
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateAPIKeyRequest" }
+            example: { name: grafana-bridge, scopes: [metrics:read] }
+      responses:
+        "201":
+          description: Created. Store the key now; it is shown only once.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreatedAPIKey" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/keys/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/KeyID" }
+    delete:
+      operationId: revokeKey
+      tags: [keys]
+      summary: Revoke an API key
+      description: Takes effect on the next request. Revoking a revoked key succeeds. Unix socket only.
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "200":
+          description: Revoked.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/APIKeyResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/keys/{id}/rotate:
+    parameters:
+      - { $ref: "#/components/parameters/KeyID" }
+    post:
+      operationId: rotateKey
+      tags: [keys]
+      summary: Rotate an API key
+      description: Issues a replacement key with the same name, scopes and expiry, and revokes the old key immediately. The new key is shown exactly once. Unix socket only.
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "201":
+          description: Rotated. Store the new key now; it is shown only once.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreatedAPIKey" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
 components:
   securitySchemes:
@@ -106,9 +378,28 @@ components:
       description: Unique ID for this request; also present in error bodies and agent logs.
       required: true
       schema: { type: string, pattern: "^req_[0-9A-HJKMNP-TV-Z]{26}$" }
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size.
+      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous page's `next_cursor`.
+      schema: { type: string, maxLength: 64 }
+    KeyID:
+      name: id
+      in: path
+      required: true
+      description: The key's non-secret ID.
+      schema: { type: string, pattern: "^[a-z2-7]{12}$" }
   responses:
-    InvalidHost:
-      description: The Host header does not name a loopback address (loopback listeners only).
+    BadRequest:
+      description: The request is invalid (unknown or malformed parameter, invalid body, or a non-loopback Host header on a loopback listener).
       headers:
         X-Request-ID: { $ref: "#/components/headers/RequestID" }
       content:
@@ -128,6 +419,30 @@ components:
       description: The API key lacks the required scope.
       headers:
         X-Request-ID: { $ref: "#/components/headers/RequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    NotFound:
+      description: No such resource.
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    TooLarge:
+      description: The request body exceeds 64 KiB.
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    RateLimited:
+      description: Too many requests. Retry after the number of seconds in Retry-After.
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestID" }
+        Retry-After:
+          required: true
+          schema: { type: string, pattern: "^[0-9]+$" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -152,6 +467,10 @@ components:
     Availability:
       type: string
       enum: [available, unsupported, permission_denied, temporarily_unavailable, not_configured]
+    Redacted:
+      type: array
+      description: Names of sensitive fields that exist but were withheld (D9).
+      items: { type: string }
     Livez:
       type: object
       additionalProperties: false
@@ -170,6 +489,7 @@ components:
         collectors:
           type: array
           items: { $ref: "#/components/schemas/Collector" }
+        api: { $ref: "#/components/schemas/APIServerStatus" }
     Agent:
       type: object
       additionalProperties: false
@@ -199,6 +519,603 @@ components:
         reason:
           type: string
           description: Safe, human-readable explanation; present when status is not available.
+    APIServerStatus:
+      type: object
+      additionalProperties: false
+      description: Admin principal only.
+      required: [listeners, requests, active_clients]
+      properties:
+        listeners:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [transport, address, tls]
+            properties:
+              transport: { type: string, enum: [unix, tcp] }
+              address: { type: string }
+              tls: { type: boolean }
+        requests:
+          type: object
+          additionalProperties: false
+          required: [total, status_2xx, status_4xx, status_5xx, auth_failures, rate_limited]
+          properties:
+            total: { type: integer, minimum: 0 }
+            status_2xx: { type: integer, minimum: 0 }
+            status_4xx: { type: integer, minimum: 0 }
+            status_5xx: { type: integer, minimum: 0 }
+            auth_failures: { type: integer, minimum: 0 }
+            rate_limited: { type: integer, minimum: 0 }
+        active_clients:
+          type: integer
+          minimum: 0
+          description: Distinct API keys used in the last 5 minutes.
+    SystemResponse:
+      type: object
+      additionalProperties: false
+      description: GET /system.
+      required: [schema_version, machine_id, generated_at, system]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        system: { $ref: "#/components/schemas/SystemSection" }
+    SystemSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/System"
+            - type: "null"
+    System:
+      type: object
+      additionalProperties: false
+      required: [hostname, os, kernel, architecture, boot_time, uptime_seconds]
+      properties:
+        hostname: { type: string }
+        os:
+          type: object
+          additionalProperties: false
+          required: [id, name, version, pretty_name]
+          properties:
+            id: { type: string, examples: [ubuntu] }
+            name: { type: string }
+            version: { type: string }
+            pretty_name: { type: string }
+        kernel: { type: string }
+        architecture: { type: string, examples: [amd64, arm64] }
+        boot_time: { type: [string, "null"], format: date-time }
+        uptime_seconds: { type: [number, "null"], minimum: 0 }
+    HardwareResponse:
+      type: object
+      additionalProperties: false
+      description: GET /hardware. Each section reports its own availability and source.
+      required: [schema_version, machine_id, generated_at, cpu, memory, block_devices, network_interfaces]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        cpu: { $ref: "#/components/schemas/CPUInventorySection" }
+        memory: { $ref: "#/components/schemas/MemoryInventorySection" }
+        block_devices: { $ref: "#/components/schemas/BlockDevicesSection" }
+        network_interfaces: { $ref: "#/components/schemas/NetworkInterfaceInventorySection" }
+    CPUInventorySection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/CPUInventory"
+            - type: "null"
+    MemoryInventorySection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/MemoryInventory"
+            - type: "null"
+    BlockDevicesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/BlockDevice" }
+            - type: "null"
+    NetworkInterfaceInventorySection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/NetworkInterfaceInventory" }
+            - type: "null"
+    CPUInventory:
+      type: object
+      additionalProperties: false
+      required: [model_name, logical_cores]
+      properties:
+        model_name: { type: string }
+        logical_cores: { type: integer, minimum: 0 }
+    MemoryInventory:
+      type: object
+      additionalProperties: false
+      required: [total_bytes, swap_total_bytes]
+      properties:
+        total_bytes: { type: integer, minimum: 0 }
+        swap_total_bytes: { type: integer, minimum: 0 }
+    BlockDevice:
+      type: object
+      additionalProperties: false
+      required: [name, model, transport, rotational, removable, size_bytes]
+      properties:
+        name: { type: string, examples: [nvme0n1] }
+        model: { type: string }
+        transport: { type: string, enum: [nvme, sata, usb, virtio, xen, mmc, scsi, unknown] }
+        rotational: { type: [boolean, "null"] }
+        removable: { type: boolean }
+        size_bytes: { type: integer, minimum: 0 }
+        serial: { type: string, x-cockpit-sensitive: true }
+        wwn: { type: string, x-cockpit-sensitive: true }
+        redacted: { $ref: "#/components/schemas/Redacted" }
+    NetworkInterfaceInventory:
+      type: object
+      additionalProperties: false
+      required: [name, mtu, loopback, speed_mbps]
+      properties:
+        name: { type: string }
+        mtu: { type: integer, minimum: 0 }
+        loopback: { type: boolean }
+        speed_mbps: { type: [integer, "null"], minimum: 0 }
+        mac_address: { type: string, x-cockpit-sensitive: true }
+        redacted: { $ref: "#/components/schemas/Redacted" }
+    MetricsResponse:
+      type: object
+      additionalProperties: false
+      description: GET /metrics. Sections not selected with `sections` are omitted.
+      required: [schema_version, machine_id, generated_at]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        cpu: { $ref: "#/components/schemas/CPUMetricsSection" }
+        memory: { $ref: "#/components/schemas/MemoryMetricsSection" }
+        memory_pressure: { $ref: "#/components/schemas/MemoryPressureSection" }
+        filesystems: { $ref: "#/components/schemas/FilesystemsSection" }
+        network: { $ref: "#/components/schemas/NetworkInterfacesSection" }
+        sensors: { $ref: "#/components/schemas/SensorsSection" }
+    CPUMetricsSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/CPUMetrics"
+            - type: "null"
+    MemoryMetricsSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/MemoryMetrics"
+            - type: "null"
+    MemoryPressureSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/MemoryPressure"
+            - type: "null"
+    FilesystemsSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/Filesystem" }
+            - type: "null"
+    NetworkInterfacesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/NetworkInterface" }
+            - type: "null"
+    SensorsSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/Sensor" }
+            - type: "null"
+    DiskHealthSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string, description: "Where the data comes from, e.g. procfs." }
+        reason: { type: string, description: Safe explanation when status is not available. }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/DiskHealth" }
+            - type: "null"
+    CPUMetrics:
+      type: object
+      additionalProperties: false
+      required: [usage_percent, per_core_usage_percent, window_seconds, logical_cores, load_average]
+      properties:
+        usage_percent:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+          description: Busy time over window_seconds. Null until two samples exist.
+        per_core_usage_percent:
+          type: [array, "null"]
+          items: { type: number, minimum: 0, maximum: 100 }
+        window_seconds: { type: number, minimum: 0 }
+        logical_cores: { type: integer, minimum: 0 }
+        load_average:
+          description: Linux and macOS only; null elsewhere.
+          anyOf:
+            - $ref: "#/components/schemas/LoadAverage"
+            - type: "null"
+    LoadAverage:
+      type: object
+      additionalProperties: false
+      required: [1m, 5m, 15m]
+      properties:
+        1m: { type: number, minimum: 0 }
+        5m: { type: number, minimum: 0 }
+        15m: { type: number, minimum: 0 }
+    MemoryMetrics:
+      type: object
+      additionalProperties: false
+      required: [total_bytes, available_bytes, used_bytes, used_percent, free_bytes, buffers_bytes, cached_bytes, swap_total_bytes, swap_used_bytes, swap_used_percent]
+      properties:
+        total_bytes: { type: integer, minimum: 0 }
+        available_bytes: { type: integer, minimum: 0 }
+        used_bytes: { type: integer, minimum: 0 }
+        used_percent: { type: number, minimum: 0, maximum: 100 }
+        free_bytes: { type: integer, minimum: 0 }
+        buffers_bytes: { type: integer, minimum: 0 }
+        cached_bytes: { type: integer, minimum: 0 }
+        swap_total_bytes: { type: integer, minimum: 0 }
+        swap_used_bytes: { type: integer, minimum: 0 }
+        swap_used_percent: { type: number, minimum: 0, maximum: 100 }
+    MemoryPressure:
+      type: object
+      additionalProperties: false
+      description: Linux pressure stall information (PSI) for memory, in percent of wall time.
+      required: [some_avg10_percent, some_avg60_percent, some_avg300_percent, full_avg10_percent, full_avg60_percent, full_avg300_percent]
+      properties:
+        some_avg10_percent: { type: number, minimum: 0 }
+        some_avg60_percent: { type: number, minimum: 0 }
+        some_avg300_percent: { type: number, minimum: 0 }
+        full_avg10_percent: { type: number, minimum: 0 }
+        full_avg60_percent: { type: number, minimum: 0 }
+        full_avg300_percent: { type: number, minimum: 0 }
+    Filesystem:
+      type: object
+      additionalProperties: false
+      required: [mount_point, device, type, read_only, total_bytes, used_bytes, available_bytes, used_percent, inodes_total, inodes_free, inodes_used_percent]
+      properties:
+        mount_point: { type: string }
+        device: { type: string }
+        type: { type: string, examples: [ext4] }
+        read_only: { type: boolean }
+        total_bytes: { type: integer, minimum: 0 }
+        used_bytes: { type: integer, minimum: 0 }
+        available_bytes: { type: integer, minimum: 0, description: Available to unprivileged users. }
+        used_percent: { type: number, minimum: 0, maximum: 100, description: "used / (used + available), like df." }
+        inodes_total: { type: integer, minimum: 0 }
+        inodes_free: { type: integer, minimum: 0 }
+        inodes_used_percent: { type: [number, "null"], minimum: 0, maximum: 100 }
+    NetworkInterface:
+      type: object
+      additionalProperties: false
+      required: [name, oper_state, loopback, mtu, speed_mbps, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_errors, tx_errors, rx_dropped, tx_dropped, rx_bytes_per_second, tx_bytes_per_second, rate_window_seconds]
+      properties:
+        name: { type: string }
+        oper_state: { type: string, examples: [up, down, unknown] }
+        loopback: { type: boolean }
+        mtu: { type: integer, minimum: 0 }
+        speed_mbps: { type: [integer, "null"], minimum: 0 }
+        rx_bytes: { type: integer, minimum: 0 }
+        tx_bytes: { type: integer, minimum: 0 }
+        rx_packets: { type: integer, minimum: 0 }
+        tx_packets: { type: integer, minimum: 0 }
+        rx_errors: { type: integer, minimum: 0 }
+        tx_errors: { type: integer, minimum: 0 }
+        rx_dropped: { type: integer, minimum: 0 }
+        tx_dropped: { type: integer, minimum: 0 }
+        rx_bytes_per_second:
+          type: [number, "null"]
+          minimum: 0
+          description: Null until two samples exist or after a counter reset.
+        tx_bytes_per_second: { type: [number, "null"], minimum: 0 }
+        rate_window_seconds: { type: number, minimum: 0 }
+        mac_address: { type: string, x-cockpit-sensitive: true }
+        redacted: { $ref: "#/components/schemas/Redacted" }
+    Sensor:
+      type: object
+      additionalProperties: false
+      required: [kind, chip, label, value, unit, high, critical, source, cpu]
+      properties:
+        kind: { type: string, enum: [temperature, fan, voltage] }
+        chip: { type: string, examples: [coretemp] }
+        label: { type: string }
+        value: { type: number }
+        unit: { type: string, enum: [celsius, rpm, volts] }
+        high: { type: [number, "null"], description: Hardware warning threshold. }
+        critical: { type: [number, "null"], description: Hardware critical threshold. }
+        source: { type: string, enum: [hwmon, thermal_zone] }
+        cpu: { type: boolean, description: The sensor measures the CPU. }
+    DiskHealth:
+      type: object
+      additionalProperties: false
+      required: [device, protocol, smart_passed, temperature_celsius, power_on_hours, percentage_used, critical_warning, reallocated_sectors, pending_sectors, media_errors]
+      properties:
+        device: { type: string }
+        protocol: { type: string, examples: [NVMe, ATA] }
+        smart_passed: { type: [boolean, "null"] }
+        temperature_celsius: { type: [number, "null"] }
+        power_on_hours: { type: [integer, "null"], minimum: 0 }
+        percentage_used: { type: [integer, "null"], minimum: 0, description: NVMe rated endurance used. }
+        critical_warning: { type: [integer, "null"], minimum: 0 }
+        reallocated_sectors: { type: [integer, "null"], minimum: 0 }
+        pending_sectors: { type: [integer, "null"], minimum: 0 }
+        media_errors: { type: [integer, "null"], minimum: 0 }
+    StorageResponse:
+      type: object
+      additionalProperties: false
+      description: GET /storage.
+      required: [schema_version, machine_id, generated_at, block_devices, filesystems, disk_health]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        block_devices: { $ref: "#/components/schemas/BlockDevicesSection" }
+        filesystems: { $ref: "#/components/schemas/FilesystemsSection" }
+        disk_health: { $ref: "#/components/schemas/DiskHealthSection" }
+    NetworkResponse:
+      type: object
+      additionalProperties: false
+      description: GET /network.
+      required: [schema_version, machine_id, generated_at, interfaces]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        interfaces: { $ref: "#/components/schemas/NetworkInterfacesSection" }
+    SensorsResponse:
+      type: object
+      additionalProperties: false
+      description: GET /sensors.
+      required: [schema_version, machine_id, generated_at, sensors]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        sensors: { $ref: "#/components/schemas/SensorsSection" }
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      description: GET /health. Overall status is the worst known check; unknown when no check could run.
+      required: [schema_version, machine_id, generated_at, status, evaluated_at, checks]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        status: { $ref: "#/components/schemas/HealthStatus" }
+        evaluated_at: { $ref: "#/components/schemas/Timestamp" }
+        checks: { type: array, items: { $ref: "#/components/schemas/HealthCheck" } }
+    HealthStatus:
+      type: string
+      enum: [ok, warning, critical, unknown]
+    HealthCheck:
+      type: object
+      additionalProperties: false
+      required: [id, name, status, availability, findings]
+      properties:
+        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health] }
+        name: { type: string }
+        status: { $ref: "#/components/schemas/HealthStatus" }
+        availability:
+          description: Availability of the data the check needs. When not available, status is unknown and reason explains why.
+          $ref: "#/components/schemas/Availability"
+        reason: { type: string }
+        summary: { type: string }
+        findings:
+          type: array
+          items: { $ref: "#/components/schemas/Finding" }
+    Finding:
+      type: object
+      additionalProperties: false
+      required: [id, check, severity, subject, summary, evidence, recommendation, since]
+      properties:
+        id: { type: string, pattern: "^fnd_[0-9a-f]{16}$" }
+        check: { type: string }
+        severity: { type: string, enum: [warning, critical] }
+        subject: { type: string, examples: ["filesystem:/home"] }
+        summary: { type: string }
+        evidence:
+          type: object
+          additionalProperties: { type: string }
+        recommendation: { type: string }
+        since: { $ref: "#/components/schemas/Timestamp" }
+    EventsResponse:
+      type: object
+      additionalProperties: false
+      description: GET /events.
+      required: [schema_version, machine_id, generated_at, items, next_cursor]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        items: { type: array, items: { $ref: "#/components/schemas/Event" } }
+        next_cursor: { type: [string, "null"], description: Pass as cursor to get older events; null when there are no more. }
+    Event:
+      type: object
+      additionalProperties: false
+      required: [id, time, type, severity, subject, message]
+      properties:
+        id: { type: string, pattern: "^evt_[0-9A-HJKMNP-TV-Z]{26}$" }
+        time: { $ref: "#/components/schemas/Timestamp" }
+        type:
+          type: string
+          enum: [finding.raised, finding.resolved, collector.degraded, key.created, key.rotated, key.revoked]
+        severity: { type: string, enum: [info, warning, critical] }
+        subject: { type: string }
+        message: { type: string }
+    Scope:
+      type: string
+      enum: [system:read, metrics:read, admin]
+    APIKey:
+      type: object
+      additionalProperties: false
+      description: Key metadata. Never contains the key or its hash.
+      required: [id, name, display, scopes, active, created_at, expires_at, last_used_at, revoked_at, rotated_from]
+      properties:
+        id: { type: string, pattern: "^[a-z2-7]{12}$" }
+        name: { type: string }
+        display: { type: string, description: "Masked form, e.g. ckp_k3p9x2m7q4ta_…" }
+        scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
+        active: { type: boolean }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        expires_at: { type: [string, "null"], format: date-time }
+        last_used_at:
+          type: [string, "null"]
+          format: date-time
+          description: May lag by up to about 30 seconds.
+        revoked_at: { type: [string, "null"], format: date-time }
+        rotated_from: { type: [string, "null"] }
+    APIKeyList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/APIKey" } }
+    CreateAPIKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name, scopes]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        scopes:
+          type: array
+          minItems: 1
+          description: Phase 1 keys may hold system:read and metrics:read only.
+          items: { type: string, enum: [system:read, metrics:read] }
+        expires_at: { type: string, format: date-time }
+    CreatedAPIKey:
+      type: object
+      additionalProperties: false
+      required: [key, api_key]
+      properties:
+        key:
+          type: string
+          pattern: "^ckp_[a-z2-7]{12}_[0-9A-Za-z]{43}$"
+          description: The full key. Shown exactly once.
+        api_key: { $ref: "#/components/schemas/APIKey" }
+    APIKeyResponse:
+      type: object
+      additionalProperties: false
+      required: [api_key]
+      properties:
+        api_key: { $ref: "#/components/schemas/APIKey" }
     ErrorEnvelope:
       type: object
       additionalProperties: false
@@ -213,6 +1130,8 @@ components:
               type: string
               enum:
                 - invalid_request
+                - invalid_parameter
+                - invalid_cursor
                 - invalid_host
                 - authentication_required
                 - invalid_credentials
@@ -220,6 +1139,7 @@ components:
                 - not_found
                 - method_not_allowed
                 - request_too_large
+                - rate_limited
                 - internal_error
             message: { type: string }
             request_id: { type: string }

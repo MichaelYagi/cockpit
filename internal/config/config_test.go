@@ -281,3 +281,28 @@ func TestMarshalRoundTrip(t *testing.T) {
 		t.Errorf("marshalled defaults do not load: %v", err)
 	}
 }
+
+func TestHealthAndRateLimitValidation(t *testing.T) {
+	file := write(t, `
+health:
+  confirm: 0
+  storage: {warn_percent: 95, critical_percent: 90}
+  memory: {warn_available_percent: 5, critical_available_percent: 10}
+api:
+  rate_limit: {per_key_rps: 500, per_key_burst: 1, global_rps: 100, global_burst: 1}
+`)
+	_, err := Load(Source{ConfigPath: file, Env: envMap(nil)})
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("got %v", err)
+	}
+	got := map[string]bool{}
+	for _, fe := range ve.Errors {
+		got[fe.Field] = true
+	}
+	for _, f := range []string{"health.confirm", "health.storage", "health.memory.available_percent", "api.rate_limit.per_key_rps"} {
+		if !got[f] {
+			t.Errorf("missing %s in %v", f, ve.Errors)
+		}
+	}
+}

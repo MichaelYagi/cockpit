@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/app"
 	"github.com/MichaelYagi/cockpit/internal/buildinfo"
@@ -27,6 +28,8 @@ const (
 
 // Env abstracts the process environment for testing.
 type Env struct {
+	Stdin          io.Reader // nil: non-interactive
+	Interactive    bool      // stdin and stdout are terminals
 	Stdout, Stderr io.Writer
 	LookupEnv      func(string) (string, bool)
 	Environ        []string
@@ -36,7 +39,8 @@ type Env struct {
 // OSEnv returns the real process environment.
 func OSEnv() Env {
 	home, _ := os.UserHomeDir()
-	return Env{Stdout: os.Stdout, Stderr: os.Stderr, LookupEnv: os.LookupEnv, Environ: os.Environ(), Home: home}
+	return Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, LookupEnv: os.LookupEnv, Environ: os.Environ(), Home: home,
+		Interactive: isTerminal(os.Stdin) && isTerminal(os.Stdout)}
 }
 
 const usage = `Cockpit: API-first machine monitoring.
@@ -47,6 +51,7 @@ Usage:
 Commands:
   agent          Run the monitoring agent and API server
   tui            Open the terminal UI (connects to a running agent)
+  keys           Create, list, rotate and revoke API keys (local admin)
   config check   Validate configuration and print the effective settings
   version        Print version information
   help           Show this help
@@ -66,6 +71,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return runAgent(ctx, rest, env)
 	case "tui":
 		return runTUI(ctx, rest, env)
+	case "keys":
+		return runKeys(ctx, rest, env)
 	case "config":
 		if len(rest) == 0 || rest[0] != "check" {
 			fmt.Fprintln(env.Stderr, `usage: cockpit config check [flags]`)
@@ -230,10 +237,27 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 	fs.SetOutput(env.Stderr)
 	mode := fs.String("mode", "", `"user" or "system" (selects the default socket)`)
 	cfgPath := fs.String("config", "", "configuration file")
-	socket := fs.String("socket", "", "agent Unix socket path")
+	socket := fs.String("socket", "", "agent Unix socket path (no embedded agent is started when set)")
 	apiURL := fs.String("url", "", "agent URL for TCP access, e.g. http://127.0.0.1:7878 (env COCKPIT_API_URL); the key is read from COCKPIT_API_KEY")
+	once := fs.Bool("once", false, "print a text summary and exit instead of starting the interactive UI")
+	refresh := fs.Duration("refresh", 0, "refresh interval (default from configuration, 1s)")
+	noEmbed := fs.Bool("no-embedded-agent", false, "fail instead of starting an embedded agent when none is running")
 	if ok, code := parse(fs, args); !ok {
 		return code
+	}
+	if !*once && !env.Interactive {
+		fmt.Fprintln(env.Stderr, "cockpit tui needs an interactive terminal. Use --once for a text summary.")
+		return ExitUsage
+	}
+
+	res, err := config.Load(config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home})
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return ExitError
+	}
+	interval := res.Config.TUI.Refresh
+	if *refresh > 0 {
+		interval = *refresh
 	}
 
 	c, target, err := connect(env, *mode, *cfgPath, *socket, *apiURL)
@@ -243,14 +267,45 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 	}
 	defer c.Close()
 
-	if err := tui.RunPlaceholder(ctx, c, env.Stdout); err != nil {
-		fmt.Fprintf(env.Stderr, "cannot reach the Cockpit agent at %s: %v\n", target, err)
-		if strings.Contains(err.Error(), "no such file") || strings.Contains(err.Error(), "connection refused") {
-			fmt.Fprintln(env.Stderr, "Is the agent running? Start it with: cockpit agent")
+	// No agent on the default socket: run one in-process for this session
+	// (D2). Only the default socket qualifies; an explicit --socket or
+	// --url means the user expects that agent to exist.
+	if *socket == "" && *apiURL == "" && !hasEnv(env, config.EnvAPIURL) && !reachable(ctx, c) && !*noEmbed {
+		emb, err := startEmbedded(ctx, res, env)
+		if err != nil {
+			fmt.Fprintln(env.Stderr, "No agent is running and an embedded agent could not be started:", err)
+			return ExitError
 		}
+		defer emb.stop()
+		c.Close()
+		c, target = emb.client, "embedded agent (this session only)"
+		defer c.Close()
+	}
+
+	if *once {
+		if err := tui.PrintSummary(ctx, c, env.Stdout); err != nil {
+			fmt.Fprintln(env.Stderr, "error:", explain(err, target))
+			return ExitError
+		}
+		return ExitOK
+	}
+	if err := tui.Run(ctx, c, tui.RunOptions{Options: tui.Options{Target: target, Refresh: interval}}); err != nil {
+		fmt.Fprintln(env.Stderr, "error:", err)
 		return ExitError
 	}
 	return ExitOK
+}
+
+func hasEnv(env Env, name string) bool {
+	v, ok := env.LookupEnv(name)
+	return ok && v != ""
+}
+
+// reachable reports whether the agent answers on c.
+func reachable(ctx context.Context, c *client.Client) bool {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return c.Livez(ctx) == nil
 }
 
 // connect chooses TCP when a URL is given, otherwise the Unix socket. API
@@ -270,6 +325,12 @@ func connect(env Env, mode, cfgPath, socket, apiURL string) (*client.Client, str
 		c, err := client.NewTCP(apiURL, key)
 		return c, apiURL, err
 	}
+	return connectSocket(env, mode, cfgPath, socket)
+}
+
+// connectSocket connects to the agent's admin socket, resolving the
+// default path from configuration when socket is empty.
+func connectSocket(env Env, mode, cfgPath, socket string) (*client.Client, string, error) {
 	if socket == "" {
 		res, err := config.Load(config.Source{Mode: config.Mode(mode), ConfigPath: cfgPath, Env: env.LookupEnv, Home: env.Home})
 		if err != nil {
@@ -279,4 +340,10 @@ func connect(env Env, mode, cfgPath, socket, apiURL string) (*client.Client, str
 	}
 	c, err := client.NewUnix(socket)
 	return c, socket, err
+}
+
+// isTerminal reports whether f is a character device (a terminal).
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

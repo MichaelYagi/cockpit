@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/api/httpx"
+	"github.com/MichaelYagi/cockpit/internal/auth"
 	"github.com/MichaelYagi/cockpit/internal/buildinfo"
 	"github.com/MichaelYagi/cockpit/internal/core"
 	"github.com/MichaelYagi/cockpit/pkg/apiv1"
@@ -35,9 +36,16 @@ func OpenAPI(specJSON []byte) http.HandlerFunc {
 	}
 }
 
+// AdminStatus provides the admin-only part of /status.
+type AdminStatus func() *apiv1.APIServerStatus
+
 // Status reports the agent version, uptime and collector capabilities.
-func Status(src StatusSource, now func() time.Time) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+// Admin principals (the local socket) also get listener and request data.
+func Status(src StatusSource, admin AdminStatus, now func() time.Time) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !allowParams(w, r) {
+			return
+		}
 		t := now().UTC()
 		started := src.StartedAt().UTC()
 		out := apiv1.Status{
@@ -53,6 +61,9 @@ func Status(src StatusSource, now func() time.Time) http.HandlerFunc {
 				UptimeSeconds: t.Sub(started).Seconds(),
 			},
 			Collectors: mapCollectors(src.Collectors()),
+		}
+		if p, ok := auth.PrincipalFrom(r.Context()); ok && p.Has(auth.ScopeAdmin) && admin != nil {
+			out.API = admin()
 		}
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}

@@ -13,10 +13,13 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	openapi "github.com/MichaelYagi/cockpit/api"
 	"github.com/MichaelYagi/cockpit/internal/api"
+	"github.com/MichaelYagi/cockpit/internal/api/middleware"
 	"github.com/MichaelYagi/cockpit/internal/api/server"
 	"github.com/MichaelYagi/cockpit/internal/auth"
 	"github.com/MichaelYagi/cockpit/internal/buildinfo"
@@ -24,8 +27,12 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/config"
 	"github.com/MichaelYagi/cockpit/internal/core"
 	"github.com/MichaelYagi/cockpit/internal/engine"
+	"github.com/MichaelYagi/cockpit/internal/events"
+	"github.com/MichaelYagi/cockpit/internal/health"
 	"github.com/MichaelYagi/cockpit/internal/netaddr"
 	"github.com/MichaelYagi/cockpit/internal/platform"
+	"github.com/MichaelYagi/cockpit/internal/storage/sqlite"
+	"github.com/MichaelYagi/cockpit/pkg/apiv1"
 )
 
 // Options configure an agent run.
@@ -36,7 +43,8 @@ type Options struct {
 
 	// Collectors builds the collector set; defaults to the platform's.
 	Collectors func(collector.Env) []collector.Collector
-	// Verifier checks API keys; defaults to rejecting all (Phase 0).
+	// Verifier overrides API key verification (tests). Defaults to the
+	// SQLite-backed key service.
 	Verifier auth.Verifier
 	// OnReady is called once all listeners are open.
 	OnReady func(server.Endpoints)
@@ -59,9 +67,6 @@ func modes(m config.Mode) (stateDir, runtimeDir, socket fs.FileMode) {
 func Run(ctx context.Context, o Options) (err error) {
 	if o.Now == nil {
 		o.Now = time.Now
-	}
-	if o.Verifier == nil {
-		o.Verifier = auth.RejectAll{}
 	}
 	if o.Collectors == nil {
 		o.Collectors = platform.Collectors
@@ -104,22 +109,72 @@ func Run(ctx context.Context, o Options) (err error) {
 		return err
 	}
 
-	// 2. Collectors and engine.
+	// Background goroutines (health, key flusher) stop before storage closes.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	var bg sync.WaitGroup
+	stopBackground := func(context.Context) error { bgCancel(); bg.Wait(); return nil }
+
+	// 2. Storage, keys and events.
+	db, err := sqlite.Open(ctx, filepath.Join(paths.StateDir, "cockpit.db"))
+	if err != nil {
+		return fmt.Errorf("database: %w", err)
+	}
+	cleanup = append(cleanup, func(context.Context) error { return db.Close() })
+	eventLog := events.NewLog(events.DefaultCapacity, o.Now)
+	publish := func(e core.Event) { eventLog.Publish(e) }
+	keys := auth.NewService(db, auth.ServiceOptions{Now: o.Now, Logger: log.With("component", "auth"), OnEvent: publish})
+	verifier := o.Verifier
+	if verifier == nil {
+		verifier = keys
+	}
+	cleanup = append(cleanup, stopBackground) // runs before db.Close
+	bg.Add(1)
+	go func() { defer bg.Done(); keys.RunFlusher(bgCtx, 30*time.Second) }()
+
+	// 3. Collectors and engine.
 	env := collector.DefaultEnv(log.With("component", "collector"), pathTools{})
-	eng, err := engine.New(o.Collectors(env), log.With("component", "engine"))
+	eng, err := engine.New(o.Collectors(env), engine.Options{
+		Logger:   log.With("component", "engine"),
+		Now:      o.Now,
+		Settings: CollectorSettings(cfg.Collection),
+	})
 	if err != nil {
 		return fmt.Errorf("collectors: %w", err)
 	}
 	cleanup = append(cleanup, eng.Close)
 	eng.Start(ctx)
 
-	// 3. API listeners.
+	evaluator := health.New(eng, health.Options{
+		Thresholds: Thresholds(cfg.Health),
+		Confirm:    cfg.Health.Confirm,
+		Now:        o.Now,
+		Logger:     log.With("component", "health"),
+		Publish:    publish,
+	})
+	bg.Add(1)
+	go func() { defer bg.Done(); evaluator.Run(bgCtx, cfg.Health.Interval) }()
+
+	// 4. API listeners.
 	specJSON, err := openapi.JSON()
 	if err != nil {
 		return err
 	}
 	status := &statusSource{machineID: machineID, startedAt: o.Now().UTC(), engine: eng}
-	deps := api.Deps{Logger: log.With("component", "api"), Verifier: o.Verifier, Status: status, SpecJSON: specJSON, Now: o.Now}
+	var listeners atomic.Pointer[[]apiv1.Listener]
+	deps := api.Deps{
+		Logger: log.With("component", "api"), Verifier: verifier, Status: status, SpecJSON: specJSON, Now: o.Now,
+		Snapshots: eng, Health: evaluator, Events: eventLog, Keys: keys,
+		Stats: middleware.NewStats(o.Now),
+		Listeners: func() []apiv1.Listener {
+			if l := listeners.Load(); l != nil {
+				return *l
+			}
+			return []apiv1.Listener{}
+		},
+	}
+	rl := cfg.API.RateLimit
+	limits := middleware.NewLimits(middleware.LimitConfig{PerKeyRPS: rl.PerKeyRPS, PerKeyBurst: rl.PerKeyBurst,
+		GlobalRPS: rl.GlobalRPS, GlobalBurst: rl.GlobalBurst})
 
 	srvCfg := server.Config{
 		Socket: server.SocketConfig{Enabled: cfg.API.Socket.Enabled, Path: paths.SocketPath, Mode: socketMode},
@@ -136,7 +191,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		}
 	}
 	if cfg.API.TCP.Enabled {
-		if tcpH, err = api.NewRouter(deps, api.Options{Listener: api.ListenerTCP, CheckLoopbackHost: isLoopback(cfg.API.TCP.Address)}); err != nil {
+		if tcpH, err = api.NewRouter(deps, api.Options{Listener: api.ListenerTCP, CheckLoopbackHost: isLoopback(cfg.API.TCP.Address), Limits: limits}); err != nil {
 			return err
 		}
 	}
@@ -146,6 +201,14 @@ func Run(ctx context.Context, o Options) (err error) {
 		return err
 	}
 	cleanup = append(cleanup, srv.Shutdown)
+	var open []apiv1.Listener
+	if ep.SocketPath != "" {
+		open = append(open, apiv1.Listener{Transport: "unix", Address: ep.SocketPath})
+	}
+	if ep.TCPAddress != "" {
+		open = append(open, apiv1.Listener{Transport: "tcp", Address: ep.TCPAddress, TLS: ep.TCPTLS})
+	}
+	listeners.Store(&open)
 
 	log.Info("agent started",
 		"version", buildinfo.Version,
@@ -200,4 +263,42 @@ func (pathTools) Find(name string) (string, bool) {
 	}
 	abs, err := filepath.Abs(p)
 	return abs, err == nil
+}
+
+// CollectorSettings resolves the effective schedule for a collector.
+// collection.defaults applies to samplers; inventory collectors keep their
+// own (much longer) defaults. A per-collector override always wins.
+func CollectorSettings(c config.Collection) func(collector.Descriptor) engine.Settings {
+	return func(d collector.Descriptor) engine.Settings {
+		s := engine.Settings{Enabled: true, Interval: d.DefaultInterval, Timeout: d.DefaultTimeout}
+		if d.Class == collector.Sampler {
+			s.Interval, s.Timeout = c.Defaults.Interval, c.Defaults.Timeout
+		}
+		if o, ok := c.Collectors[d.ID]; ok {
+			if o.Enabled != nil {
+				s.Enabled = *o.Enabled
+			}
+			if o.Interval > 0 {
+				s.Interval = o.Interval
+			}
+			if o.Timeout > 0 {
+				s.Timeout = o.Timeout
+			}
+		}
+		if s.Interval > 0 && s.Timeout > s.Interval {
+			s.Timeout = s.Interval
+		}
+		return s
+	}
+}
+
+// Thresholds maps configuration to health check thresholds.
+func Thresholds(h config.Health) health.Thresholds {
+	return health.Thresholds{
+		CPUWarnCelsius: h.CPUTemperature.WarnCelsius, CPUCriticalCelsius: h.CPUTemperature.CriticalCelsius,
+		MemWarnAvailablePct: h.Memory.WarnAvailablePercent, MemCriticalAvailablePct: h.Memory.CriticalAvailablePercent,
+		MemWarnPressurePct: h.Memory.WarnPressurePercent, MemCriticalPressurePct: h.Memory.CriticalPressurePercent,
+		StorageWarnPct: h.Storage.WarnPercent, StorageCriticalPct: h.Storage.CriticalPercent,
+		DiskWarnPercentageUsed: h.Disk.WarnPercentageUsed,
+	}
 }
