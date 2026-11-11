@@ -1093,3 +1093,15 @@ func TestNoZFSOrPowerBoxesWithoutData(t *testing.T) {
 		t.Error("zfs box without pools")
 	}
 }
+
+func TestIntelGPULines(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 140, 60)
+	m.metrics.GPU = &apiv1.Section[[]apiv1.GPU]{Status: "available", Data: &[]apiv1.GPU{{Name: "Intel Arc A380", Driver: "i915", MetricsSource: "i915",
+		FrequencyMHz: ptr(1200.0), MaxFrequencyMHz: ptr(2450.0), PowerWatts: ptr(14.0)}}}
+	out := strings.Join(m.gpuLines(60), "\n")
+	for _, want := range []string{"Intel Arc A380", "1200 MHz of 2450", "14 W", "needs perf access"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+}

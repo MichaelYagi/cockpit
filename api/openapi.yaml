@@ -1153,7 +1153,7 @@ components:
     GPU:
       type: object
       additionalProperties: false
-      required: [vendor, name, pci_address, driver, driver_version, memory_total_bytes, memory_used_bytes, utilization_percent, temperature_celsius, power_watts, power_limit_watts, fan_percent, metrics_source]
+      required: [vendor, name, pci_address, driver, driver_version, memory_total_bytes, memory_used_bytes, utilization_percent, temperature_celsius, power_watts, power_limit_watts, fan_percent, frequency_mhz, max_frequency_mhz, metrics_source]
       properties:
         vendor: { type: string, examples: [NVIDIA, AMD, Intel] }
         name: { type: string }
@@ -1167,7 +1167,9 @@ components:
         power_watts: { type: [number, "null"], minimum: 0 }
         power_limit_watts: { type: [number, "null"], minimum: 0 }
         fan_percent: { type: [number, "null"], minimum: 0 }
-        metrics_source: { type: string, enum: ["", nvidia-smi, amdgpu] }
+        frequency_mhz: { type: [number, "null"], minimum: 0, description: Current GPU clock (Intel i915/xe). }
+        max_frequency_mhz: { type: [number, "null"], minimum: 0 }
+        metrics_source: { type: string, enum: ["", nvidia-smi, amdgpu, i915, xe] }
         uuid: { type: string, x-cockpit-sensitive: true }
         redacted: { $ref: "#/components/schemas/Redacted" }
     MemoryInventory:

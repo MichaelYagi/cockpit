@@ -138,7 +138,7 @@ adjust thresholds, and exports a redacted diagnostic report.
 | 4D ✓ | Example extension: a collector in its own module under `examples/collector/` (open file handles and entropy, from `/proc/sys`), built with `custom.Main` in CI and tested end to end | 4C |
 | 4E ✓ | Containers (D24): `linux.containers` from cgroup v2, `GET /containers` (`processes:read`), a Containers view in the Processes screen, history series for the busiest containers | — |
 | 4F ✓ | ZFS, batteries and UPS (D25): `linux.zfs`, `linux.power`, `linux.ups` (opt-in), health checks for pools and UPS, Storage and Overview additions | — |
-| 4G | More GPU metrics: Intel (`i915`/`xe`) frequency and power from sysfs; utilization reported unavailable where it needs perf privileges (extends D16) | — |
+| 4G ✓ | More GPU metrics: Intel (`i915`/`xe`) frequency and power from sysfs; utilization reported unavailable where it needs perf privileges (extends D16) | — |
 | 4H | SDKs and releases (D26): `pkg/client` examples as Go example tests, stability policy, `CHANGELOG.md`, Python and TypeScript examples (no dependencies) run in CI against a live agent, release workflow with checksums, tag `v0.4.0` | 4C |
 | 4I | Docs, spec and security review; check the extension trust model and the new data for sensitive fields | all |
 

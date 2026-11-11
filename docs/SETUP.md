@@ -259,7 +259,8 @@ Unavailable data is reported with a reason, never as an error:
 | Disk health | Permission denied | Reading SMART data needs raw device access; in system mode enable the SMART helper (see System service) |
 | Disk health | Results more than 3 hours old | The SMART helper stopped running: `systemctl status cockpit-smart.timer` |
 | Memory pressure | Kernel without PSI (before 4.20, or `psi=0`) | Memory utilization is still checked |
-| GPU metrics | `nvidia-smi` not installed (NVIDIA) or no metrics source (e.g. Intel) | Install the NVIDIA driver utilities; the GPU is still listed |
+| GPU metrics | `nvidia-smi` not installed (NVIDIA) or no metrics source | Install the NVIDIA driver utilities; the GPU is still listed |
+| GPU busy % (Intel) | Needs perf events | Frequency and power are shown instead; busy % is not available to an unprivileged agent |
 | Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
 | Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
 | Services | Not running systemd | Nothing; other features still work |

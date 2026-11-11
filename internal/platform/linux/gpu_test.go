@@ -4,7 +4,10 @@ package linux
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/core"
 )
@@ -126,4 +129,47 @@ func TestIntelGPUWithoutMetrics(t *testing.T) {
 	r := c.Collect(context.Background())
 	wantStatus(t, r, core.CapGPUDevices, core.Available)
 	wantStatus(t, r, core.CapGPUMetrics, core.Unsupported)
+}
+
+func TestGPUIntelI915(t *testing.T) {
+	d := "sys/bus/pci/devices/0000:00:02.0"
+	files := merge(pciDev("0000:00:02.0", "0x8086", "0x030000", "i915"), map[string]string{
+		d + "/drm/card1/gt_cur_freq_mhz":  "350\n",
+		d + "/drm/card1/gt_RP0_freq_mhz":  "1300\n",
+		d + "/drm/renderD128/dev":         "226:128\n",
+		d + "/hwmon/hwmon5/energy1_input": "1000000\n",
+		d + "/hwmon/hwmon5/power1_max":    "25000000\n",
+	})
+	c, _ := gpuEnv(t, files, false)
+	root := c.env.SysRoot[:len(c.env.SysRoot)-len("/sys")]
+	now := c.env.Now()
+	c.env.Now = func() time.Time { return now }
+	g := record[core.GPUs](t, c.Collect(context.Background()))[0]
+	if g.Vendor != "Intel" || *g.FrequencyMHz != 350 || *g.MaxFrequencyMHz != 1300 || *g.PowerLimitWatts != 25 || g.PowerWatts != nil ||
+		g.UtilizationPercent != nil || g.MetricsSource != "i915" {
+		t.Errorf("first sample %+v", g)
+	}
+	// 5 J over 2 s: 2.5 W.
+	if err := os.WriteFile(filepath.Join(root, d, "hwmon/hwmon5/energy1_input"), []byte("6000000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.env.Now = func() time.Time { return now.Add(2 * time.Second) }
+	g = record[core.GPUs](t, c.Collect(context.Background()))[0]
+	if g.PowerWatts == nil || *g.PowerWatts != 2.5 {
+		t.Errorf("power %v", g.PowerWatts)
+	}
+}
+
+func TestGPUIntelXe(t *testing.T) {
+	d := "sys/bus/pci/devices/0000:03:00.0"
+	files := merge(pciDev("0000:03:00.0", "0x8086", "0x030000", "xe"), map[string]string{
+		d + "/tile0/gt0/freq0/cur_freq": "2000\n",
+		d + "/tile0/gt0/freq0/rp0_freq": "2400\n",
+	})
+	c, _ := gpuEnv(t, files, false)
+	r := c.Collect(context.Background())
+	wantStatus(t, r, core.CapGPUMetrics, core.Available)
+	if g := record[core.GPUs](t, r)[0]; *g.FrequencyMHz != 2000 || *g.MaxFrequencyMHz != 2400 || g.MetricsSource != "xe" {
+		t.Errorf("%+v", g)
+	}
 }

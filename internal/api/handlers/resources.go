@@ -181,7 +181,7 @@ func (h *Resources) gpus(v *core.GPUs) *[]apiv1.GPU {
 		a := apiv1.GPU{Vendor: g.Vendor, Name: g.Name, PCIAddress: g.PCIAddress, Driver: g.Driver, DriverVersion: g.DriverVersion,
 			MemoryTotalBytes: g.MemoryTotalBytes, MemoryUsedBytes: g.MemoryUsedBytes, UtilizationPercent: g.UtilizationPercent,
 			TemperatureCelsius: g.TemperatureCelsius, PowerWatts: g.PowerWatts, PowerLimitWatts: g.PowerLimitWatts,
-			FanPercent: g.FanPercent, MetricsSource: g.MetricsSource}
+			FanPercent: g.FanPercent, FrequencyMHz: g.FrequencyMHz, MaxFrequencyMHz: g.MaxFrequencyMHz, MetricsSource: g.MetricsSource}
 		h.Policy.Field(redact.UUID, g.UUID, &a.UUID, &a.Redacted)
 		out = append(out, a)
 	}

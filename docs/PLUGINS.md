@@ -153,7 +153,7 @@ A collector declares what it can **potentially** provide. `Probe` and each
 | `linux.pci` | 2 | `hardware.pci` | `/sys/bus/pci`, `pci.ids` when installed |
 | `linux.usb` | 2 | `hardware.usb` | `/sys/bus/usb`, `usb.ids` when installed |
 | `linux.dmi` | 2 | `hardware.board`, `hardware.memory_modules` | `/sys/class/dmi/id`, SMBIOS type 17 (root-only) |
-| `linux.gpu` | 2 | `gpu.devices`, `gpu.metrics` | PCI/DRM; `nvidia-smi` CSV query; `amdgpu` sysfs (D16); at least every 5s |
+| `linux.gpu` | 2 | `gpu.devices`, `gpu.metrics` | PCI/DRM; `nvidia-smi` CSV query; `amdgpu` sysfs (D16); Intel `i915`/`xe` frequency, and power from hwmon energy (Phase 4); at least every 5s |
 | `linux.containers` | 4 | `containers.list` | cgroup v2: `cpu.stat`, `memory.current`/`max`, `io.stat`, `pids.current` of Docker, Podman, containerd and CRI-O scopes; bounded walk, at most 500 containers, every 5s |
 | `linux.zfs` | 4 | `storage.zfs` | `/proc/spl/kstat/zfs/<pool>/state`, `arcstats`; `zpool list -j` / `zpool status -j` (optional, OpenZFS 2.3+), every 30s |
 | `linux.power` | 4 | `power.supplies` | `/sys/class/power_supply` (serial numbers are never read), every 10s |

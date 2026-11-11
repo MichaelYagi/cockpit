@@ -146,6 +146,8 @@ type GPU struct {
 	PowerWatts         *float64 `json:"power_watts"`
 	PowerLimitWatts    *float64 `json:"power_limit_watts"`
 	FanPercent         *float64 `json:"fan_percent"`
+	FrequencyMHz       *float64 `json:"frequency_mhz"`
+	MaxFrequencyMHz    *float64 `json:"max_frequency_mhz"`
 	MetricsSource      string   `json:"metrics_source"`
 	UUID               string   `json:"uuid,omitempty"`
 	Redacted           []string `json:"redacted,omitempty"`

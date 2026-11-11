@@ -290,6 +290,12 @@ structured output mode), AMD via `amdgpu` sysfs files. Missing tools are
 `not_configured`; GPUs without a metrics source are listed without
 metrics. NVML (cgo) is not used.
 
+*Extension (4G):* Intel GPUs (`i915`, `xe`) report their current and
+maximum frequency from sysfs, and discrete cards report power from the
+hwmon energy counter and the power limit. Utilization needs perf events,
+which the unprivileged agent cannot open, so it stays unavailable with
+that reason.
+
 ## D17 — Server-Sent Events for the event stream
 
 **Status:** Accepted (2026-11-11)

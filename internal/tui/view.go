@@ -1024,11 +1024,21 @@ func (m *Model) gpuLines(inner int) []string {
 		if g.FanPercent != nil {
 			extra = append(extra, "fan "+optPct(g.FanPercent))
 		}
+		if g.FrequencyMHz != nil {
+			f := fmt.Sprintf("%.0f MHz", *g.FrequencyMHz)
+			if g.MaxFrequencyMHz != nil {
+				f += fmt.Sprintf(" of %.0f", *g.MaxFrequencyMHz)
+			}
+			extra = append(extra, f)
+		}
 		if len(extra) > 0 {
 			out = append(out, kv("", strings.Join(extra, sMuted.Render(" · "))))
 		}
-		if g.MetricsSource == "" {
+		switch {
+		case g.MetricsSource == "":
 			out = append(out, sMuted.Render("no metrics source for this GPU"))
+		case g.UtilizationPercent == nil && (g.MetricsSource == "i915" || g.MetricsSource == "xe"):
+			out = append(out, sMuted.Render("busy % needs perf access; not available to the agent"))
 		}
 	}
 	return out
