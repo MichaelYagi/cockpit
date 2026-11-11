@@ -121,6 +121,9 @@ type Env struct {
 	SMARTResultsDir string
 	// Filesystems adjusts which mounts are reported (Q5).
 	Filesystems FilesystemFilter
+	// UPSAddress is the Network UPS Tools server (host:port); empty when
+	// UPS monitoring is off (D25).
+	UPSAddress string
 }
 
 // FilesystemFilter adjusts the filesystem collector's built-in skip list.

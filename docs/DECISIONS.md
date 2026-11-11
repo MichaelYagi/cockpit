@@ -477,8 +477,9 @@ cgroup v2 provides it without privileges. See Q8 for names and images.
   `127.0.0.1:3493`, configurable). It never sends commands that change
   state. A health check raises a warning when running on battery and a
   critical finding at low battery.
-- Everything appears in a new `power` section of `/metrics` and in
-  `/storage` (ZFS), under `metrics:read`.
+- Batteries and UPS appear in new `power` and `ups` sections of
+  `/metrics` (two sections because two collectors provide them), and ZFS
+  in `/storage`, all under `metrics:read`.
 
 **Why.** These are the remaining common "is my machine healthy" questions
 on servers and laptops. All sources are documented interfaces with

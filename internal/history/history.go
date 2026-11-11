@@ -225,6 +225,30 @@ func Extract(s *core.Snapshot, now time.Time) map[string]float64 {
 			}
 		}
 	}
+	if z := s.ZFS.Data; z != nil && ok(s.ZFS.Meta) {
+		for _, p := range z.Pools {
+			if p.SizeBytes != nil && p.AllocatedBytes != nil && *p.SizeBytes > 0 {
+				out["zfs."+p.Name+".used_percent"] = float64(*p.AllocatedBytes) / float64(*p.SizeBytes) * 100
+			}
+		}
+	}
+	if ps := s.Power.Data; ps != nil && ok(s.Power.Meta) {
+		for _, p := range *ps {
+			if p.Type == "battery" && p.CapacityPercent != nil {
+				out["power."+p.Name+".capacity_percent"] = *p.CapacityPercent
+			}
+		}
+	}
+	if us := s.UPS.Data; us != nil && ok(s.UPS.Meta) {
+		for _, u := range *us {
+			if u.ChargePercent != nil {
+				out["ups."+u.Name+".charge_percent"] = *u.ChargePercent
+			}
+			if u.LoadPercent != nil {
+				out["ups."+u.Name+".load_percent"] = *u.LoadPercent
+			}
+		}
+	}
 	for _, set := range s.Custom {
 		if !ok(set.Meta) {
 			continue

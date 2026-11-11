@@ -54,6 +54,9 @@ type Snapshot struct {
 	Routes         Section[Routes]
 	DNS            Section[DNSConfig]
 	Containers     Section[[]ContainerMetrics]
+	ZFS            Section[ZFSInfo]
+	Power          Section[PowerSupplies]
+	UPS            Section[UPSList]
 
 	// Custom holds generic metrics, one set per collector that reports
 	// them (D22), in collector order.

@@ -93,6 +93,11 @@ func validate(c *Config, p *Paths, v *validator) {
 		v.add("collection.defaults.timeout", "must be positive and no longer than the interval (got %s)", d.Timeout)
 	}
 	validateFilesystems(v, c.Collection.Filesystems)
+	if u := c.Collection.UPS; u.Enabled {
+		if host, port, err := net.SplitHostPort(u.Address); err != nil || host == "" || port == "" {
+			v.add("collection.ups.address", "must be host:port, e.g. %s (got %q)", DefaultUPSAddress, u.Address)
+		}
+	}
 	for id, o := range c.Collection.Collectors {
 		field := "collection.collectors." + id
 		if !collectorIDPattern.MatchString(id) {

@@ -263,6 +263,10 @@ Unavailable data is reported with a reason, never as an error:
 | Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
 | Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
 | Services | Not running systemd | Nothing; other features still work |
+| Batteries | None present | Expected on desktops, servers and VMs |
+| UPS | Off by default | Set `collection.ups.enabled: true` (see UPS monitoring) |
+| UPS | No server answered | Start `upsd` or check `collection.ups.address` |
+| ZFS capacity and errors | zpool older than OpenZFS 2.3 | Pool state and ARC still work; capacity needs zpool's JSON output |
 | Containers | cgroup v1 host | Containers are found only through cgroup v2 |
 | Container names and images | Never shown | They come from the engine's API socket, which is root-equivalent and not used (D24) |
 | Container memory or I/O (rootless) | Controller not delegated to the user | Enable cgroup delegation for the user's systemd instance |
@@ -285,6 +289,23 @@ collection:
 
 Excluded filesystems disappear from the API, the TUI, history and the
 storage health check. Changes need an agent restart.
+
+## UPS monitoring
+
+Cockpit reads UPS state from a Network UPS Tools server (`upsd`). It only
+lists UPS units and their variables and never sends commands. Enable it in
+the configuration file:
+
+```yaml
+collection:
+  ups:
+    enabled: true
+    address: 127.0.0.1:3493   # upsd's default
+```
+
+The Overview shows each UPS. The `ups` health check warns when a UPS runs
+on battery and reports critical at low battery. Batteries and power adapters
+(laptops) and ZFS pools need no setup.
 
 ## Configuration reference
 

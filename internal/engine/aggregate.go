@@ -32,6 +32,9 @@ const (
 	secRoutes
 	secDNS
 	secContainers
+	secZFS
+	secPower
+	secUPS
 	numSections
 )
 
@@ -57,6 +60,9 @@ var sectionCaps = [numSections][]core.Capability{
 	secRoutes:         {core.CapNetworkRoutes},
 	secDNS:            {core.CapNetworkDNS},
 	secContainers:     {core.CapContainers},
+	secZFS:            {core.CapStorageZFS},
+	secPower:          {core.CapPowerSupplies},
+	secUPS:            {core.CapPowerUPS},
 }
 
 func sectionOf(r core.Record) (section, bool) {
@@ -99,6 +105,12 @@ func sectionOf(r core.Record) (section, bool) {
 		return secDNS, true
 	case core.ContainerSamples:
 		return secContainers, true
+	case *core.ZFSInfo:
+		return secZFS, true
+	case core.PowerSupplies:
+		return secPower, true
+	case core.UPSList:
+		return secUPS, true
 	}
 	return 0, false
 }
@@ -310,6 +322,16 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 	case core.ContainerSamples:
 		m := a.containers(v, at)
 		return &m
+	case *core.ZFSInfo:
+		c := *v
+		c.Pools = append([]core.ZFSPool(nil), v.Pools...)
+		return &c
+	case core.PowerSupplies:
+		c := append(core.PowerSupplies(nil), v...)
+		return &c
+	case core.UPSList:
+		c := append(core.UPSList(nil), v...)
+		return &c
 	case core.GPUs:
 		c := append(core.GPUs(nil), v...)
 		return &c
@@ -434,6 +456,9 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.Routes = sec[core.Routes](a, secRoutes)
 	snap.DNS = sec[core.DNSConfig](a, secDNS)
 	snap.Containers = sec[[]core.ContainerMetrics](a, secContainers)
+	snap.ZFS = sec[core.ZFSInfo](a, secZFS)
+	snap.Power = sec[core.PowerSupplies](a, secPower)
+	snap.UPS = sec[core.UPSList](a, secUPS)
 
 	for _, r := range a.e.runners {
 		if cs := a.custom[r]; cs != nil {

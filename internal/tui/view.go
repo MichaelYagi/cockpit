@@ -334,6 +334,9 @@ func (m *Model) overview(w, h int) string {
 	if g := m.gpuLines(inner); g != nil {
 		left = append(left, box{title: "GPU", lines: g, flex: true})
 	}
+	if p := m.powerLines(inner); p != nil {
+		left = append(left, box{title: "Power", lines: p})
+	}
 	right := []box{
 		{title: "Health", lines: m.healthSummary(inner), flex: true},
 		{title: "Storage", lines: m.filesystemLines(inner, 6), flex: true},
@@ -654,11 +657,118 @@ func (m *Model) storageScreen(w, h int) string {
 			healthLines = unavailable(d, inner)
 		}
 	}
-	return column([]box{
+	boxes := []box{
 		{title: "Filesystems", lines: fsLines, flex: true},
 		{title: "Disks", lines: devLines, flex: true},
 		{title: "Disk health (SMART)", lines: healthLines, flex: true},
-	}, w, h)
+	}
+	if z := m.zfsLines(inner); z != nil {
+		boxes = append(boxes, box{title: "ZFS pools", lines: z})
+	}
+	return column(boxes, w, h)
+}
+
+// zfsLines lists ZFS pools (D25); nil when ZFS is not in use.
+func (m *Model) zfsLines(w int) []string {
+	if m.storage == nil || m.storage.ZFS.Data == nil || len(m.storage.ZFS.Data.Pools) == 0 {
+		return nil
+	}
+	z := m.storage.ZFS.Data
+	var lines []string
+	for _, p := range z.Pools {
+		l := lvOK
+		switch p.State {
+		case "ONLINE":
+		case "DEGRADED":
+			l = lvWarn
+		case "OFFLINE", "REMOVED":
+			l = lvUnknown
+		default:
+			l = lvCrit
+		}
+		line := pad(p.Name, 14) + badge(l, p.State)
+		if p.SizeBytes != nil && p.AllocatedBytes != nil && *p.SizeBytes > 0 {
+			pct := float64(*p.AllocatedBytes) / float64(*p.SizeBytes) * 100
+			line += "  " + bar(pct, 16, percentLevel(pct, 80, 90)) + fmt.Sprintf(" %5.1f%% of %s", pct, bytes(*p.SizeBytes))
+		}
+		if p.ReadErrors != nil && p.WriteErrors != nil && p.ChecksumErrors != nil {
+			if n := *p.ReadErrors + *p.WriteErrors + *p.ChecksumErrors; n > 0 {
+				line += "  " + sWarn.Render(fmt.Sprintf("errors r%d w%d c%d", *p.ReadErrors, *p.WriteErrors, *p.ChecksumErrors))
+			}
+		}
+		lines = append(lines, line)
+	}
+	if a := z.ARC; a != nil {
+		arc := fmt.Sprintf("ARC %s of %s max", bytes(a.SizeBytes), bytes(a.MaxBytes))
+		if a.HitPercent != nil {
+			arc += fmt.Sprintf(" · %.1f%% hits", *a.HitPercent)
+		}
+		lines = append(lines, sMuted.Render(arc))
+	}
+	if z.DetailReason != "" {
+		lines = append(lines, sMuted.Render(truncate(z.DetailReason, w)))
+	}
+	return lines
+}
+
+// powerLines shows batteries, mains and UPS (D25); nil when there are none.
+func (m *Model) powerLines(w int) []string {
+	if m.metrics == nil {
+		return nil
+	}
+	var lines []string
+	if p := m.metrics.Power; p != nil && p.Data != nil {
+		for _, s := range *p.Data {
+			switch s.Type {
+			case "battery":
+				line := pad(s.Name, 8)
+				if s.CapacityPercent != nil {
+					line += bar(*s.CapacityPercent, 12, percentLevel(100-*s.CapacityPercent, 80, 90)) + fmt.Sprintf(" %3.0f%%", *s.CapacityPercent)
+				}
+				if s.Status != "" {
+					line += "  " + strings.ReplaceAll(s.Status, "_", " ")
+				}
+				if s.HoursRemaining != nil {
+					line += fmt.Sprintf("  %s left", (time.Duration(*s.HoursRemaining * float64(time.Hour))).Round(time.Minute))
+				}
+				if s.PowerWatts != nil {
+					line += fmt.Sprintf("  %.1f W", *s.PowerWatts)
+				}
+				lines = append(lines, truncate(line, w))
+			case "mains":
+				if s.Online != nil {
+					word, l := "on mains", lvOK
+					if !*s.Online {
+						word, l = "on battery", lvWarn
+					}
+					lines = append(lines, pad(s.Name, 8)+badge(l, word))
+				}
+			}
+		}
+	}
+	if u := m.metrics.UPS; u != nil && u.Data != nil {
+		for _, x := range *u.Data {
+			l, word := lvOK, "on line"
+			switch {
+			case x.LowBattery:
+				l, word = lvCrit, "LOW BATTERY"
+			case x.OnBattery:
+				l, word = lvWarn, "on battery"
+			}
+			line := pad("UPS "+x.Name, 14) + badge(l, word)
+			if x.ChargePercent != nil {
+				line += fmt.Sprintf("  %.0f%%", *x.ChargePercent)
+			}
+			if x.RuntimeSeconds != nil {
+				line += "  " + (time.Duration(*x.RuntimeSeconds) * time.Second).String() + " runtime"
+			}
+			if x.LoadPercent != nil {
+				line += fmt.Sprintf("  load %.0f%%", *x.LoadPercent)
+			}
+			lines = append(lines, truncate(line, w))
+		}
+	}
+	return lines
 }
 
 func (m *Model) networkScreen(w, h int) string {

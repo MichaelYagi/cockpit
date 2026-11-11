@@ -182,3 +182,21 @@ func TestExtractBusiestContainers(t *testing.T) {
 		t.Error("idle container recorded")
 	}
 }
+
+func TestExtractZFSPowerUPS(t *testing.T) {
+	s := &core.Snapshot{
+		ZFS:   core.Section[core.ZFSInfo]{Meta: meta(), Data: &core.ZFSInfo{Pools: []core.ZFSPool{{Name: "tank", SizeBytes: ptr(uint64(200)), AllocatedBytes: ptr(uint64(50))}, {Name: "nocap"}}}},
+		Power: core.Section[core.PowerSupplies]{Meta: meta(), Data: &core.PowerSupplies{{Name: "BAT0", Type: "battery", CapacityPercent: ptr(80.0)}, {Name: "AC", Type: "mains"}}},
+		UPS:   core.Section[core.UPSList]{Meta: meta(), Data: &core.UPSList{{Name: "rack", ChargePercent: ptr(90.0), LoadPercent: ptr(30.0)}}},
+	}
+	got := Extract(s, t0)
+	want := map[string]float64{"zfs.tank.used_percent": 25, "power.BAT0.capacity_percent": 80, "ups.rack.charge_percent": 90, "ups.rack.load_percent": 30}
+	if len(got) != len(want) {
+		t.Errorf("got %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %v, want %v", k, got[k], v)
+		}
+	}
+}

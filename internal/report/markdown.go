@@ -123,6 +123,37 @@ func Markdown(r *apiv1.Report) []byte {
 		}
 	}
 
+	if m := r.Metrics; m != nil && ((m.Power != nil && m.Power.Data != nil && len(*m.Power.Data) > 0) || (m.UPS != nil && m.UPS.Data != nil && len(*m.UPS.Data) > 0)) {
+		w.heading("Power")
+		if m.Power != nil && m.Power.Data != nil && len(*m.Power.Data) > 0 {
+			w.table([]string{"Supply", "Type", "Status", "Charge", "Power", "Time left"}, func(row func(...string)) {
+				for _, p := range *m.Power.Data {
+					status := p.Status
+					if p.Online != nil {
+						status = map[bool]string{true: "online", false: "offline"}[*p.Online]
+					}
+					left := "—"
+					if p.HoursRemaining != nil {
+						left = fmt.Sprintf("%.1f h", *p.HoursRemaining)
+					}
+					row(p.Name, p.Type, status, optUnit(p.CapacityPercent, "%"), optUnit(p.PowerWatts, " W"), left)
+				}
+			})
+			w.line("")
+		}
+		if m.UPS != nil && m.UPS.Data != nil && len(*m.UPS.Data) > 0 {
+			w.table([]string{"UPS", "Status", "Charge", "Runtime", "Load"}, func(row func(...string)) {
+				for _, u := range *m.UPS.Data {
+					rt := "—"
+					if u.RuntimeSeconds != nil {
+						rt = duration(*u.RuntimeSeconds)
+					}
+					row(u.Name, strings.Join(u.Status, " "), optUnit(u.ChargePercent, "%"), rt, optUnit(u.LoadPercent, "%"))
+				}
+			})
+		}
+	}
+
 	if m := r.Metrics; m != nil && m.Custom != nil && len(*m.Custom) > 0 {
 		w.heading("Extension metrics")
 		for _, set := range *m.Custom {
@@ -175,6 +206,29 @@ func Markdown(r *apiv1.Report) []byte {
 					row(d.Device, d.Protocol, smart, optUnit(d.TemperatureCelsius, " °C"), used, errs)
 				}
 			})
+		}
+	}
+
+	if s := r.Storage; s != nil && s.ZFS.Data != nil && len(s.ZFS.Data.Pools) > 0 {
+		w.heading("ZFS pools")
+		w.table([]string{"Pool", "State", "Used", "Size", "Errors (r/w/c)"}, func(row func(...string)) {
+			for _, p := range s.ZFS.Data.Pools {
+				used, total, errs := "—", "—", "—"
+				if p.AllocatedBytes != nil {
+					used = size(*p.AllocatedBytes)
+				}
+				if p.SizeBytes != nil {
+					total = size(*p.SizeBytes)
+				}
+				if p.ReadErrors != nil && p.WriteErrors != nil && p.ChecksumErrors != nil {
+					errs = fmt.Sprintf("%d / %d / %d", *p.ReadErrors, *p.WriteErrors, *p.ChecksumErrors)
+				}
+				row(p.Name, p.State, used, total, errs)
+			}
+		})
+		if s.ZFS.Data.DetailReason != "" {
+			w.line("")
+			w.line(esc(s.ZFS.Data.DetailReason))
 		}
 	}
 

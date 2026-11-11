@@ -195,7 +195,39 @@ type MetricsResponse struct {
 	GPU            *Section[[]GPU]              `json:"gpu,omitempty"`
 	// Custom holds generic metrics from extension collectors (D22), one
 	// set per collector.
-	Custom *[]CustomMetricsSet `json:"custom,omitempty"`
+	Custom *[]CustomMetricsSet     `json:"custom,omitempty"`
+	Power  *Section[[]PowerSupply] `json:"power,omitempty"`
+	UPS    *Section[[]UPS]         `json:"ups,omitempty"`
+}
+
+// PowerSupply is a battery, mains adapter or USB supply (D25).
+type PowerSupply struct {
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	Online          *bool    `json:"online"`
+	Status          string   `json:"status,omitempty"`
+	CapacityPercent *float64 `json:"capacity_percent"`
+	Health          string   `json:"health,omitempty"`
+	PowerWatts      *float64 `json:"power_watts"`
+	EnergyNowWh     *float64 `json:"energy_now_wh"`
+	EnergyFullWh    *float64 `json:"energy_full_wh"`
+	HoursRemaining  *float64 `json:"hours_remaining"`
+	Model           string   `json:"model,omitempty"`
+}
+
+// UPS is one UPS read from a Network UPS Tools server (D25).
+type UPS struct {
+	Name           string   `json:"name"`
+	Description    string   `json:"description,omitempty"`
+	Status         []string `json:"status"`
+	OnBattery      bool     `json:"on_battery"`
+	LowBattery     bool     `json:"low_battery"`
+	ChargePercent  *float64 `json:"charge_percent"`
+	RuntimeSeconds *float64 `json:"runtime_seconds"`
+	LoadPercent    *float64 `json:"load_percent"`
+	InputVolts     *float64 `json:"input_volts"`
+	OutputVolts    *float64 `json:"output_volts"`
+	Model          string   `json:"model,omitempty"`
 }
 
 // CustomMetricsSet is one collector's generic metrics with its
@@ -224,7 +256,7 @@ type CustomMetric struct {
 }
 
 // MetricSections are the valid values of ?sections=.
-var MetricSections = []string{"cpu", "memory", "memory_pressure", "filesystems", "network", "sensors", "gpu", "custom"}
+var MetricSections = []string{"cpu", "memory", "memory_pressure", "filesystems", "network", "sensors", "gpu", "custom", "power", "ups"}
 
 // CPUMetrics is current CPU utilization.
 type CPUMetrics struct {
@@ -326,6 +358,39 @@ type StorageResponse struct {
 	BlockDevices Section[[]BlockDevice] `json:"block_devices"`
 	Filesystems  Section[[]Filesystem]  `json:"filesystems"`
 	DiskHealth   Section[[]DiskHealth]  `json:"disk_health"`
+	ZFS          Section[ZFS]           `json:"zfs"`
+}
+
+// ZFS is ZFS pool state and the ARC (D25).
+type ZFS struct {
+	Pools []ZFSPool `json:"pools"`
+	ARC   *ZFSARC   `json:"arc"`
+	// DetailReason explains missing capacity or error counts (zpool
+	// before OpenZFS 2.3, or not installed).
+	DetailReason string `json:"detail_reason,omitempty"`
+}
+
+// ZFSPool is one pool.
+type ZFSPool struct {
+	Name           string  `json:"name"`
+	State          string  `json:"state"`
+	SizeBytes      *uint64 `json:"size_bytes"`
+	AllocatedBytes *uint64 `json:"allocated_bytes"`
+	FreeBytes      *uint64 `json:"free_bytes"`
+	ReadErrors     *uint64 `json:"read_errors"`
+	WriteErrors    *uint64 `json:"write_errors"`
+	ChecksumErrors *uint64 `json:"checksum_errors"`
+}
+
+// ZFSARC is the adaptive replacement cache. Hits and misses count since
+// the module loaded.
+type ZFSARC struct {
+	SizeBytes   uint64   `json:"size_bytes"`
+	TargetBytes uint64   `json:"target_bytes"`
+	MaxBytes    uint64   `json:"max_bytes"`
+	Hits        uint64   `json:"hits"`
+	Misses      uint64   `json:"misses"`
+	HitPercent  *float64 `json:"hit_percent"`
 }
 
 // DiskHealth is a SMART/NVMe summary for one disk.

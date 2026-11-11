@@ -52,6 +52,8 @@ func healthy() *core.Snapshot {
 			{NetInterface: core.NetInterface{Name: "eth0", RxErrors: 5}},
 			{NetInterface: core.NetInterface{Name: "lo", Loopback: true, RxErrors: 999}},
 		}},
+		ZFS: core.Section[core.ZFSInfo]{Meta: ok(t0), Data: &core.ZFSInfo{Pools: []core.ZFSPool{{Name: "tank", State: "ONLINE"}}}},
+		UPS: core.Section[core.UPSList]{Meta: ok(t0), Data: &core.UPSList{{Name: "rack", Status: []string{"OL"}}}},
 	}
 }
 
@@ -87,7 +89,7 @@ func check(t *testing.T, r *Report, id string) CheckResult {
 func TestAllHealthy(t *testing.T) {
 	e, _, evs := newEval(t, healthy(), 1)
 	r := e.Evaluate()
-	if r.Status != StatusOK || len(r.Checks) != 6 {
+	if r.Status != StatusOK || len(r.Checks) != 8 {
 		t.Fatalf("report %+v", r)
 	}
 	for _, c := range r.Checks {
@@ -399,5 +401,42 @@ func TestSetThresholdsAppliesToNextEvaluation(t *testing.T) {
 	e.SetThresholds(th, 1)
 	if c := check(t, e.Evaluate(), CheckStorageCapacity); c.Status != StatusWarning {
 		t.Errorf("new threshold not applied: %+v", c)
+	}
+}
+
+func TestZFSPools(t *testing.T) {
+	s := healthy()
+	s.ZFS.Data.Pools = []core.ZFSPool{{Name: "tank", State: "DEGRADED", ChecksumErrors: ptr(uint64(5))}, {Name: "old", State: "OFFLINE"}, {Name: "gone", State: "FAULTED"}}
+	e, _, _ := newEval(t, s, 1)
+	c := check(t, e.Evaluate(), CheckZFSPools)
+	if c.Status != StatusCritical || len(c.Findings) != 2 {
+		t.Fatalf("%+v", c)
+	}
+	sev := map[string]core.Severity{}
+	for _, f := range c.Findings {
+		sev[f.Subject] = f.Severity
+	}
+	if sev["zpool:tank"] != core.SeverityWarning || sev["zpool:gone"] != core.SeverityCritical {
+		t.Errorf("severities %v", sev)
+	}
+	for _, f := range c.Findings {
+		if f.Subject == "zpool:tank" && f.Evidence["checksum_errors"] != "5" {
+			t.Errorf("evidence %v", f.Evidence)
+		}
+	}
+}
+
+func TestUPSCheck(t *testing.T) {
+	s := healthy()
+	*s.UPS.Data = core.UPSList{{Name: "a", Status: []string{"OB"}, OnBattery: true, ChargePercent: ptr(60.0)},
+		{Name: "b", Status: []string{"OB", "LB"}, OnBattery: true, LowBattery: true}}
+	e, _, _ := newEval(t, s, 1)
+	c := check(t, e.Evaluate(), CheckUPS)
+	if c.Status != StatusCritical || len(c.Findings) != 2 || c.Findings[0].Summary != "UPS b battery is low" {
+		t.Errorf("%+v", c)
+	}
+	s.UPS = core.Section[core.UPSList]{Meta: core.SectionMeta{Status: core.NotConfigured, Reason: "UPS monitoring is off."}}
+	if c := check(t, e.Evaluate(), CheckUPS); c.Status != StatusUnknown || c.Availability != core.NotConfigured {
+		t.Errorf("off: %+v", c)
 	}
 }

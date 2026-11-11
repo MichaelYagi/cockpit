@@ -227,7 +227,7 @@ paths:
           description: Comma-separated list of sections to include.
           schema:
             type: string
-            pattern: "^(cpu|memory|memory_pressure|filesystems|network|sensors|gpu|custom)(,(cpu|memory|memory_pressure|filesystems|network|sensors|gpu|custom))*$"
+            pattern: "^(cpu|memory|memory_pressure|filesystems|network|sensors|gpu|custom|power|ups)(,(cpu|memory|memory_pressure|filesystems|network|sensors|gpu|custom|power|ups))*$"
           example: cpu,memory
       responses:
         "200":
@@ -1222,6 +1222,77 @@ components:
           type: array
           description: Generic metrics from extension collectors (D22), one entry per collector. Empty when no extension collectors are built in.
           items: { $ref: "#/components/schemas/CustomMetricsSet" }
+        power: { $ref: "#/components/schemas/PowerSection" }
+        ups: { $ref: "#/components/schemas/UPSSection" }
+    PowerSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/PowerSupply" }
+            - type: "null"
+    UPSSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/UPS" }
+            - type: "null"
+    PowerSupply:
+      type: object
+      additionalProperties: false
+      description: A battery, mains adapter or USB supply from sysfs (D25).
+      required: [name, type, online, capacity_percent, power_watts, energy_now_wh, energy_full_wh, hours_remaining]
+      properties:
+        name: { type: string }
+        type: { type: string, examples: [battery, mains, usb] }
+        online: { type: [boolean, "null"] }
+        status: { type: string, examples: [charging, discharging, full, not_charging] }
+        capacity_percent: { type: [number, "null"] }
+        health: { type: string }
+        power_watts: { type: [number, "null"] }
+        energy_now_wh: { type: [number, "null"] }
+        energy_full_wh: { type: [number, "null"] }
+        hours_remaining: { type: [number, "null"], description: While discharging with a known power draw. }
+        model: { type: string }
+    UPS:
+      type: object
+      additionalProperties: false
+      description: A UPS read from a Network UPS Tools server (D25). Serial numbers are never read.
+      required: [name, status, on_battery, low_battery, charge_percent, runtime_seconds, load_percent, input_volts, output_volts]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        status:
+          type: array
+          description: NUT status flags, e.g. OL (on line), OB (on battery), LB (low battery), CHRG.
+          items: { type: string }
+        on_battery: { type: boolean }
+        low_battery: { type: boolean }
+        charge_percent: { type: [number, "null"] }
+        runtime_seconds: { type: [number, "null"] }
+        load_percent: { type: [number, "null"] }
+        input_volts: { type: [number, "null"] }
+        output_volts: { type: [number, "null"] }
+        model: { type: string }
     CustomMetricsSet:
       type: object
       additionalProperties: false
@@ -1549,7 +1620,7 @@ components:
       type: object
       additionalProperties: false
       description: GET /storage.
-      required: [schema_version, machine_id, generated_at, block_devices, filesystems, disk_health]
+      required: [schema_version, machine_id, generated_at, block_devices, filesystems, disk_health, zfs]
       properties:
         schema_version: { $ref: "#/components/schemas/SchemaVersion" }
         machine_id: { $ref: "#/components/schemas/MachineID" }
@@ -1557,6 +1628,58 @@ components:
         block_devices: { $ref: "#/components/schemas/BlockDevicesSection" }
         filesystems: { $ref: "#/components/schemas/FilesystemsSection" }
         disk_health: { $ref: "#/components/schemas/DiskHealthSection" }
+        zfs: { $ref: "#/components/schemas/ZFSSection" }
+    ZFSSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - { $ref: "#/components/schemas/ZFS" }
+            - type: "null"
+    ZFS:
+      type: object
+      additionalProperties: false
+      description: ZFS pools and the ARC (D25).
+      required: [pools, arc]
+      properties:
+        pools:
+          type: array
+          items: { $ref: "#/components/schemas/ZFSPool" }
+        arc:
+          anyOf:
+            - type: object
+              additionalProperties: false
+              required: [size_bytes, target_bytes, max_bytes, hits, misses, hit_percent]
+              properties:
+                size_bytes: { type: integer, minimum: 0 }
+                target_bytes: { type: integer, minimum: 0 }
+                max_bytes: { type: integer, minimum: 0 }
+                hits: { type: integer, minimum: 0, description: Since the module loaded. }
+                misses: { type: integer, minimum: 0 }
+                hit_percent: { type: [number, "null"] }
+            - type: "null"
+        detail_reason: { type: string, description: Why capacity or error counts are missing. }
+    ZFSPool:
+      type: object
+      additionalProperties: false
+      required: [name, state, size_bytes, allocated_bytes, free_bytes, read_errors, write_errors, checksum_errors]
+      properties:
+        name: { type: string }
+        state: { type: string, examples: [ONLINE, DEGRADED, FAULTED] }
+        size_bytes: { type: [integer, "null"] }
+        allocated_bytes: { type: [integer, "null"] }
+        free_bytes: { type: [integer, "null"] }
+        read_errors: { type: [integer, "null"] }
+        write_errors: { type: [integer, "null"] }
+        checksum_errors: { type: [integer, "null"] }
     NetworkResponse:
       type: object
       additionalProperties: false
@@ -1599,7 +1722,7 @@ components:
       additionalProperties: false
       required: [id, name, status, availability, findings]
       properties:
-        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health, services, network_errors] }
+        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health, services, network_errors, zfs_pools, ups] }
         name: { type: string }
         status: { $ref: "#/components/schemas/HealthStatus" }
         availability:

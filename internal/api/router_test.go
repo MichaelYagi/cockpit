@@ -133,6 +133,11 @@ func testSnapshot() *core.Snapshot {
 			{ContainerSample: core.ContainerSample{Runtime: "docker", ID: strings.Repeat("a", 64), UID: -1, CPUUsageUsec: 10, MemoryBytes: ptr(uint64(1 << 20))}},
 			{ContainerSample: core.ContainerSample{Runtime: "podman", ID: strings.Repeat("b", 64), Rootless: true, UID: 1000}, CPUPercent: ptr(12.5)},
 		}},
+		ZFS: core.Section[core.ZFSInfo]{Meta: meta(), Data: &core.ZFSInfo{Pools: []core.ZFSPool{{Name: "tank", State: "ONLINE", SizeBytes: ptr(uint64(1000)), ChecksumErrors: ptr(uint64(2))}},
+			ARC: &core.ZFSARC{SizeBytes: 10, Hits: 9, Misses: 1}}},
+		Power: core.Section[core.PowerSupplies]{Meta: meta(), Data: &core.PowerSupplies{{Name: "BAT0", Type: "battery", Status: "discharging", CapacityPercent: ptr(80.0), HoursRemaining: ptr(4.0)},
+			{Name: "AC", Type: "mains", Online: ptr(false)}}},
+		UPS: core.Section[core.UPSList]{Meta: core.SectionMeta{Status: core.NotConfigured, Source: "Network UPS Tools", Reason: "UPS monitoring is off."}},
 		Custom: []core.CustomSet{
 			{Collector: "custom.demo", Meta: meta(), Dropped: 1, Problem: "metric \"x\" has an unknown unit", Metrics: []core.CustomMetric{
 				{Name: "custom.demo.open", Kind: core.Gauge, Unit: "count", Value: 42},
@@ -301,6 +306,7 @@ func TestContract(t *testing.T) {
 		{"metrics gpu", tcp, "GET", "/api/v1/metrics?sections=gpu", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"metrics custom", tcp, "GET", "/api/v1/metrics?sections=custom", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"containers", sock, "GET", "/api/v1/containers", nil, 200, ""},
+		{"metrics power and ups", tcp, "GET", "/api/v1/metrics?sections=power,ups", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"containers need processes scope", tcp, "GET", "/api/v1/containers", []reqOpt{bearer(metricsKey)}, 403, apiv1.CodeInsufficientScope},
 		{"metrics bad section", tcp, "GET", "/api/v1/metrics?sections=cpu,tpu", []reqOpt{bearer(metricsKey)}, 400, apiv1.CodeInvalidParameter},
 		{"metrics needs metrics scope", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(systemKey)}, 403, apiv1.CodeInsufficientScope},

@@ -91,6 +91,9 @@ principal.
 |---|---|---|---|
 | GET | `/status` | `system:read` | Collectors now carry `external` (built with the collector SDK, D23) and `sdk_version` |
 | GET | `/containers` | `processes:read` | Docker, Podman (rootful and rootless), containerd and CRI-O containers from cgroup v2, busiest first, at most 500: CPU % of one core, memory and limit, I/O rates, PIDs, rootless owner. No names or images (D24) |
+| GET | `/metrics?sections=power,ups` | `metrics:read` | Batteries and mains from sysfs; UPS from a Network UPS Tools server when enabled (D25) |
+| GET | `/storage` | `metrics:read` | Gains `zfs`: pool state, capacity and error counts (OpenZFS 2.3+ JSON), ARC size and hit rate (D25) |
+| GET | `/health` | `metrics:read` | Gains the `zfs_pools` and `ups` checks |
 | GET | `/metrics?sections=custom` | `metrics:read` | Generic metrics from extension collectors (D22): one set per collector with availability, `dropped_series` and `problem`; each metric has `name`, `kind`, `unit`, `labels`, `value`, and for counters `rate_per_second` and `rate_unit` |
 
 WebSocket is not planned: all streaming is server-to-client, which SSE
