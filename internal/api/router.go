@@ -116,6 +116,7 @@ func Routes(d Deps) []Route {
 		st.OpenStreams = d.Streams.Open()
 		return st
 	}
+	rep := &handlers.Report{Resources: res, Status: d.Status, Admin: admin, Health: d.Health, Events: d.Events, Settings: d.Settings, Logger: d.Logger}
 	get, post, del := http.MethodGet, http.MethodPost, http.MethodDelete
 	sys, met, prc, adm := auth.ScopeSystemRead, auth.ScopeMetricsRead, auth.ScopeProcessesRead, auth.ScopeAdmin
 	return []Route{
@@ -125,6 +126,7 @@ func Routes(d Deps) []Route {
 		{Method: get, Path: "/system", Scope: sys, Handler: res.System},
 		{Method: get, Path: "/hardware", Scope: sys, Handler: res.Hardware},
 		{Method: get, Path: "/services", Scope: sys, Handler: res.Services},
+		{Method: get, Path: "/report", Scope: sys, Handler: rep.Get},
 		{Method: get, Path: "/metrics", Scope: met, Handler: res.Metrics},
 		{Method: get, Path: "/metrics/history", Scope: met, Handler: hist.Query},
 		{Method: get, Path: "/metrics/history/series", Scope: met, Handler: hist.Series},

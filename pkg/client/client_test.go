@@ -204,6 +204,8 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 			return err
 		},
 		func() error { _, err := c.ResetSettings(ctx); return err },
+		func() error { _, err := c.Report(ctx, true); return err },
+		func() error { _, err := c.ReportMarkdown(ctx, false); return err },
 		func() error { _, err := c.ListKeys(ctx); return err },
 		func() error {
 			_, err := c.CreateKey(ctx, apiv1.CreateAPIKeyRequest{Name: "n", Scopes: []string{"metrics:read"}, ExpiresAt: &exp})
@@ -222,6 +224,23 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 	}
 	if paths[3] != "GET /api/v1/metrics?sections=cpu%2Cmemory" || !strings.Contains(paths[9], "kernel_threads=true") {
 		t.Errorf("metrics query %q", paths[3])
+	}
+}
+
+func TestReportMarkdownIsRaw(t *testing.T) {
+	var accept string
+	srv := mockAgent(t, func(w http.ResponseWriter, r *http.Request) {
+		accept = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte("# Cockpit diagnostic report\n"))
+	})
+	c, _ := NewTCP(srv.URL, testKey)
+	md, err := c.ReportMarkdown(context.Background(), true)
+	if err != nil || string(md) != "# Cockpit diagnostic report\n" {
+		t.Fatalf("%q %v", md, err)
+	}
+	if !strings.HasPrefix(accept, "text/markdown") {
+		t.Errorf("accept %q", accept)
 	}
 }
 

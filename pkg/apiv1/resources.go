@@ -626,3 +626,31 @@ type WarnCritical struct {
 type DiskEnduranceThreshold struct {
 	WarnPercentageUsed int `json:"warn_percentage_used"`
 }
+
+// Report is GET /report (D21): a point-in-time diagnostic snapshot built
+// from the other endpoints' responses. Sections the caller may not read
+// are absent and listed in Omitted.
+type Report struct {
+	Meta
+	Anonymized bool              `json:"anonymized"`
+	Status     Status            `json:"status"`
+	System     *SystemResponse   `json:"system,omitempty"`
+	Hardware   *HardwareResponse `json:"hardware,omitempty"`
+	Services   *ServicesResponse `json:"services,omitempty"`
+	Metrics    *MetricsResponse  `json:"metrics,omitempty"`
+	Storage    *StorageResponse  `json:"storage,omitempty"`
+	Network    *NetworkResponse  `json:"network,omitempty"`
+	Health     *HealthResponse   `json:"health,omitempty"`
+	Events     *EventsResponse   `json:"events,omitempty"`
+	Settings   *SettingsResponse `json:"settings,omitempty"`
+	Omitted    []ReportOmission  `json:"omitted"`
+}
+
+// ReportOmission names a report section left out and why.
+type ReportOmission struct {
+	Section string `json:"section"`
+	Reason  string `json:"reason"`
+}
+
+// ReportFormats are the values of the report format parameter.
+var ReportFormats = []string{"json", "markdown"}

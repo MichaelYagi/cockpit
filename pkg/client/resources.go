@@ -227,3 +227,24 @@ func (c *Client) ResetSettings(ctx context.Context) (*apiv1.SettingsResponse, er
 	}
 	return &out, nil
 }
+
+// Report returns a diagnostic report (D21). Requires system:read; parts
+// built from metrics also need metrics:read and are otherwise listed in
+// Omitted. With anonymize, host names, addresses and user names are
+// replaced with placeholders.
+func (c *Client) Report(ctx context.Context, anonymize bool) (*apiv1.Report, error) {
+	return get[apiv1.Report](ctx, c, reportPath("json", anonymize))
+}
+
+// ReportMarkdown returns the diagnostic report rendered as Markdown.
+func (c *Client) ReportMarkdown(ctx context.Context, anonymize bool) ([]byte, error) {
+	var out []byte
+	if err := c.get(ctx, reportPath("markdown", anonymize), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func reportPath(format string, anonymize bool) string {
+	return "/report?format=" + format + "&anonymize=" + strconv.FormatBool(anonymize)
+}

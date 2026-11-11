@@ -360,10 +360,13 @@ agent elevated privileges.
 
 **Status:** Proposed (2026-11-11)
 
-**Decision.** `GET /report` (requires both `system:read` and
-`metrics:read`; always available to the socket) and `cockpit report`
-produce a point-in-time report: status, system, hardware, health, recent
-events, current metrics and the effective configuration (no secrets).
+**Decision.** `GET /report` and `cockpit report` produce a point-in-time
+report: status, system, hardware, services, health, recent events,
+current metrics and the effective health thresholds (no secrets). The
+route requires `system:read`, keeping D8's one scope per route; the
+metric-based parts are included only when the caller also holds
+`metrics:read`, and the thresholds only over the socket. Parts left out
+are listed in `omitted` with a reason.
 Formats: JSON and Markdown. Sensitive fields stay redacted (D9).
 `anonymize=true` additionally replaces host names, IP addresses, MAC-like
 strings, user names and mount points under `/home` with stable

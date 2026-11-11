@@ -33,7 +33,10 @@ var registerOnce sync.Once
 // Load parses and validates the embedded specification.
 func Load(t testing.TB) *Spec {
 	t.Helper()
-	registerOnce.Do(func() { openapi3filter.RegisterBodyDecoder("text/event-stream", openapi3filter.PlainBodyDecoder) })
+	registerOnce.Do(func() {
+		openapi3filter.RegisterBodyDecoder("text/event-stream", openapi3filter.PlainBodyDecoder)
+		openapi3filter.RegisterBodyDecoder("text/markdown", openapi3filter.PlainBodyDecoder)
+	})
 	loader := openapi3.NewLoader()
 	doc, err := loader.LoadFromData(openapi.YAML)
 	if err != nil {

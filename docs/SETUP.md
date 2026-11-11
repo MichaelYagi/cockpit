@@ -76,6 +76,22 @@ The agent refuses to start if these directories are more permissive than
 shown or owned by another user. `cockpit config check` prints the effective
 configuration and paths.
 
+## Diagnostic reports
+
+```sh
+./bin/cockpit report > report.md                        # Markdown, from the local socket
+./bin/cockpit report --format json -o report.json       # file is created with mode 0600
+./bin/cockpit report --anonymize -o report-shareable.md # placeholders for host names, IPs, MACs, users
+```
+
+Over the socket the report includes everything, including the health
+thresholds. Over TCP (`--url`, key in `COCKPIT_API_KEY`) it needs
+`system:read`; parts built from metrics are added when the key also has
+`metrics:read`, and the report lists anything it left out. Serial numbers,
+MAC addresses and other sensitive fields are never included. Check an
+anonymized report before sharing it: identifiers that appear only in free
+text, such as a host name in a service description, are not recognised.
+
 ## API keys
 
 Key management works only through the admin socket, so only the local

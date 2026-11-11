@@ -169,3 +169,9 @@ func TestHistoryDependsOnDomainOnly(t *testing.T) {
 func TestSettingsDependencies(t *testing.T) {
 	rule(t, "internal/settings/...", hasPrefix("internal/core", "internal/config", "internal/netaddr"))
 }
+
+// Reports are post-processed from wire types alone (D21), so the same
+// code serves the API and any client.
+func TestReportUsesWireTypesOnly(t *testing.T) {
+	rule(t, "internal/report/...", hasPrefix("pkg/apiv1"))
+}

@@ -52,7 +52,7 @@ decision entry before deviating from one.
 | Item | Value |
 |---|---|
 | Module | `github.com/MichaelYagi/cockpit` |
-| Executable | `cockpit` (`agent`, `tui`, `keys`, `config check`, `version`) |
+| Executable | `cockpit` (`agent`, `tui`, `keys`, `report`, `config check`, `version`) |
 | systemd unit | `cockpit-agent.service` |
 | System config / data / runtime | `/etc/cockpit-monitor/`, `/var/lib/cockpit-monitor/`, `/run/cockpit-monitor/` |
 | User-mode dirs | `$XDG_{CONFIG,STATE,RUNTIME}_HOME/cockpit-monitor/` |
@@ -107,7 +107,9 @@ internal/
   events/                    # event bus and ring buffer
   auth/                      # API keys and scopes (no HTTP)
   storage/sqlite/            # key store (later history), migrations
-  history/                   # Phase 3
+  history/                   # metric history: recorder, tiers, retention (D18)
+  settings/                  # runtime health thresholds (D19)
+  report/                    # diagnostic report anonymization and Markdown (D21)
   logging/                   # slog setup, secret redaction, UTC timestamps
   netaddr/                   # loopback classification for listen and Host addresses
   ulid/                      # request and event IDs
