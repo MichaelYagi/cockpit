@@ -46,27 +46,32 @@ func Status(src StatusSource, admin AdminStatus, now func() time.Time) http.Hand
 		if !allowParams(w, r) {
 			return
 		}
-		t := now().UTC()
-		started := src.StartedAt().UTC()
-		out := apiv1.Status{
-			Meta: apiv1.Meta{
-				SchemaVersion: apiv1.SchemaVersion,
-				MachineID:     string(src.MachineID()),
-				GeneratedAt:   t,
-			},
-			Agent: apiv1.Agent{
-				Version:       buildinfo.Version,
-				APIVersion:    buildinfo.APIVersion,
-				StartedAt:     started,
-				UptimeSeconds: t.Sub(started).Seconds(),
-			},
-			Collectors: mapCollectors(src.Collectors()),
-		}
-		if p, ok := auth.PrincipalFrom(r.Context()); ok && p.Has(auth.ScopeAdmin) && admin != nil {
-			out.API = admin()
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		p, ok := auth.PrincipalFrom(r.Context())
+		httpx.WriteJSON(w, http.StatusOK, statusResponse(src, admin, ok && p.Has(auth.ScopeAdmin), now().UTC()))
 	}
+}
+
+// statusResponse builds /status; withAdmin adds listener and request data.
+func statusResponse(src StatusSource, admin AdminStatus, withAdmin bool, t time.Time) apiv1.Status {
+	started := src.StartedAt().UTC()
+	out := apiv1.Status{
+		Meta: apiv1.Meta{
+			SchemaVersion: apiv1.SchemaVersion,
+			MachineID:     string(src.MachineID()),
+			GeneratedAt:   t,
+		},
+		Agent: apiv1.Agent{
+			Version:       buildinfo.Version,
+			APIVersion:    buildinfo.APIVersion,
+			StartedAt:     started,
+			UptimeSeconds: t.Sub(started).Seconds(),
+		},
+		Collectors: mapCollectors(src.Collectors()),
+	}
+	if withAdmin && admin != nil {
+		out.API = admin()
+	}
+	return out
 }
 
 func mapCollectors(in []core.CollectorStatus) []apiv1.Collector {

@@ -64,6 +64,8 @@ type EventsQuery struct {
 	Cursor   string
 	Severity string // info | warning | critical
 	Since    time.Time
+	Until    time.Time
+	Type     string // e.g. "finding.raised"
 }
 
 // Events returns recent events, newest first.
@@ -80,6 +82,12 @@ func (c *Client) Events(ctx context.Context, q EventsQuery) (*apiv1.EventsRespon
 	}
 	if !q.Since.IsZero() {
 		v.Set("since", q.Since.UTC().Format(time.RFC3339))
+	}
+	if !q.Until.IsZero() {
+		v.Set("until", q.Until.UTC().Format(time.RFC3339))
+	}
+	if q.Type != "" {
+		v.Set("type", q.Type)
 	}
 	path := "/events"
 	if len(v) > 0 {
@@ -166,4 +174,77 @@ func (c *Client) Services(ctx context.Context, state string) (*apiv1.ServicesRes
 		path += "?state=" + url.QueryEscape(state)
 	}
 	return get[apiv1.ServicesResponse](ctx, c, path)
+}
+
+// HistoryQuery selects stored history. Zero From/To mean the last hour;
+// an empty Resolution means automatic.
+type HistoryQuery struct {
+	Series     []string
+	From, To   time.Time
+	Resolution string // auto | raw | 1m | 1h
+}
+
+// History returns stored metric history. Requires metrics:read.
+func (c *Client) History(ctx context.Context, q HistoryQuery) (*apiv1.HistoryResponse, error) {
+	v := url.Values{"series": {strings.Join(q.Series, ",")}}
+	if !q.From.IsZero() {
+		v.Set("from", q.From.UTC().Format(time.RFC3339))
+	}
+	if !q.To.IsZero() {
+		v.Set("to", q.To.UTC().Format(time.RFC3339))
+	}
+	if q.Resolution != "" {
+		v.Set("resolution", q.Resolution)
+	}
+	return get[apiv1.HistoryResponse](ctx, c, "/metrics/history?"+v.Encode())
+}
+
+// HistorySeries lists recorded series. Requires metrics:read.
+func (c *Client) HistorySeries(ctx context.Context) (*apiv1.HistorySeriesList, error) {
+	return get[apiv1.HistorySeriesList](ctx, c, "/metrics/history/series")
+}
+
+// Settings returns the effective health thresholds (Unix socket only).
+func (c *Client) Settings(ctx context.Context) (*apiv1.SettingsResponse, error) {
+	return get[apiv1.SettingsResponse](ctx, c, "/settings")
+}
+
+// UpdateSettings replaces the health thresholds (Unix socket only).
+func (c *Client) UpdateSettings(ctx context.Context, h apiv1.HealthSettings) (*apiv1.SettingsResponse, error) {
+	var out apiv1.SettingsResponse
+	if err := c.do(ctx, "PUT", "/settings", apiv1.UpdateSettingsRequest{Health: h}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ResetSettings returns to the configuration file's thresholds (Unix
+// socket only).
+func (c *Client) ResetSettings(ctx context.Context) (*apiv1.SettingsResponse, error) {
+	var out apiv1.SettingsResponse
+	if err := c.do(ctx, "DELETE", "/settings", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Report returns a diagnostic report (D21). Requires system:read; parts
+// built from metrics also need metrics:read and are otherwise listed in
+// Omitted. With anonymize, host names, addresses and user names are
+// replaced with placeholders.
+func (c *Client) Report(ctx context.Context, anonymize bool) (*apiv1.Report, error) {
+	return get[apiv1.Report](ctx, c, reportPath("json", anonymize))
+}
+
+// ReportMarkdown returns the diagnostic report rendered as Markdown.
+func (c *Client) ReportMarkdown(ctx context.Context, anonymize bool) ([]byte, error) {
+	var out []byte
+	if err := c.get(ctx, reportPath("markdown", anonymize), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func reportPath(format string, anonymize bool) string {
+	return "/report?format=" + format + "&anonymize=" + strconv.FormatBool(anonymize)
 }

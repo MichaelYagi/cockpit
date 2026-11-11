@@ -359,3 +359,46 @@ func TestTUIExplicitSocketDoesNotEmbed(t *testing.T) {
 		t.Error("an embedded agent was started despite an explicit --socket")
 	}
 }
+
+func TestReportCommand(t *testing.T) {
+	sock := startAgent(t)
+	code, out, errOut := run(t, "", "report", "--socket", sock)
+	if code != ExitOK || !strings.Contains(out, "# Cockpit diagnostic report") || !strings.Contains(out, "## Collectors") {
+		t.Fatalf("markdown report: %d %s\n%s", code, errOut, out)
+	}
+
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut = run(t, "", "report", "--socket", sock, "--format", "json", "--anonymize", "-o", path)
+	if code != ExitOK {
+		t.Fatalf("json report: %d %s", code, errOut)
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("report file mode %v %v", fi.Mode(), err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), `"anonymized": true`) || !strings.Contains(string(data), `"machine_id": "00000000-0000-4000-8000-000000000000"`) {
+		t.Errorf("json report:\n%.400s", data)
+	}
+
+	if code, _, _ := run(t, "", "report", "--format", "pdf"); code != ExitUsage {
+		t.Errorf("bad format exit %d", code)
+	}
+	if code, _, errOut := run(t, "", "report", "--socket", filepath.Join(t.TempDir(), "none.sock")); code != ExitError || !strings.Contains(errOut, "Is it running?") {
+		t.Errorf("no agent: %d %s", code, errOut)
+	}
+}
+
+func TestSMARTHelperCommand(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "smart")
+	code, _, errOut := run(t, "", "smart-helper", "--dir", dir, "--group", "no-such-group-for-cockpit-tests")
+	if code != ExitError || !strings.Contains(errOut, "no-such-group-for-cockpit-tests") {
+		t.Errorf("unknown group: %d %s", code, errOut)
+	}
+	if code, _, _ := run(t, "", "smart-helper", "extra"); code != ExitUsage {
+		t.Errorf("extra argument exit %d", code)
+	}
+}

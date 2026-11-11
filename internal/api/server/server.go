@@ -80,6 +80,13 @@ func (s *Server) Start() (Endpoints, error) {
 	var ep Endpoints
 	var listeners []net.Listener
 	fail := func(err error) (Endpoints, error) {
+		// Stop servers already started so a later Shutdown has nothing to
+		// close twice, then close any listener not yet handed to a server.
+		for _, srv := range s.servers {
+			_ = srv.Close()
+		}
+		s.servers = nil
+		s.wg.Wait()
 		for _, l := range listeners {
 			_ = l.Close()
 		}

@@ -541,3 +541,116 @@ type Service struct {
 	ActiveState string `json:"active_state"`
 	SubState    string `json:"sub_state"`
 }
+
+// ---- /metrics/history ----
+
+// HistoryResponse is GET /metrics/history.
+type HistoryResponse struct {
+	Meta
+	Status      string          `json:"status"`
+	Reason      string          `json:"reason,omitempty"`
+	From        time.Time       `json:"from"`
+	To          time.Time       `json:"to"`
+	Resolution  string          `json:"resolution"` // raw | 1m | 1h
+	StepSeconds int             `json:"step_seconds"`
+	Series      []HistorySeries `json:"series"`
+}
+
+// HistorySeries is one series' points.
+type HistorySeries struct {
+	Name   string         `json:"name"`
+	Unit   string         `json:"unit"`
+	Points []HistoryPoint `json:"points"`
+}
+
+// HistoryPoint is a value (raw: min=avg=max) or a bucket aggregate.
+type HistoryPoint struct {
+	Time time.Time `json:"t"`
+	Min  float64   `json:"min"`
+	Avg  float64   `json:"avg"`
+	Max  float64   `json:"max"`
+}
+
+// HistorySeriesList is GET /metrics/history/series.
+type HistorySeriesList struct {
+	Meta
+	Status string              `json:"status"`
+	Reason string              `json:"reason,omitempty"`
+	Items  []HistorySeriesInfo `json:"items"`
+}
+
+// HistorySeriesInfo describes a recorded series.
+type HistorySeriesInfo struct {
+	Name  string    `json:"name"`
+	Unit  string    `json:"unit"`
+	First time.Time `json:"first"`
+	Last  time.Time `json:"last"`
+}
+
+// HistoryResolutions are the valid values of ?resolution=.
+var HistoryResolutions = []string{"auto", "raw", "1m", "1h"}
+
+// ---- /settings (socket only, D19) ----
+
+// SettingsResponse is GET, PUT and DELETE /settings.
+type SettingsResponse struct {
+	Health    HealthSettings `json:"health"`
+	Source    string         `json:"source"` // configuration | override
+	UpdatedAt *time.Time     `json:"updated_at"`
+}
+
+// UpdateSettingsRequest is the body of PUT /settings. All fields are
+// required: it replaces the health thresholds.
+type UpdateSettingsRequest struct {
+	Health HealthSettings `json:"health"`
+}
+
+// HealthSettings are the editable health thresholds.
+type HealthSettings struct {
+	Confirm        int                    `json:"confirm"`
+	CPUTemperature WarnCritical           `json:"cpu_temperature_celsius"`
+	MemAvailable   WarnCritical           `json:"memory_available_percent"`
+	MemPressure    WarnCritical           `json:"memory_pressure_percent"`
+	Storage        WarnCritical           `json:"storage_used_percent"`
+	NetworkErrors  WarnCritical           `json:"network_errors_per_minute"`
+	Disk           DiskEnduranceThreshold `json:"disk"`
+}
+
+// WarnCritical is a threshold pair.
+type WarnCritical struct {
+	Warn     float64 `json:"warn"`
+	Critical float64 `json:"critical"`
+}
+
+// DiskEnduranceThreshold is the NVMe endurance warning level.
+type DiskEnduranceThreshold struct {
+	WarnPercentageUsed int `json:"warn_percentage_used"`
+}
+
+// Report is GET /report (D21): a point-in-time diagnostic snapshot built
+// from the other endpoints' responses. Sections the caller may not read
+// are absent and listed in Omitted.
+type Report struct {
+	Meta
+	Anonymized bool              `json:"anonymized"`
+	Status     Status            `json:"status"`
+	System     *SystemResponse   `json:"system,omitempty"`
+	Hardware   *HardwareResponse `json:"hardware,omitempty"`
+	Services   *ServicesResponse `json:"services,omitempty"`
+	Metrics    *MetricsResponse  `json:"metrics,omitempty"`
+	Storage    *StorageResponse  `json:"storage,omitempty"`
+	Network    *NetworkResponse  `json:"network,omitempty"`
+	Health     *HealthResponse   `json:"health,omitempty"`
+	Events     *EventsResponse   `json:"events,omitempty"`
+	Settings   *SettingsResponse `json:"settings,omitempty"`
+	Omitted    []ReportOmission  `json:"omitted"`
+}
+
+// ReportOmission names a report section left out and why.
+type ReportOmission struct {
+	Section string `json:"section"`
+	Reason  string `json:"reason"`
+}
+
+// ReportFormats are the values of the report format parameter.
+var ReportFormats = []string{"json", "markdown"}

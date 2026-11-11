@@ -172,6 +172,46 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/report:
+    get:
+      operationId: getReport
+      tags: [meta]
+      summary: Diagnostic report
+      description: >-
+        A point-in-time report made of the status, system, hardware and
+        services responses, plus metrics, storage, network, health and the
+        latest 100 events when the caller also holds `metrics:read`, and the
+        health thresholds over the local socket (D21). Sections the caller
+        cannot read are listed in `omitted`. Sensitive fields stay redacted
+        (D9). With `anonymize=true`, host names, DNS search domains,
+        non-loopback IP addresses, MAC-like strings, user names from
+        `/home` paths and the machine ID are replaced with stable
+        placeholders.
+      x-cockpit-scope: system:read
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [json, markdown], default: json }
+        - name: anonymize
+          in: query
+          required: false
+          schema: { type: string, enum: ["true", "false"], default: "false" }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+            text/markdown:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/metrics:
     get:
       operationId: getMetrics
@@ -196,6 +236,70 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MetricsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/metrics/history:
+    get:
+      operationId: getMetricHistory
+      tags: [machine]
+      summary: Stored metric history
+      description: |
+        Samples are recorded every 10 seconds and rolled up to 1-minute and
+        1-hour min/avg/max buckets (D18). `resolution=auto` picks the finest
+        resolution that keeps each series within 2000 points. When history
+        is disabled, `status` is `not_configured` and series are empty.
+      x-cockpit-scope: metrics:read
+      parameters:
+        - name: series
+          in: query
+          required: true
+          description: Comma-separated series names (at most 10); see /metrics/history/series.
+          schema: { type: string, maxLength: 2600 }
+          example: cpu.usage_percent,memory.used_percent
+        - name: from
+          in: query
+          required: false
+          description: Start (RFC 3339). Default one hour before `to`. The range may be at most 90 days.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: End (RFC 3339). Default now.
+          schema: { type: string, format: date-time }
+        - name: resolution
+          in: query
+          required: false
+          schema: { type: string, enum: [auto, raw, 1m, 1h], default: auto }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/metrics/history/series:
+    get:
+      operationId: listHistorySeries
+      tags: [machine]
+      summary: Recorded history series
+      x-cockpit-scope: metrics:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistorySeriesList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -282,7 +386,7 @@ paths:
       operationId: listEvents
       tags: [health]
       summary: Recent events, newest first
-      description: In-memory log of the most recent events (Phase 1). Use `next_cursor` to page through older events.
+      description: Events newest first, persisted for 30 days (at most 100,000). Use `next_cursor` to page through older events.
       x-cockpit-scope: metrics:read
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -297,6 +401,15 @@ paths:
           required: false
           description: Only events at or after this time (RFC 3339).
           schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          required: false
+          description: Only events before this time (RFC 3339).
+          schema: { type: string, format: date-time }
+        - name: type
+          in: query
+          required: false
+          schema: { type: string, enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked, settings.changed] }
       responses:
         "200":
           description: OK
@@ -478,6 +591,64 @@ paths:
               schema: { $ref: "#/components/schemas/CreatedAPIKey" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/settings:
+    get:
+      operationId: getSettings
+      tags: [keys]
+      summary: Effective health thresholds
+      description: Unix socket only (D19).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      operationId: updateSettings
+      tags: [keys]
+      summary: Replace health thresholds
+      description: Validated like the configuration file, stored, applied immediately and recorded as a settings.changed event. Unix socket only (D19).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSettingsRequest" }
+      responses:
+        "200":
+          description: Applied.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    delete:
+      operationId: resetSettings
+      tags: [keys]
+      summary: Return to the configuration file's thresholds
+      description: Unix socket only (D19).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "200":
+          description: Reset.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/InternalError" }
 components:
   securitySchemes:
@@ -1405,7 +1576,7 @@ components:
         time: { $ref: "#/components/schemas/Timestamp" }
         type:
           type: string
-          enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked]
+          enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked, settings.changed]
         severity: { type: string, enum: [info, warning, critical] }
         subject: { type: string }
         message: { type: string }
@@ -1490,6 +1661,125 @@ components:
         load_state: { type: string, examples: [loaded, not-found, masked] }
         active_state: { type: string, examples: [active, inactive, failed, activating] }
         sub_state: { type: string, examples: [running, exited, dead] }
+    HistoryResponse:
+      type: object
+      additionalProperties: false
+      required: [schema_version, machine_id, generated_at, status, from, to, resolution, step_seconds, series]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        status: { $ref: "#/components/schemas/Availability" }
+        reason: { type: string }
+        from: { $ref: "#/components/schemas/Timestamp" }
+        to: { $ref: "#/components/schemas/Timestamp" }
+        resolution: { type: string, enum: [raw, 1m, 1h] }
+        step_seconds: { type: integer, minimum: 1 }
+        series:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, unit, points]
+            properties:
+              name: { type: string }
+              unit: { type: string, enum: ["", percent, bytes, bytes_per_second, celsius, watts] }
+              points:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [t, min, avg, max]
+                  properties:
+                    t: { $ref: "#/components/schemas/Timestamp" }
+                    min: { type: number }
+                    avg: { type: number }
+                    max: { type: number }
+    HistorySeriesList:
+      type: object
+      additionalProperties: false
+      required: [schema_version, machine_id, generated_at, status, items]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        status: { $ref: "#/components/schemas/Availability" }
+        reason: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, unit, first, last]
+            properties:
+              name: { type: string, examples: [cpu.usage_percent, net.eth0.rx_bytes_per_second] }
+              unit: { type: string }
+              first: { $ref: "#/components/schemas/Timestamp" }
+              last: { $ref: "#/components/schemas/Timestamp" }
+    HealthSettings:
+      type: object
+      additionalProperties: false
+      required: [confirm, cpu_temperature_celsius, memory_available_percent, memory_pressure_percent, storage_used_percent, network_errors_per_minute, disk]
+      properties:
+        confirm: { type: integer, minimum: 1, maximum: 20, description: Consecutive evaluations before a finding is raised or cleared. }
+        cpu_temperature_celsius: { type: object, additionalProperties: false, required: [warn, critical], properties: { warn: { type: number }, critical: { type: number } } }
+        memory_available_percent:
+          description: Warning when available memory falls below warn; critical below critical.
+          type: object
+          additionalProperties: false
+          required: [warn, critical]
+          properties: { warn: { type: number }, critical: { type: number } }
+        memory_pressure_percent: { type: object, additionalProperties: false, required: [warn, critical], properties: { warn: { type: number }, critical: { type: number } } }
+        storage_used_percent: { type: object, additionalProperties: false, required: [warn, critical], properties: { warn: { type: number }, critical: { type: number } } }
+        network_errors_per_minute: { type: object, additionalProperties: false, required: [warn, critical], properties: { warn: { type: number }, critical: { type: number } } }
+        disk:
+          type: object
+          additionalProperties: false
+          required: [warn_percentage_used]
+          properties: { warn_percentage_used: { type: integer, minimum: 1, maximum: 100 } }
+    Report:
+      type: object
+      additionalProperties: false
+      description: GET /report (D21). Each part is the matching endpoint's response.
+      required: [schema_version, machine_id, generated_at, anonymized, status, omitted]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        anonymized: { type: boolean }
+        status: { $ref: "#/components/schemas/Status" }
+        system: { $ref: "#/components/schemas/SystemResponse" }
+        hardware: { $ref: "#/components/schemas/HardwareResponse" }
+        services: { $ref: "#/components/schemas/ServicesResponse" }
+        metrics: { $ref: "#/components/schemas/MetricsResponse" }
+        storage: { $ref: "#/components/schemas/StorageResponse" }
+        network: { $ref: "#/components/schemas/NetworkResponse" }
+        health: { $ref: "#/components/schemas/HealthResponse" }
+        events: { $ref: "#/components/schemas/EventsResponse" }
+        settings: { $ref: "#/components/schemas/SettingsResponse" }
+        omitted:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [section, reason]
+            properties:
+              section: { type: string, enum: [metrics, storage, network, health, events, settings] }
+              reason: { type: string }
+    SettingsResponse:
+      type: object
+      additionalProperties: false
+      required: [health, source, updated_at]
+      properties:
+        health: { $ref: "#/components/schemas/HealthSettings" }
+        source: { type: string, enum: [configuration, override] }
+        updated_at: { type: [string, "null"], format: date-time }
+    UpdateSettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [health]
+      properties:
+        health: { $ref: "#/components/schemas/HealthSettings" }
     Scope:
       type: string
       enum: [system:read, metrics:read, processes:read, admin]

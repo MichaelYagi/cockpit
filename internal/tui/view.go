@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,11 +113,12 @@ func (m *Model) tabs(w int) string {
 			parts = append(parts, sTabOff.Render(label))
 		}
 	}
-	return truncate(strings.Join(parts, " "), w)
+	_, gap := tabNames(w)
+	return truncate(strings.Join(parts, strings.Repeat(" ", gap)), w)
 }
 
 func (m *Model) footer(w int) string {
-	hints := []string{"1-9 screens", "tab next", "r refresh", "? help", "q quit"}
+	hints := []string{"0-9 , screens", "tab next", "r refresh", "? help", "q quit"}
 	switch m.screen {
 	case scrAccess:
 		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "? help", "q quit"}
@@ -129,7 +132,17 @@ func (m *Model) footer(w int) string {
 		if m.svcFailed {
 			label = "show all"
 		}
-		hints = []string{"f " + label, "1-9 screens", "? help", "q quit"}
+		hints = []string{"f " + label, "tab next", "? help", "q quit"}
+	case scrPerformance:
+		hints = []string{"t range:" + rangeLabel(historyRanges[m.histRange]), "tab next", "? help", "q quit"}
+	case scrEvents:
+		f := severityFilters[m.evFilter]
+		if f == "" {
+			f = "all"
+		}
+		hints = []string{"v severity:" + f, "m older", "tab next", "q quit"}
+	case scrSettings:
+		hints = []string{"↑↓ select", "enter edit", "w save", "d reset", "esc discard", "+/- refresh"}
 	}
 	if m.modal != modalNone {
 		hints = []string{"enter confirm", "esc cancel"}
@@ -212,7 +225,8 @@ func column(boxes []box, w, h int) string {
 	if dropped := len(boxes) - keep; dropped > 0 && used < h {
 		var names []string
 		for _, b := range boxes[keep:] {
-			names = append(names, b.title)
+			name, _, _ := strings.Cut(b.title, " · ") // drop inline stats
+			names = append(names, name)
 		}
 		out = append(out, sMuted.Render(truncate(" Not shown at this size: "+strings.Join(names, ", ")+". Enlarge the terminal or use the other screens.", w)))
 	}
@@ -276,6 +290,10 @@ func waiting() []string { return []string{sMuted.Render("waiting for data…")} 
 
 func (m *Model) screenView(w, h int) string {
 	switch m.screen {
+	case scrPerformance:
+		return m.performanceScreen(w, h)
+	case scrSettings:
+		return m.settingsScreen(w, h)
 	case scrHardware:
 		return m.hardwareScreen(w, h)
 	case scrProcesses:
@@ -792,6 +810,22 @@ func (m *Model) modalView(w int) string {
 		title = verb + " key " + m.pendingID
 		lines = append(lines, wrapText(effect, inner)...)
 		lines = append(lines, "", "Type the key ID to confirm:", sAccent.Render("› ")+m.input+sAccent.Render("█"), "", sMuted.Render("enter confirm · esc cancel"))
+	case modalEditSetting:
+		f := settingFields[m.setField]
+		title = "Edit threshold"
+		lines = []string{f.label + sMuted.Render("  (current "+fmtSetting(f, m.draft)+" "+f.unit+")"), "", sAccent.Render("› ") + m.input + sAccent.Render("█") + " " + sMuted.Render(f.unit), "", sMuted.Render("enter set · esc cancel")}
+	case modalConfirmSettings:
+		if m.pendingAction == "reset" {
+			title = "Reset thresholds"
+			lines = wrapText("Return every health threshold to the values in the configuration file? This applies immediately.", inner)
+		} else {
+			title = "Save thresholds"
+			lines = wrapText("Apply the edited thresholds now? They take effect at the next health evaluation and are kept across restarts.", inner)
+			for _, c := range m.settingsChanges() {
+				lines = append(lines, sAccent.Render("  "+c))
+			}
+		}
+		lines = append(lines, "", sMuted.Render("y apply · n cancel"))
 	case modalReveal:
 		title = "New API key — shown only once"
 		k := m.revealed
@@ -810,7 +844,7 @@ func (m *Model) modalView(w int) string {
 func (m *Model) helpView(w, h int) string {
 	lines := []string{
 		sBold.Render("Navigation"),
-		kv("1-9", "switch screen") + "      " + kv("tab", "next screen"),
+		kv("0-9 ,", "switch screen") + "    " + kv("tab", "next screen"),
 		kv("←/→", "previous / next") + "    " + kv("click", "tab bar"),
 		kv("r", "refresh now") + "        " + kv("?", "toggle help"),
 		kv("q", "quit"),
@@ -818,6 +852,10 @@ func (m *Model) helpView(w, h int) string {
 		sBold.Render("Processes"),
 		kv("s", "change sort") + "        " + kv("/", "search"),
 		kv("k", "kernel threads") + "     " + kv("esc", "clear search"),
+		"",
+		sBold.Render("Performance · Events · Settings"),
+		kv("t", "chart range") + "        " + kv("v", "event severity") + "    " + kv("m", "older events"),
+		kv("enter", "edit threshold") + "   " + kv("w", "save") + "  " + kv("d", "reset to file"),
 		"",
 		sBold.Render("Services"),
 		kv("f", "failed only / all"),
@@ -1121,7 +1159,15 @@ func (m *Model) eventsScreen(w, h int) string {
 	default:
 		status = badge(lvUnknown, "connecting")
 	}
-	title := "Events · " + status + sMuted.Render(fmt.Sprintf(" · %d shown, newest first", len(m.eventList)))
+	filter := "all severities"
+	if f := severityFilters[m.evFilter]; f != "" {
+		filter = f + " and above"
+	}
+	more := ""
+	if m.evMore {
+		more = " · m for older"
+	}
+	title := "Events · " + status + sMuted.Render(fmt.Sprintf(" · %s · %d shown, newest first%s", filter, len(m.eventList), more))
 	return column([]box{{title: title, lines: m.eventLines(0), flex: true}}, w, h)
 }
 
@@ -1174,3 +1220,271 @@ func (m *Model) netConfigLines(inner int) []string {
 
 // kvw is kv with a fixed label width of 9 (labels up to "features").
 func kvw(k, v string) string { return sMuted.Render(pad(k, 9)) + v }
+
+// ---- Phase 3 screens ----
+
+func rangeLabel(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
+}
+
+var chartRunes = []rune(" ▁▂▃▄▅▆▇█")
+
+// chart draws points as a block chart w columns by h rows over [from, to].
+// Columns without data stay empty (gaps are visible, not zero).
+func chart(points []apiv1.HistoryPoint, w, h int, top float64, from, to time.Time) []string {
+	if w < 1 || h < 1 {
+		return nil
+	}
+	sum := make([]float64, w)
+	n := make([]int, w)
+	span := to.Sub(from)
+	for _, p := range points {
+		if p.Time.Before(from) || p.Time.After(to) || span <= 0 {
+			continue
+		}
+		c := int(float64(p.Time.Sub(from)) / float64(span) * float64(w))
+		c = min(max(c, 0), w-1)
+		sum[c] += p.Avg
+		n[c]++
+	}
+	if top <= 0 {
+		for c := range sum {
+			if n[c] > 0 {
+				top = math.Max(top, sum[c]/float64(n[c]))
+			}
+		}
+	}
+	rows := make([][]rune, h)
+	for r := range rows {
+		rows[r] = []rune(strings.Repeat(" ", w))
+	}
+	for c := 0; c < w; c++ {
+		if n[c] == 0 || top <= 0 {
+			continue
+		}
+		eighths := int(math.Round(math.Min(1, math.Max(0, sum[c]/float64(n[c])/top)) * float64(h*8)))
+		if eighths == 0 {
+			eighths = 1 // a measured value is never drawn as a gap
+		}
+		for level := 0; level < h; level++ {
+			fill := eighths - level*8
+			switch {
+			case fill >= 8:
+				rows[h-1-level][c] = '█'
+			case fill > 0:
+				rows[h-1-level][c] = chartRunes[fill]
+			}
+		}
+	}
+	out := make([]string, h)
+	for r := range rows {
+		out[r] = sAccent.Render(string(rows[r]))
+	}
+	return out
+}
+
+// sumSeries adds series point-by-point (same timestamps).
+func sumSeries(series []apiv1.HistorySeries) []apiv1.HistoryPoint {
+	byT := map[time.Time]float64{}
+	for _, s := range series {
+		for _, p := range s.Points {
+			byT[p.Time] += p.Avg
+		}
+	}
+	out := make([]apiv1.HistoryPoint, 0, len(byT))
+	for t, v := range byT {
+		out = append(out, apiv1.HistoryPoint{Time: t, Min: v, Avg: v, Max: v})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Time.Before(out[j].Time) })
+	return out
+}
+
+func fmtValue(v float64, unit string) string {
+	switch unit {
+	case "percent":
+		return fmt.Sprintf("%.1f%%", v)
+	case "bytes_per_second":
+		return rate(&v)
+	case "bytes":
+		return bytes(uint64(math.Max(0, v)))
+	case "celsius":
+		return fmt.Sprintf("%.0f °C", v)
+	case "watts":
+		return fmt.Sprintf("%.0f W", v)
+	}
+	return fmt.Sprintf("%.2f", v)
+}
+
+var chartTitles = map[string]string{
+	"cpu.usage_percent": "CPU usage", "memory.used_percent": "Memory used", "gpu.0.utilization_percent": "GPU busy",
+	"sensors.cpu_temperature_celsius": "CPU temperature", "cpu.load_1m": "Load (1m)",
+}
+
+func (m *Model) performanceScreen(w, h int) string {
+	inner := w - 4
+	switch {
+	case m.histErr != "":
+		return column([]box{{title: "Performance", lines: []string{badge(lvUnknown, "history unavailable"), sMuted.Render(m.histErr)}}}, w, h)
+	case m.histData == nil:
+		return column([]box{{title: "Performance", lines: waiting()}}, w, h)
+	}
+	d := m.histData
+	type plot struct {
+		title  string
+		unit   string
+		points []apiv1.HistoryPoint
+		top    float64
+	}
+	var plots []plot
+	var rx, tx []apiv1.HistorySeries
+	for _, s := range d.Series {
+		switch {
+		case strings.HasSuffix(s.Name, ".rx_bytes_per_second"):
+			rx = append(rx, s)
+		case strings.HasSuffix(s.Name, ".tx_bytes_per_second"):
+			tx = append(tx, s)
+		default:
+			top := 0.0
+			if s.Unit == "percent" {
+				top = 100
+			}
+			plots = append(plots, plot{title: chartTitles[s.Name], unit: s.Unit, points: s.Points, top: top})
+		}
+	}
+	if len(rx) > 0 {
+		plots = append(plots, plot{title: "Network received (all interfaces)", unit: "bytes_per_second", points: sumSeries(rx)})
+	}
+	if len(tx) > 0 {
+		plots = append(plots, plot{title: "Network sent (all interfaces)", unit: "bytes_per_second", points: sumSeries(tx)})
+	}
+
+	twoCols := w >= 120
+	cw := w
+	if twoCols {
+		cw = w / 2
+	}
+	chartW := max(10, cw-4-9)
+	const rows = 4
+	var boxes []box
+	for _, p := range plots {
+		if len(p.points) == 0 {
+			continue
+		}
+		lo, hi, sum := math.Inf(1), math.Inf(-1), 0.0
+		for _, pt := range p.points {
+			lo, hi, sum = math.Min(lo, pt.Min), math.Max(hi, pt.Max), sum+pt.Avg
+		}
+		avg := sum / float64(len(p.points))
+		top := p.top
+		if top <= 0 {
+			top = hi
+		}
+		lines := chart(p.points, chartW, rows, top, d.From, d.To)
+		for i := range lines {
+			label := ""
+			switch i {
+			case 0:
+				label = fmtValue(top, p.unit)
+			case rows - 1:
+				label = fmtValue(0, p.unit)
+			}
+			lines[i] = sMuted.Render(padLeft(label, 8)) + " " + lines[i]
+		}
+		axis := pad(d.From.Local().Format("Jan 02 15:04"), chartW/2) + padLeft(d.To.Local().Format("15:04"), chartW-chartW/2)
+		lines = append(lines, strings.Repeat(" ", 9)+sMuted.Render(axis))
+		title := fmt.Sprintf("%s · avg %s · min %s · max %s", p.title, fmtValue(avg, p.unit), fmtValue(lo, p.unit), fmtValue(hi, p.unit))
+		boxes = append(boxes, box{title: title, lines: lines})
+	}
+	if len(boxes) == 0 {
+		return column([]box{{title: "Performance", lines: []string{sMuted.Render("No history recorded for this range yet. Samples are taken every 10 seconds.")}}}, w, h)
+	}
+	header := sMuted.Render(fmt.Sprintf(" Last %s · %s resolution · t to change the range", rangeLabel(historyRanges[m.histRange]), d.Resolution))
+	h--
+	if !twoCols {
+		return header + "\n" + column(boxes, w, h)
+	}
+	var left, right []box
+	for i, b := range boxes {
+		if i%2 == 0 {
+			left = append(left, b)
+		} else {
+			right = append(right, b)
+		}
+	}
+	_ = inner
+	return header + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, column(left, cw, h), column(right, w-cw, h))
+}
+
+func fmtSetting(f settingField, h *apiv1.HealthSettings) string {
+	if h == nil {
+		return "—"
+	}
+	v := f.get(h)
+	if f.whole {
+		return strconv.Itoa(int(v))
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
+// settingsChanges lists edited fields as "label: old -> new".
+func (m *Model) settingsChanges() []string {
+	if m.draft == nil || m.settings == nil {
+		return nil
+	}
+	cur := m.settings.Health
+	var out []string
+	for _, f := range settingFields {
+		if f.get(m.draft) != f.get(&cur) {
+			out = append(out, fmt.Sprintf("%s: %s → %s %s", f.label, fmtSetting(f, &cur), fmtSetting(f, m.draft), f.unit))
+		}
+	}
+	return out
+}
+
+func (m *Model) settingsScreen(w, h int) string {
+	local := []string{
+		kv("refresh", m.opts.Refresh.String()) + sMuted.Render("  (this session; + and - change it)"),
+		kv("agent", m.opts.Target),
+	}
+	var lines []string
+	switch {
+	case !m.isAdmin():
+		lines = []string{sMuted.Render("Health thresholds can be changed only through the local admin socket.")}
+	case m.settingsErr != "":
+		lines = []string{sCrit.Render("✖ " + m.settingsErr)}
+	case m.settings == nil:
+		lines = waiting()
+	default:
+		shown := &m.settings.Health
+		if m.draft != nil {
+			shown = m.draft
+		}
+		src := "from the configuration file"
+		if m.settings.Source == "override" {
+			src = "changed at runtime"
+			if m.settings.UpdatedAt != nil {
+				src += " on " + m.settings.UpdatedAt.Local().Format("2006-01-02 15:04")
+			}
+			src += " (d resets to the file)"
+		}
+		lines = append(lines, sMuted.Render("Thresholds "+src+"."), "")
+		for i, f := range settingFields {
+			cursor := "  "
+			if i == m.setField {
+				cursor = sAccent.Render("▶ ")
+			}
+			val := fmtSetting(f, shown)
+			if m.draft != nil && f.get(m.draft) != f.get(&m.settings.Health) {
+				val = sWarn.Render(val + " *")
+			}
+			lines = append(lines, cursor+pad(f.label, 36)+padLeft(val, 10)+" "+sMuted.Render(f.unit))
+		}
+		if m.draft != nil {
+			lines = append(lines, "", sWarn.Render("* unsaved — w to save, esc to discard"))
+		}
+	}
+	return column([]box{{title: "Terminal UI", lines: local}, {title: "Health thresholds", lines: lines, flex: true}}, w, h)
+}

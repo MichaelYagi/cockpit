@@ -7,9 +7,11 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/MichaelYagi/cockpit/internal/collector"
 	"github.com/MichaelYagi/cockpit/internal/core"
 )
 
@@ -192,6 +194,65 @@ func TestFilesystems(t *testing.T) {
 	for _, q := range queried {
 		if q == "/mnt/nfs" || q == "/proc" || q == "/run" || q == "/srv/home-bind" || q == "/snap/core/1" || q == "/init" || q == "/usr/lib/modules" {
 			t.Errorf("statfs called on %s", q)
+		}
+	}
+}
+
+func TestFilesystemsFilter(t *testing.T) {
+	mountinfo := `22 1 8:1 / / rw - ext4 /dev/sda1 rw
+24 22 0:20 / /run rw - tmpfs tmpfs rw
+25 22 0:21 / /dev/shm rw - tmpfs tmpfs rw
+26 22 8:2 / /data rw - xfs /dev/sdb1 rw
+27 22 0:40 / /mnt/nfs rw - nfs4 server:/export rw
+28 22 8:3 / /var/lib/docker/volumes/a rw - ext4 /dev/sdc1 rw
+29 22 8:4 / /var/lib/docker rw - ext4 /dev/sdd1 rw
+30 22 8:5 / /backup rw - btrfs /dev/sde1 rw
+31 22 0:50 / /var/lib/containers/x rw - overlay none rw
+`
+	root := tree(t, map[string]string{"proc/self/mountinfo": mountinfo})
+	e := env(root)
+	e.Filesystems = collector.FilesystemFilter{
+		ExcludeTypes:       []string{"btrfs"},
+		IncludeTypes:       []string{"tmpfs", "overlay", "nfs4"}, // nfs4 is ignored: never inspected
+		ExcludeMountPoints: []string{"/var/lib/docker/**", "/dev/*"},
+	}
+	c := newFilesystems(e)
+	var queried []string
+	c.statfs = func(p string) (fsStats, error) {
+		queried = append(queried, p)
+		return fsStats{total: uint64(1000 + len(queried)), free: 10, avail: 10}, nil
+	}
+	fss := record[core.Filesystems](t, c.Collect(context.Background()))
+	var got []string
+	for _, f := range fss {
+		got = append(got, f.MountPoint)
+	}
+	if strings.Join(got, " ") != "/ /data /run /var/lib/containers/x" {
+		t.Errorf("mounts %v (queried %v)", got, queried)
+	}
+	for _, q := range queried {
+		if q == "/mnt/nfs" {
+			t.Error("a network filesystem was inspected")
+		}
+	}
+}
+
+func TestExcludedMount(t *testing.T) {
+	for _, tt := range []struct {
+		pattern, mount string
+		want           bool
+	}{
+		{"/snap/*", "/snap/core", true},
+		{"/snap/*", "/snap/core/1", false},
+		{"/snap/**", "/snap/core/1", true},
+		{"/snap/**", "/snap", true},
+		{"/snap/**", "/snapshots", false},
+		{"/mnt/[cd]", "/mnt/c", true},
+		{"/mnt/[cd]", "/mnt/e", false},
+		{"/**", "/anything", true},
+	} {
+		if got := excludedMount([]string{tt.pattern}, tt.mount); got != tt.want {
+			t.Errorf("%s vs %s: %v", tt.pattern, tt.mount, got)
 		}
 	}
 }

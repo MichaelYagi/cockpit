@@ -52,8 +52,8 @@ decision entry before deviating from one.
 | Item | Value |
 |---|---|
 | Module | `github.com/MichaelYagi/cockpit` |
-| Executable | `cockpit` (`agent`, `tui`, `keys`, `config check`, `version`) |
-| systemd unit | `cockpit-agent.service` |
+| Executable | `cockpit` (`agent`, `tui`, `keys`, `report`, `smart-helper`, `config check`, `version`) |
+| systemd units | `cockpit-agent.service`, `cockpit-smart.service` / `.timer` (D20) |
 | System config / data / runtime | `/etc/cockpit-monitor/`, `/var/lib/cockpit-monitor/`, `/run/cockpit-monitor/` |
 | User-mode dirs | `$XDG_{CONFIG,STATE,RUNTIME}_HOME/cockpit-monitor/` |
 | Env prefix | `COCKPIT_` |
@@ -107,7 +107,9 @@ internal/
   events/                    # event bus and ring buffer
   auth/                      # API keys and scopes (no HTTP)
   storage/sqlite/            # key store (later history), migrations
-  history/                   # Phase 3
+  history/                   # metric history: recorder, tiers, retention (D18)
+  settings/                  # runtime health thresholds (D19)
+  report/                    # diagnostic report anonymization and Markdown (D21)
   logging/                   # slog setup, secret redaction, UTC timestamps
   netaddr/                   # loopback classification for listen and Host addresses
   ulid/                      # request and event IDs
@@ -124,6 +126,7 @@ internal/
 pkg/
   apiv1/                     # public wire types matching the spec
   client/                    # public Go SDK (Unix socket, TCP, TLS)
+deploy/                      # systemd units, sysusers.d entry, install/uninstall scripts (+ tests)
 docs/
 ```
 
@@ -209,8 +212,8 @@ Visual language:
 
 Navigation: Overview, Hardware, Performance, Health, Storage, Network,
 Processes, Services, Events / Logs, API Access, Settings. Screens without
-an implementation are hidden, not shown empty (Performance and Settings,
-as of Phase 2).
+an implementation are hidden, not shown empty (all are implemented as of
+Phase 3).
 
 Text from the API (process names, device strings, descriptions) is
 untrusted: never render it without the sanitization in `sanitize.go`.

@@ -102,17 +102,35 @@ SMART) are reported, not fatal.
 
 ## Phase 3 — History and operational polish
 
-- SQLite metric history with retention and downsampling; `/metrics/history`.
-- Historical sparklines and charts in the TUI.
-- Event persistence, filtering and pagination.
-- Configurable thresholds and refresh intervals in the TUI.
-- Diagnostic report export (redacted).
-- `cockpit-agent.service`, `cockpit-monitor` user/group, packaging,
-  installation and upgrade docs.
+**Status: implemented, awaiting review.** Every milestone below is done,
+verified with tests and against a real WSL2 host: history and charts, a
+real diagnostic report checked for leaks, and the agent run under the
+unit's seccomp and memory restrictions in a transient systemd unit. The
+units pass `systemd-analyze verify`; nothing was installed system-wide,
+so the full system service has not been run as root here. D18–D21 are
+implemented as written (D20 and D21 with the clarifications noted there)
+and await acceptance.
+
+| # | Milestone | Depends on |
+|---|---|---|
+| 3A | Metric history: recorder sampling the snapshot every 10s into SQLite, batched writes, rollups to 1-minute and 1-hour tiers, retention per tier (D18) | 1C |
+| 3B | `GET /metrics/history` and `/metrics/history/series`: series, time range, automatic resolution, point limits | 3A |
+| 3C | Event persistence: events written to SQLite asynchronously, loaded on start, filtered and paginated from storage, bounded retention | 1E |
+| 3D | TUI: Performance screen with charts over 1h/6h/24h/7d; sparklines seeded from history; event filtering and paging | 3B, 3C |
+| 3E | Settings: health thresholds editable through a socket-only admin API (`GET`/`PUT /settings`), persisted, applied without restart, confirmed in the TUI (D19) | 1E |
+| 3F | Diagnostic report: `cockpit report` and `GET /report` produce a redacted JSON or Markdown snapshot; `--anonymize` hides host names and addresses (D21) | 2* |
+| 3G | Packaging: `cockpit-agent.service` with systemd hardening, `cockpit-monitor` user/group (sysusers.d), install/uninstall script, upgrade docs; SMART helper timer running `smartctl` as root and writing results the unprivileged agent reads (Q1, D20) | all |
+| 3H | Configurable filesystem skip lists (Q5); docs, spec and security review | all |
+
+**Exit criteria:** the agent runs unattended as a hardened system service
+without root, keeps bounded history and events across restarts, serves
+history through the API, shows charts in the TUI, lets the local admin
+adjust thresholds, and exports a redacted diagnostic report.
 
 ## Phase 4 — Extensibility
 
 - Collector SDK documentation, `core.GenericMetric`, compatibility metadata.
+- Bare `cockpit` opens the TUI in a terminal and prints help otherwise (Q2).
 - Example external collector compiled into a development build.
 - Published Go SDK; Python and TypeScript examples.
 - Docker/Podman, ZFS, UPS, additional GPU collectors.
@@ -128,9 +146,9 @@ SMART) are reported, not fatal.
 
 | # | Question | Needed by | Current recommendation |
 |---|---|---|---|
-| Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. Phase 3: a root-owned systemd timer runs `smartctl --json` and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
-| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 2 | Still prints help. Launching the TUI is now reasonable since it can embed an agent. |
-| Q5 | Should the filesystem skip lists become configurable? | 3 | Yes, with the history work. |
+| Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. **Phase 3 done (D20):** `cockpit-smart.timer` runs `cockpit smart-helper` as root hourly and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
+| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 4 | **Decided (2026-11-11):** launch the TUI when stdin and stdout are terminals; otherwise print help. `cockpit help` and `-h` keep printing help. Scheduled for Phase 4. |
+| Q5 | Should the filesystem skip lists become configurable? | 3 | **Done (Phase 3):** `collection.filesystems` with `exclude_types`, `include_types` and `exclude_mount_points`. Network filesystems stay excluded. |
 | Q6 | Should a dedicated scope cover network addresses, routes and DNS? | 3 | No for now: documented as visible with `metrics:read`. Revisit with fleet mode. |
 | Q7 | Should command lines ever be exposed (behind a new scope)? | 3+ | Not until there is a clear need; they often contain secrets. |
 | Q3 | Default TCP port | 0.6 | `7878` (avoids 9090, used by Red Hat Cockpit) |

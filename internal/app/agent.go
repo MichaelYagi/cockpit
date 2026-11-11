@@ -29,8 +29,10 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/engine"
 	"github.com/MichaelYagi/cockpit/internal/events"
 	"github.com/MichaelYagi/cockpit/internal/health"
+	"github.com/MichaelYagi/cockpit/internal/history"
 	"github.com/MichaelYagi/cockpit/internal/netaddr"
 	"github.com/MichaelYagi/cockpit/internal/platform"
+	"github.com/MichaelYagi/cockpit/internal/settings"
 	"github.com/MichaelYagi/cockpit/internal/storage/sqlite"
 	"github.com/MichaelYagi/cockpit/pkg/apiv1"
 )
@@ -121,6 +123,9 @@ func Run(ctx context.Context, o Options) (err error) {
 	}
 	cleanup = append(cleanup, func(context.Context) error { return db.Close() })
 	eventLog := events.NewLog(events.DefaultCapacity, o.Now)
+	if err := eventLog.Persist(ctx, db, log.With("component", "events")); err != nil {
+		return fmt.Errorf("load events: %w", err)
+	}
 	publish := func(e core.Event) { eventLog.Publish(e) }
 	keys := auth.NewService(db, auth.ServiceOptions{Now: o.Now, Logger: log.With("component", "auth"), OnEvent: publish})
 	verifier := o.Verifier
@@ -130,9 +135,16 @@ func Run(ctx context.Context, o Options) (err error) {
 	cleanup = append(cleanup, stopBackground) // runs before db.Close
 	bg.Add(1)
 	go func() { defer bg.Done(); keys.RunFlusher(bgCtx, 30*time.Second) }()
+	bg.Add(1)
+	go func() { defer bg.Done(); eventLog.RunWriter(bgCtx) }()
 
 	// 3. Collectors and engine.
 	env := collector.DefaultEnv(log.With("component", "collector"), pathTools{})
+	if paths.Mode == config.ModeSystem {
+		env.SMARTResultsDir = SMARTResultsDir(paths) // written by cockpit-smart.service (D20)
+	}
+	fsf := cfg.Collection.Filesystems
+	env.Filesystems = collector.FilesystemFilter{ExcludeTypes: fsf.ExcludeTypes, IncludeTypes: fsf.IncludeTypes, ExcludeMountPoints: fsf.ExcludeMountPoints}
 	eng, err := engine.New(o.Collectors(env), engine.Options{
 		Logger:   log.With("component", "engine"),
 		Now:      o.Now,
@@ -153,8 +165,21 @@ func Run(ctx context.Context, o Options) (err error) {
 		Publish:    publish,
 		Wait:       eng.Ready(),
 	})
+	settingsSvc := settings.New(db, cfg.Health, func(h config.Health) { evaluator.SetThresholds(Thresholds(h), h.Confirm) },
+		o.Now, publish, log.With("component", "settings"))
+	if err := settingsSvc.Load(ctx); err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
 	bg.Add(1)
 	go func() { defer bg.Done(); evaluator.Run(bgCtx, cfg.Health.Interval) }()
+
+	var recorder *history.Recorder
+	if cfg.History.Enabled {
+		r := cfg.History.Retention
+		recorder = history.NewRecorder(db, eng, history.Retention{Raw: r.Raw, Minute: r.Minute, Hour: r.Hour}, o.Now, log.With("component", "history"))
+		bg.Add(1)
+		go func() { defer bg.Done(); recorder.Run(bgCtx) }()
+	}
 
 	// 4. API listeners.
 	specJSON, err := openapi.JSON()
@@ -166,7 +191,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	deps := api.Deps{
 		Logger: log.With("component", "api"), Verifier: verifier, Status: status, SpecJSON: specJSON, Now: o.Now,
 		Snapshots: eng, Health: evaluator, Events: eventLog, Keys: keys,
-		Subscriber: eventLog, KeyChecker: keys, Processes: eng,
+		Subscriber: eventLog, KeyChecker: keys, Processes: eng, Settings: settingsSvc,
 		Stats: middleware.NewStats(o.Now),
 		Listeners: func() []apiv1.Listener {
 			if l := listeners.Load(); l != nil {
@@ -174,6 +199,9 @@ func Run(ctx context.Context, o Options) (err error) {
 			}
 			return []apiv1.Listener{}
 		},
+	}
+	if recorder != nil {
+		deps.History = db
 	}
 	rl := cfg.API.RateLimit
 	limits := middleware.NewLimits(middleware.LimitConfig{PerKeyRPS: rl.PerKeyRPS, PerKeyBurst: rl.PerKeyBurst,

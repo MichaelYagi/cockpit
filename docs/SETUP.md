@@ -42,7 +42,7 @@ programs, run the agent separately:
 
 | Key | Action |
 |---|---|
-| `1`–`9`, `tab`, `←`/`→`, click a tab | Switch screen (Overview, Hardware, Health, Storage, Network, Processes, Services, Events, API Access) |
+| `1`–`9`, `0`, `,`, `tab`, `←`/`→`, click a tab | Switch screen (1 Overview, 2 Hardware, 3 Performance, 4 Health, 5 Storage, 6 Network, 7 Processes, 8 Services, 9 Events, 0 API Access, `,` Settings) |
 | `r` | Refresh now |
 | `?` | Help |
 | `q`, `Ctrl-C` | Quit |
@@ -50,6 +50,16 @@ programs, run the agent separately:
 | `n` / `o` / `x` (API Access) | Create / rotate / revoke a key |
 | `s` / `/` / `k` (Processes) | Change sort / search / show kernel threads |
 | `f` (Services) | Failed services only / all |
+| `t` (Performance) | Chart range: 1h, 6h, 24h, 7d |
+| `v` / `m` (Events) | Minimum severity: all, warning, critical / load older events |
+| `+` / `-` (Settings) | Change this session's refresh interval |
+| `↑`/`↓`, `enter`, `w`, `d`, `esc` (Settings) | Select / edit a health threshold / save / reset to the file / discard edits |
+
+Performance charts come from the agent's metric history (raw samples for
+recent ranges, 1-minute or 1-hour aggregates for longer ones). Health
+thresholds can be changed only over the local socket. A save shows the
+changes and asks for confirmation; the override persists in the database
+until reset.
 
 Rotation and revocation ask you to type the key ID. A new key is shown once.
 It is erased from the screen when you press Enter and cannot be shown again.
@@ -65,6 +75,97 @@ It is erased from the screen when you press Enter and cannot be shown again.
 The agent refuses to start if these directories are more permissive than
 shown or owned by another user. `cockpit config check` prints the effective
 configuration and paths.
+
+## System service
+
+To keep monitoring when nobody is logged in, install the agent as a
+hardened systemd service running as the unprivileged `cockpit-monitor`
+user:
+
+```sh
+make build
+sudo ./deploy/install.sh                  # binary to /usr/local/bin, units to /etc/systemd/system
+sudo ./deploy/install.sh --smart-helper   # also enable the hourly SMART helper (needs smartmontools)
+sudo usermod -aG cockpit-monitor "$USER"  # admin socket access; log in again afterwards
+cockpit tui --mode system
+cockpit keys list --mode system
+```
+
+`install.sh` accepts `--prefix DIR` (default `/usr/local`) and `--no-start`.
+It installs:
+
+| Path | Contents | Mode |
+|---|---|---|
+| `/usr/local/bin/cockpit` | The binary | `0755` |
+| `/etc/systemd/system/cockpit-agent.service` | The agent (`cockpit agent --mode system`) | `0644` |
+| `/etc/systemd/system/cockpit-smart.{service,timer}` | SMART helper, hourly (D20) | `0644` |
+| `/etc/sysusers.d/cockpit-monitor.conf` | The `cockpit-monitor` user and group | `0644` |
+
+systemd creates the directories when the agent starts:
+
+| Path | Contents | Mode |
+|---|---|---|
+| `/etc/cockpit-monitor/config.yaml` | Optional configuration | `0750` dir |
+| `/var/lib/cockpit-monitor/` | Database, machine ID, lock | `0700` dir, `0600` files |
+| `/var/lib/cockpit-monitor/smart/` | SMART helper results | `0750` dir, `0640` files, `root:cockpit-monitor` |
+| `/run/cockpit-monitor/agent.sock` | Admin socket | `0750` dir, `0660` socket, group `cockpit-monitor` |
+
+Membership of the `cockpit-monitor` group gives full local admin access,
+including key management. Grant it as you would `sudo`.
+
+The unit applies systemd hardening: no capabilities, `NoNewPrivileges`, a
+read-only file system apart from its own directories, read-only home
+directories, a system-call filter and restricted address families
+(`systemd-analyze security cockpit-agent.service` rates it about 1.9,
+"OK"). Process listing and GPU metrics keep working.
+
+**SMART helper (D20).** Disk health needs raw device access, which the
+agent deliberately lacks. `cockpit-smart.timer` runs `cockpit smart-helper`
+as root once an hour (and two minutes after boot) with only the
+capabilities `smartctl` needs and no network. It writes one file per disk
+to `/var/lib/cockpit-monitor/smart/`, and the agent reads them. Results
+older than three hours are reported as stale. Without the helper, the
+agent runs `smartctl` itself, which usually reports `permission_denied`.
+Run it now with `sudo systemctl start cockpit-smart.service`; check it with
+`systemctl list-timers cockpit-smart.timer` and
+`journalctl -u cockpit-smart.service`. The helper refuses to write if its
+directory is a symlink, is not owned by root or is writable by others;
+remove the directory and run it again.
+
+**WSL.** `nvidia-smi` lives in `/usr/lib/wsl/lib`, which is not on a
+service's `PATH`. Add it with a drop-in:
+
+```sh
+sudo systemctl edit cockpit-agent.service
+# [Service]
+# Environment=PATH=/usr/lib/wsl/lib:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+**Upgrade.** Build the new version and run `sudo ./deploy/install.sh`
+again. It replaces the binary and units, reloads systemd and restarts the
+agent. Data, keys and history in `/var/lib/cockpit-monitor` are kept, and
+database migrations run on start. Local unit changes belong in drop-ins
+(`systemctl edit`), which upgrades do not overwrite.
+
+**Uninstall.** `sudo ./deploy/uninstall.sh` stops and removes the units and
+binary but keeps data, configuration and the user. `--purge` also deletes
+them, including every API key; this cannot be undone.
+
+## Diagnostic reports
+
+```sh
+./bin/cockpit report > report.md                        # Markdown, from the local socket
+./bin/cockpit report --format json -o report.json       # file is created with mode 0600
+./bin/cockpit report --anonymize -o report-shareable.md # placeholders for host names, IPs, MACs, users
+```
+
+Over the socket the report includes everything, including the health
+thresholds. Over TCP (`--url`, key in `COCKPIT_API_KEY`) it needs
+`system:read`; parts built from metrics are added when the key also has
+`metrics:read`, and the report lists anything it left out. Serial numbers,
+MAC addresses and other sensitive fields are never included. Check an
+anonymized report before sharing it: identifiers that appear only in free
+text, such as a host name in a service description, are not recognised.
 
 ## API keys
 
@@ -153,13 +254,32 @@ Unavailable data is reported with a reason, never as an error:
 |---|---|---|
 | Temperatures, fans | No hwmon/thermal sensors (VMs, containers, WSL) | Nothing; this is expected |
 | Disk health | `smartctl` not installed | Install smartmontools 7.0+ |
-| Disk health | Permission denied | Reading SMART data needs elevated privileges; a least-privilege option is planned for Phase 3 |
+| Disk health | Permission denied | Reading SMART data needs raw device access; in system mode enable the SMART helper (see System service) |
+| Disk health | Results more than 3 hours old | The SMART helper stopped running: `systemctl status cockpit-smart.timer` |
 | Memory pressure | Kernel without PSI (before 4.20, or `psi=0`) | Memory utilization is still checked |
 | GPU metrics | `nvidia-smi` not installed (NVIDIA) or no metrics source (e.g. Intel) | Install the NVIDIA driver utilities; the GPU is still listed |
 | Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
 | Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
 | Services | Not running systemd | Nothing; other features still work |
 | Processes (partial) | `/proc` mounted with `hidepid` | Run the agent with access to other users' processes, if appropriate |
+
+## Choosing filesystems
+
+Pseudo and in-memory filesystems (`proc`, `tmpfs`, `squashfs`, container
+overlays, …) are skipped, and network filesystems (NFS, SMB, sshfs, Ceph, …)
+are never inspected because a hung server can block collection. Adjust the
+rest in the configuration file:
+
+```yaml
+collection:
+  filesystems:
+    exclude_types: [fuse.mergerfs]
+    include_types: [tmpfs]                       # e.g. to watch /dev/shm
+    exclude_mount_points: ["/snap/**", "/mnt/[de]"]
+```
+
+Excluded filesystems disappear from the API, the TUI, history and the
+storage health check. Changes need an agent restart.
 
 ## Configuration reference
 

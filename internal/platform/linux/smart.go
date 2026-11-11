@@ -101,6 +101,10 @@ var (
 	smartNoPermission = core.CapabilityStatus{Availability: core.PermissionDenied,
 		Reason: "Reading SMART data requires elevated privileges. Disk health is unavailable while the agent runs unprivileged."}
 	smartNoDisks = core.CapabilityStatus{Availability: core.Unsupported, Reason: "No disks were found."}
+	smartStale   = core.CapabilityStatus{Availability: core.TemporarilyUnavailable,
+		Reason: "SMART results from the helper are more than 3 hours old. Check: systemctl status cockpit-smart.timer"}
+	smartVirtual = core.CapabilityStatus{Availability: core.Unsupported,
+		Reason: "None of the disks report SMART health (common for virtual disks)."}
 )
 
 // Probe is cheap: it checks for the tool and whether disks can be opened,
@@ -109,15 +113,18 @@ func (c *smartCollector) Probe(context.Context) map[core.Capability]core.Capabil
 	st := func(s core.CapabilityStatus) map[core.Capability]core.CapabilityStatus {
 		return map[core.Capability]core.CapabilityStatus{core.CapStorageSMART: s}
 	}
-	if _, ok := c.tool(); !ok {
-		return st(smartNotInstalled)
-	}
 	disks, err := listDisks(c.env.SysRoot)
 	if err != nil {
 		return st(status(err, "block device information"))
 	}
 	if len(disks) == 0 {
 		return st(smartNoDisks)
+	}
+	if _, found, _ := readHelperResults(c.env.SMARTResultsDir, disks, c.env.Now()); found {
+		return st(available())
+	}
+	if _, ok := c.tool(); !ok {
+		return st(smartNotInstalled)
 	}
 	for _, d := range disks {
 		if err := c.open(filepath.Join(c.env.DevRoot, d)); err == nil {
@@ -129,14 +136,34 @@ func (c *smartCollector) Probe(context.Context) map[core.Capability]core.Capabil
 
 func (c *smartCollector) Collect(ctx context.Context) collector.Result {
 	res := collector.Result{CollectedAt: c.env.Now(), Status: map[core.Capability]core.CapabilityStatus{}}
-	path, ok := c.tool()
-	if !ok {
-		res.Status[core.CapStorageSMART] = smartNotInstalled
-		return res
-	}
 	disks, err := listDisks(c.env.SysRoot)
 	if err != nil {
 		res.Status[core.CapStorageSMART] = status(err, "block device information")
+		return res
+	}
+	// Results from the privileged helper take precedence (D20).
+	if recs, found, stale := readHelperResults(c.env.SMARTResultsDir, disks, c.env.Now()); found {
+		var out core.DiskHealthList
+		for _, r := range recs {
+			if h, _, ok := parseSmartctl(r.Smartctl, r.ExitCode); ok {
+				h.Device = r.Device
+				out = append(out, h)
+			}
+		}
+		switch {
+		case len(out) > 0:
+			res.Status[core.CapStorageSMART] = available()
+			res.Records = []core.Record{out}
+		case stale > 0:
+			res.Status[core.CapStorageSMART] = smartStale
+		default:
+			res.Status[core.CapStorageSMART] = smartVirtual
+		}
+		return res
+	}
+	path, ok := c.tool()
+	if !ok {
+		res.Status[core.CapStorageSMART] = smartNotInstalled
 		return res
 	}
 	var out core.DiskHealthList
@@ -169,8 +196,7 @@ func (c *smartCollector) Collect(ctx context.Context) collector.Result {
 	case len(disks) == 0:
 		res.Status[core.CapStorageSMART] = smartNoDisks
 	default:
-		res.Status[core.CapStorageSMART] = core.CapabilityStatus{Availability: core.Unsupported,
-			Reason: "None of the disks report SMART health (common for virtual disks)."}
+		res.Status[core.CapStorageSMART] = smartVirtual
 	}
 	return res
 }

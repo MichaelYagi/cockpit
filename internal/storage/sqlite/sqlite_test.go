@@ -27,7 +27,7 @@ func open(t *testing.T) (*DB, string) {
 func TestOpenMigratesAndRestrictsPermissions(t *testing.T) {
 	db, path := open(t)
 	v, err := db.SchemaVersion(context.Background())
-	if err != nil || v != 1 {
+	if err != nil || v != migrationCount(t) {
 		t.Fatalf("version %d %v", v, err)
 	}
 	if runtime.GOOS != "windows" {
@@ -43,7 +43,7 @@ func TestOpenMigratesAndRestrictsPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db2.Close()
-	if v, _ := db2.SchemaVersion(context.Background()); v != 1 {
+	if v, _ := db2.SchemaVersion(context.Background()); v != migrationCount(t) {
 		t.Errorf("version after reopen %d", v)
 	}
 }
@@ -160,4 +160,15 @@ func TestPlaintextNeverPersisted(t *testing.T) {
 			t.Errorf("%s contains the key secret", filepath.Base(f))
 		}
 	}
+}
+
+// migrationCount is the number of embedded migrations, i.e. the expected
+// schema version.
+func migrationCount(t *testing.T) int {
+	t.Helper()
+	entries, err := migrations.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
 }

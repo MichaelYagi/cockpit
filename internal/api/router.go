@@ -65,6 +65,10 @@ type Deps struct {
 	// Listeners reports open listeners for the admin part of /status.
 	Listeners func() []apiv1.Listener
 	Processes handlers.ProcessSource
+	// History is nil when metric history is disabled.
+	History handlers.HistorySource
+	// Settings manages runtime settings (socket only).
+	Settings handlers.SettingsService
 	// Event streaming (D17).
 	Subscriber      handlers.Subscriber
 	KeyChecker      handlers.KeyChecker
@@ -92,6 +96,8 @@ func Routes(d Deps) []Route {
 	}
 	res := &handlers.Resources{Snapshots: d.Snapshots, MachineID: machineID, Policy: d.Redaction, Now: d.Now}
 	keys := &handlers.Keys{Service: d.Keys, Now: d.Now, Logger: d.Logger}
+	hist := &handlers.History{Source: d.History, MachineID: machineID, Now: d.Now, Logger: d.Logger}
+	set := &handlers.Settings{Service: d.Settings, Logger: d.Logger}
 	if d.Streams == nil {
 		d.Streams = handlers.NewStreamLimits()
 	}
@@ -110,6 +116,7 @@ func Routes(d Deps) []Route {
 		st.OpenStreams = d.Streams.Open()
 		return st
 	}
+	rep := &handlers.Report{Resources: res, Status: d.Status, Admin: admin, Health: d.Health, Events: d.Events, Settings: d.Settings, Logger: d.Logger}
 	get, post, del := http.MethodGet, http.MethodPost, http.MethodDelete
 	sys, met, prc, adm := auth.ScopeSystemRead, auth.ScopeMetricsRead, auth.ScopeProcessesRead, auth.ScopeAdmin
 	return []Route{
@@ -119,7 +126,10 @@ func Routes(d Deps) []Route {
 		{Method: get, Path: "/system", Scope: sys, Handler: res.System},
 		{Method: get, Path: "/hardware", Scope: sys, Handler: res.Hardware},
 		{Method: get, Path: "/services", Scope: sys, Handler: res.Services},
+		{Method: get, Path: "/report", Scope: sys, Handler: rep.Get},
 		{Method: get, Path: "/metrics", Scope: met, Handler: res.Metrics},
+		{Method: get, Path: "/metrics/history", Scope: met, Handler: hist.Query},
+		{Method: get, Path: "/metrics/history/series", Scope: met, Handler: hist.Series},
 		{Method: get, Path: "/storage", Scope: met, Handler: res.Storage},
 		{Method: get, Path: "/network", Scope: met, Handler: res.Network},
 		{Method: get, Path: "/sensors", Scope: met, Handler: res.Sensors},
@@ -131,6 +141,9 @@ func Routes(d Deps) []Route {
 		{Method: post, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.Create},
 		{Method: del, Path: "/keys/{id}", Scope: adm, SocketOnly: true, Handler: keys.Revoke},
 		{Method: post, Path: "/keys/{id}/rotate", Scope: adm, SocketOnly: true, Handler: keys.Rotate},
+		{Method: get, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Get},
+		{Method: http.MethodPut, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Put},
+		{Method: del, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Delete},
 	}
 }
 

@@ -71,6 +71,7 @@ const (
 	EventKeyCreated         EventType = "key.created"
 	EventKeyRotated         EventType = "key.rotated"
 	EventKeyRevoked         EventType = "key.revoked"
+	EventSettingsChanged    EventType = "settings.changed"
 )
 
 // Event is a timestamped occurrence worth recording.

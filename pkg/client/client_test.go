@@ -159,6 +159,8 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 	srv := mockAgent(t, func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.Method+" "+r.URL.RequestURI())
 		switch {
+		case r.Method == "PUT", r.Method == "DELETE" && strings.HasSuffix(r.URL.Path, "/settings"), strings.HasSuffix(r.URL.Path, "/settings"):
+			writeJSON(w, 200, map[string]any{"health": map[string]any{}, "source": "override"})
 		case r.Method == "POST":
 			writeJSON(w, 201, map[string]any{"key": "x", "api_key": map[string]any{"id": "aaaaaaaaaaaa"}})
 		case strings.HasSuffix(r.URL.Path, "/keys"):
@@ -188,6 +190,22 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 			return err
 		},
 		func() error { _, err := c.Services(ctx, "failed"); return err },
+		func() error {
+			_, err := c.History(ctx, HistoryQuery{Series: []string{"cpu.usage_percent"}, From: exp.Add(-time.Hour), To: exp, Resolution: "1m"})
+			return err
+		},
+		func() error { _, err := c.HistorySeries(ctx); return err },
+		func() error { _, err := c.Settings(ctx); return err },
+		func() error {
+			_, err := c.UpdateSettings(ctx, apiv1.HealthSettings{Confirm: 2, CPUTemperature: apiv1.WarnCritical{Warn: 80, Critical: 90},
+				MemAvailable: apiv1.WarnCritical{Warn: 10, Critical: 5}, MemPressure: apiv1.WarnCritical{Warn: 5, Critical: 20},
+				Storage: apiv1.WarnCritical{Warn: 85, Critical: 95}, NetworkErrors: apiv1.WarnCritical{Warn: 10, Critical: 100},
+				Disk: apiv1.DiskEnduranceThreshold{WarnPercentageUsed: 90}})
+			return err
+		},
+		func() error { _, err := c.ResetSettings(ctx); return err },
+		func() error { _, err := c.Report(ctx, true); return err },
+		func() error { _, err := c.ReportMarkdown(ctx, false); return err },
 		func() error { _, err := c.ListKeys(ctx); return err },
 		func() error {
 			_, err := c.CreateKey(ctx, apiv1.CreateAPIKeyRequest{Name: "n", Scopes: []string{"metrics:read"}, ExpiresAt: &exp})
@@ -206,6 +224,23 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 	}
 	if paths[3] != "GET /api/v1/metrics?sections=cpu%2Cmemory" || !strings.Contains(paths[9], "kernel_threads=true") {
 		t.Errorf("metrics query %q", paths[3])
+	}
+}
+
+func TestReportMarkdownIsRaw(t *testing.T) {
+	var accept string
+	srv := mockAgent(t, func(w http.ResponseWriter, r *http.Request) {
+		accept = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte("# Cockpit diagnostic report\n"))
+	})
+	c, _ := NewTCP(srv.URL, testKey)
+	md, err := c.ReportMarkdown(context.Background(), true)
+	if err != nil || string(md) != "# Cockpit diagnostic report\n" {
+		t.Fatalf("%q %v", md, err)
+	}
+	if !strings.HasPrefix(accept, "text/markdown") {
+		t.Errorf("accept %q", accept)
 	}
 }
 

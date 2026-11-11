@@ -40,6 +40,12 @@ type fakeAPI struct {
 	procsOK bool
 	stream  []apiv1.Event
 
+	noHistory   bool
+	histQueries []client.HistoryQuery
+	settings    *apiv1.SettingsResponse
+	saved       []apiv1.HealthSettings
+	resets      int
+
 	procQueries []client.ProcessesQuery
 }
 
@@ -218,6 +224,71 @@ func (f *fakeAPI) StreamEvents(ctx context.Context, _ string, fn func(client.Str
 	return ctx.Err()
 }
 
+func (f *fakeAPI) History(_ context.Context, q client.HistoryQuery) (*apiv1.HistoryResponse, error) {
+	if f.down {
+		return nil, errDown
+	}
+	if f.noHistory {
+		return &apiv1.HistoryResponse{Status: "not_configured", Reason: "Metric history is disabled."}, nil
+	}
+	f.histQueries = append(f.histQueries, q)
+	from, to := q.From, q.To
+	if from.IsZero() {
+		from, to = t0.Add(-time.Hour), t0
+	}
+	out := &apiv1.HistoryResponse{Status: "available", From: from, To: to, Resolution: "raw", StepSeconds: 10}
+	for _, name := range q.Series {
+		s := apiv1.HistorySeries{Name: name, Unit: "percent"}
+		if strings.HasSuffix(name, "_bytes_per_second") {
+			s.Unit = "bytes_per_second"
+		}
+		for i := 0; i < 60; i++ {
+			v := float64(i % 50)
+			s.Points = append(s.Points, apiv1.HistoryPoint{Time: from.Add(to.Sub(from) * time.Duration(i) / 60), Min: v, Avg: v, Max: v})
+		}
+		out.Series = append(out.Series, s)
+	}
+	return out, nil
+}
+
+func (f *fakeAPI) HistorySeries(context.Context) (*apiv1.HistorySeriesList, error) {
+	if f.down {
+		return nil, errDown
+	}
+	if f.noHistory {
+		return &apiv1.HistorySeriesList{Status: "not_configured", Reason: "Metric history is disabled."}, nil
+	}
+	return &apiv1.HistorySeriesList{Status: "available", Items: []apiv1.HistorySeriesInfo{
+		{Name: "cpu.usage_percent"}, {Name: "memory.used_percent"}, {Name: "net.eth0.rx_bytes_per_second"}, {Name: "net.eth0.tx_bytes_per_second"},
+	}}, nil
+}
+
+func (f *fakeAPI) Settings(context.Context) (*apiv1.SettingsResponse, error) {
+	if f.settings == nil {
+		f.settings = &apiv1.SettingsResponse{Source: "configuration", Health: apiv1.HealthSettings{Confirm: 2,
+			CPUTemperature: apiv1.WarnCritical{Warn: 85, Critical: 95}, MemAvailable: apiv1.WarnCritical{Warn: 10, Critical: 5},
+			MemPressure: apiv1.WarnCritical{Warn: 5, Critical: 20}, Storage: apiv1.WarnCritical{Warn: 85, Critical: 95},
+			NetworkErrors: apiv1.WarnCritical{Warn: 10, Critical: 100}, Disk: apiv1.DiskEnduranceThreshold{WarnPercentageUsed: 90}}}
+	}
+	c := *f.settings
+	return &c, nil
+}
+
+func (f *fakeAPI) UpdateSettings(_ context.Context, h apiv1.HealthSettings) (*apiv1.SettingsResponse, error) {
+	if h.Storage.Warn >= h.Storage.Critical {
+		return nil, &client.APIError{StatusCode: 400, Code: "invalid_request", Message: "Invalid settings: health.storage: warning threshold must be below critical."}
+	}
+	f.saved = append(f.saved, h)
+	f.settings = &apiv1.SettingsResponse{Source: "override", Health: h, UpdatedAt: &t0}
+	return f.Settings(context.Background())
+}
+
+func (f *fakeAPI) ResetSettings(ctx context.Context) (*apiv1.SettingsResponse, error) {
+	f.resets++
+	f.settings = nil
+	return f.Settings(ctx)
+}
+
 // drive runs a command and feeds resulting messages back into the model,
 // like the Bubble Tea runtime does (ticks excluded).
 func drive(t *testing.T, m *Model, cmd tea.Cmd) {
@@ -284,6 +355,9 @@ func press(t *testing.T, m *Model, keys ...string) {
 	}
 }
 
+// key returns the key that selects a screen.
+func key(s screen) string { return screenKeys[s] }
+
 func typeText(t *testing.T, m *Model, s string) {
 	t.Helper()
 	for _, r := range s {
@@ -336,7 +410,7 @@ func TestOverviewContent(t *testing.T) {
 	out := screenText(m)
 	for _, want := range []string{
 		"COCKPIT", "testbox", "Ubuntu 24.04 LTS", "up 1d 1h 1m", "▲ WARNING", // header with health (symbol + word)
-		"1 Overview", "9 API Access", "GPU", "RTX 3060", "vram",
+		"1 Overview", "0 API", ", Settings", "GPU", "RTX 3060", "vram",
 		"Test CPU @ 3.0GHz · 8 threads", "37.5%", "1.50  1.25  0.75",
 		"62.5%", "6.0 GiB of 16.0 GiB", "stall  unsupported",
 		"91.2%", "1.4 MiB/s", "eth0",
@@ -357,21 +431,21 @@ func TestOverviewContent(t *testing.T) {
 
 func TestScreensShowUnavailableReasons(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 120, 40)
-	press(t, m, "3")
+	press(t, m, key(scrHealth))
 	out := screenText(m)
 	for _, want := range []string{"Health checks", "unsupported: No hardware temperature sensors", "/ is 91.2% full", "Remove or archive", "Recent events"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("health missing %q:\n%s", want, out)
 		}
 	}
-	press(t, m, "4")
+	press(t, m, key(scrStorage))
 	out = screenText(m)
 	for _, want := range []string{"Test SSD", "nvme", "not configured", "smartctl (smartmontools 7.0 or newer) is not installed."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("storage missing %q:\n%s", want, out)
 		}
 	}
-	press(t, m, "5")
+	press(t, m, key(scrNetwork))
 	out = screenText(m)
 	for _, want := range []string{"RX/s", "eth0", "1000 Mb/s", "1.4 MiB/s", "244.1 KiB/s", "5.0 GiB"} {
 		if !strings.Contains(out, want) {
@@ -386,9 +460,13 @@ func TestNavigation(t *testing.T) {
 	if m.screen != scrHardware {
 		t.Errorf("tab -> %v", m.screen)
 	}
-	press(t, m, "9")
+	press(t, m, key(scrAccess))
 	if m.screen != scrAccess {
-		t.Errorf("9 -> %v", m.screen)
+		t.Errorf("0 -> %v", m.screen)
+	}
+	press(t, m, "tab")
+	if m.screen != scrSettings {
+		t.Errorf("tab after API Access -> %v", m.screen)
 	}
 	press(t, m, "tab")
 	if m.screen != scrOverview {
@@ -418,7 +496,7 @@ func TestNavigation(t *testing.T) {
 func TestCreateKeyRevealsOnce(t *testing.T) {
 	api := &fakeAPI{admin: true}
 	m := setup(t, api, 120, 40)
-	press(t, m, "9", "n")
+	press(t, m, key(scrAccess), "n")
 	typeText(t, m, "grafana")
 	press(t, m, "enter")
 	if !strings.Contains(screenText(m), "metrics:read") {
@@ -445,7 +523,7 @@ func TestCreateKeyRevealsOnce(t *testing.T) {
 func TestCreateKeyNeedsAScope(t *testing.T) {
 	api := &fakeAPI{admin: true}
 	m := setup(t, api, 120, 40)
-	press(t, m, "9", "n")
+	press(t, m, key(scrAccess), "n")
 	typeText(t, m, "x")
 	press(t, m, "enter", "down", "space", "enter") // turn metrics:read off: nothing selected
 	if len(api.created) != 0 || !strings.Contains(screenText(m), "at least one scope") {
@@ -460,7 +538,7 @@ func TestCreateKeyNeedsAScope(t *testing.T) {
 func TestRevokeRequiresTypedID(t *testing.T) {
 	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{{ID: "k3p9x2m7q4ta", Name: "victim", Active: true}}}
 	m := setup(t, api, 120, 40)
-	press(t, m, "9", "x")
+	press(t, m, key(scrAccess), "x")
 	typeText(t, m, "wrong")
 	press(t, m, "enter")
 	if len(api.revoked) != 0 || !strings.Contains(screenText(m), "did not match") {
@@ -491,7 +569,7 @@ func TestRevokeRequiresTypedID(t *testing.T) {
 func TestKeyManagementRequiresSocket(t *testing.T) {
 	api := &fakeAPI{admin: false}
 	m := setup(t, api, 120, 40)
-	press(t, m, "9")
+	press(t, m, key(scrAccess))
 	out := screenText(m)
 	if !strings.Contains(out, "requires the local admin socket") {
 		t.Errorf("access screen over TCP:\n%s", out)
@@ -553,7 +631,7 @@ func TestOverviewAtMinimumSize(t *testing.T) {
 func TestKeyTableFitsNarrowTerminal(t *testing.T) {
 	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{{ID: "k3p9x2m7q4ta", Name: "grafana", Scopes: []string{"metrics:read", "system:read"}, Active: true}}}
 	m := setup(t, api, MinWidth, MinHeight)
-	press(t, m, "9")
+	press(t, m, key(scrAccess))
 	out := screenText(m)
 	for _, want := range []string{"EXPIRES", "metrics,system", "never", "clients 1 active"} {
 		if !strings.Contains(out, want) {
@@ -575,7 +653,7 @@ func TestColumnDropsWholeBoxes(t *testing.T) {
 
 func TestHardwareScreen(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 120, 45)
-	press(t, m, "2")
+	press(t, m, key(scrHardware))
 	out := screenText(m)
 	for _, want := range []string{"Processor", "AuthenticAMD", "1 socket(s) · 4 cores · 8 threads · up to 4.40 GHz", "L3 u 16.0 MiB", "AMD-V",
 		"running in a virtual machine", "Graphics", "NVIDIA GeForce RTX 3060", "permission denied — Reading memory module details requires root",
@@ -589,7 +667,7 @@ func TestHardwareScreen(t *testing.T) {
 func TestProcessesScreen(t *testing.T) {
 	api := &fakeAPI{admin: true}
 	m := setup(t, api, 120, 40)
-	press(t, m, "6")
+	press(t, m, key(scrProcesses))
 	out := screenText(m)
 	for _, want := range []string{"Processes · sorted by cpu", "postgres", "42.5", "512.0 MiB", "top 2 of 140 processes", "command lines are not shown"} {
 		if !strings.Contains(out, want) {
@@ -624,7 +702,7 @@ func TestProcessesScreen(t *testing.T) {
 
 func TestProcessesNeedScope(t *testing.T) {
 	m := setup(t, &fakeAPI{admin: false}, 120, 40)
-	press(t, m, "6")
+	press(t, m, key(scrProcesses))
 	out := screenText(m)
 	if !strings.Contains(out, "processes:read") {
 		t.Errorf("missing scope explanation:\n%s", out)
@@ -633,7 +711,7 @@ func TestProcessesNeedScope(t *testing.T) {
 
 func TestServicesScreen(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 120, 40)
-	press(t, m, "7")
+	press(t, m, key(scrServices))
 	out := screenText(m)
 	if !strings.Contains(out, "3 total · 1 active · 1 inactive · 1 failed") || strings.Index(out, "backup.service") > strings.Index(out, "ssh.service") {
 		t.Errorf("services (failed first):\n%s", out)
@@ -647,7 +725,7 @@ func TestServicesScreen(t *testing.T) {
 
 func TestNetworkScreenConfig(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 120, 40)
-	press(t, m, "5")
+	press(t, m, key(scrNetwork))
 	out := screenText(m)
 	for _, want := range []string{"192.168.1.10/24", "default     via 192.168.1.1 dev eth0 metric 100 (ipv4)", "1.1.1.1", "via systemd-resolved"} {
 		if !strings.Contains(out, want) {
@@ -664,7 +742,7 @@ func TestLiveEvents(t *testing.T) {
 	for i := 0; i < 2; i++ { // open, then the event
 		_, cmd = m.Update(cmd())
 	}
-	press(t, m, "8")
+	press(t, m, key(scrEvents))
 	out := screenText(m)
 	if !strings.Contains(out, "● live") || !strings.Contains(out, "sda: SMART FAILED") || !strings.Contains(out, "/ is 91.2% full") {
 		t.Errorf("events screen:\n%s", out)
@@ -693,7 +771,7 @@ func TestEventListIsBounded(t *testing.T) {
 func TestCompactTabsFitAndClick(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 80, 24)
 	tabs := ansi.Strip(m.tabs(80))
-	if lipgloss.Width(tabs) > 80 || !strings.Contains(tabs, "9 API") || !strings.Contains(tabs, "6 Procs") {
+	if lipgloss.Width(tabs) > 80 || !strings.Contains(tabs, "0 API") || !strings.Contains(tabs, "7 Proc") || !strings.Contains(tabs, ", Set") {
 		t.Errorf("compact tabs %q (%d wide)", tabs, lipgloss.Width(tabs))
 	}
 	span := tabSpans(80)[scrAccess]
@@ -711,16 +789,16 @@ func TestHostileStringsAreSanitized(t *testing.T) {
 	evil := "\x1b]0;pwned\x07\x1b[2Jevil\x9bname\xff"
 	api := &hostileAPI{fakeAPI: &fakeAPI{admin: true}, evil: evil}
 	m := setup(t, api, 120, 40)
-	for _, key := range []string{"2", "6"} {
-		press(t, m, key)
+	for _, k := range []string{key(scrHardware), key(scrProcesses)} {
+		press(t, m, k)
 		out := m.render()
 		for _, bad := range []string{"\x1b]0;pwned", "\x1b[2J", "\x07", "\x9b", "\xff"} {
 			if strings.Contains(out, bad) {
-				t.Errorf("screen %s contains raw control sequence %q", key, bad)
+				t.Errorf("screen %s contains raw control sequence %q", k, bad)
 			}
 		}
 		if !strings.Contains(ansi.Strip(out), "evil") {
-			t.Errorf("screen %s lost the visible text", key)
+			t.Errorf("screen %s lost the visible text", k)
 		}
 	}
 	e := apiv1.Event{ID: "x", Message: evil}
@@ -757,5 +835,152 @@ func TestCleanText(t *testing.T) {
 	}
 	if got := cleanText("a\x1bb\tc\x00"); got != "a�b�c�" {
 		t.Errorf("%q", got)
+	}
+}
+
+func TestPerformanceScreen(t *testing.T) {
+	api := &fakeAPI{}
+	m := setup(t, api, 140, 45)
+	press(t, m, key(scrPerformance))
+	out := screenText(m)
+	for _, want := range []string{"Last 1h", "CPU usage · avg", "Memory used", "Network received (all interfaces)", "Network sent", "100.0%", "█"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("performance missing %q:\n%s", want, out)
+		}
+	}
+	press(t, m, "t")
+	q := api.histQueries[len(api.histQueries)-1]
+	if got := q.To.Sub(q.From); got != 6*time.Hour {
+		t.Errorf("range after t: %v", got)
+	}
+	if !strings.Contains(screenText(m), "Last 6h") {
+		t.Error("range label not updated")
+	}
+}
+
+func TestPerformanceWithoutHistory(t *testing.T) {
+	m := setup(t, &fakeAPI{noHistory: true}, 120, 40)
+	press(t, m, key(scrPerformance))
+	if out := screenText(m); !strings.Contains(out, "history unavailable") || !strings.Contains(out, "disabled") {
+		t.Errorf("no-history state:\n%s", out)
+	}
+}
+
+func TestSparklinesSeededFromHistory(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 120, 40)
+	if len(m.cpuHist) < 60 || len(m.memHist) < 60 {
+		t.Errorf("not seeded: cpu %d mem %d", len(m.cpuHist), len(m.memHist))
+	}
+}
+
+func TestChartGapsAndScaling(t *testing.T) {
+	from := t0
+	pts := []apiv1.HistoryPoint{{Time: from, Avg: 100}, {Time: from.Add(9 * time.Minute), Avg: 50}}
+	rows := chart(pts, 10, 2, 100, from, from.Add(10*time.Minute))
+	top, bottom := ansi.Strip(rows[0]), ansi.Strip(rows[1])
+	if []rune(top)[0] != '█' || []rune(bottom)[0] != '█' {
+		t.Errorf("full column: %q / %q", top, bottom)
+	}
+	if []rune(top)[9] != ' ' || []rune(bottom)[9] != '█' {
+		t.Errorf("half column: %q / %q", top, bottom)
+	}
+	if []rune(bottom)[5] != ' ' {
+		t.Errorf("a column without data must stay empty: %q", bottom)
+	}
+}
+
+func TestEventFilterAndPaging(t *testing.T) {
+	api := &pagedEvents{fakeAPI: &fakeAPI{}}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrEvents))
+	if !strings.Contains(screenText(m), "m for older") {
+		t.Fatalf("no more indicator:\n%s", screenText(m))
+	}
+	press(t, m, "m")
+	if len(m.eventList) != 2 || m.eventList[1].Message != "older event" {
+		t.Errorf("older page not appended: %+v", m.eventList)
+	}
+	press(t, m, "v")
+	if last := api.queries[len(api.queries)-1]; last.Severity != "warning" {
+		t.Errorf("filter not sent: %+v", last)
+	}
+	if !strings.Contains(screenText(m), "warning and above") {
+		t.Error("filter not shown")
+	}
+	// Live events below the filter are not shown.
+	m.Update(streamEventMsg{e: apiv1.Event{ID: "low", Severity: "info", Message: "just info"}})
+	if strings.Contains(screenText(m), "just info") {
+		t.Error("filtered live event shown")
+	}
+}
+
+type pagedEvents struct {
+	*fakeAPI
+	queries []client.EventsQuery
+}
+
+func (p *pagedEvents) Events(_ context.Context, q client.EventsQuery) (*apiv1.EventsResponse, error) {
+	p.queries = append(p.queries, q)
+	if q.Cursor != "" {
+		return &apiv1.EventsResponse{Items: []apiv1.Event{{ID: "e1", Time: t0.Add(-2 * time.Hour), Severity: "warning", Message: "older event"}}}, nil
+	}
+	next := "5"
+	return &apiv1.EventsResponse{Items: []apiv1.Event{{ID: "e2", Time: t0, Severity: "warning", Message: "newest event"}}, NextCursor: &next}, nil
+}
+
+func TestSettingsEditSaveAndReset(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrSettings))
+	if out := screenText(m); !strings.Contains(out, "Storage used: warning") || !strings.Contains(out, "from the configuration file") {
+		t.Fatalf("settings screen:\n%s", out)
+	}
+	for i := 0; i < 6; i++ {
+		press(t, m, "down") // to "Storage used: warning"
+	}
+	press(t, m, "enter")
+	typeText(t, m, "70")
+	press(t, m, "enter")
+	if out := screenText(m); !strings.Contains(out, "70 *") || !strings.Contains(out, "unsaved") {
+		t.Fatalf("draft not shown:\n%s", out)
+	}
+	press(t, m, "w")
+	if out := screenText(m); !strings.Contains(out, "Storage used: warning: 85 → 70 %") {
+		t.Fatalf("confirmation does not list the change:\n%s", out)
+	}
+	press(t, m, "n")
+	if len(api.saved) != 0 {
+		t.Fatal("saved without confirmation")
+	}
+	press(t, m, "w", "y")
+	if len(api.saved) != 1 || api.saved[0].Storage.Warn != 70 || !strings.Contains(screenText(m), "saved and applied") {
+		t.Fatalf("save: %+v", api.saved)
+	}
+	if !strings.Contains(screenText(m), "changed at runtime") {
+		t.Error("source not updated")
+	}
+
+	// Server-side validation errors are shown, not swallowed.
+	press(t, m, "enter")
+	typeText(t, m, "99")
+	press(t, m, "enter", "w", "y")
+	if !strings.Contains(screenText(m), "Not saved") || len(api.saved) != 1 {
+		t.Errorf("invalid save:\n%s", screenText(m))
+	}
+	press(t, m, "esc", "d", "y")
+	if api.resets != 1 || !strings.Contains(screenText(m), "reset to the configuration file") {
+		t.Errorf("reset: %d", api.resets)
+	}
+}
+
+func TestSettingsNeedSocket(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 120, 40)
+	press(t, m, key(scrSettings))
+	if out := screenText(m); !strings.Contains(out, "only through the local admin socket") {
+		t.Errorf("non-admin settings:\n%s", out)
+	}
+	press(t, m, "+")
+	if m.opts.Refresh != 1500*time.Millisecond {
+		t.Errorf("refresh %v", m.opts.Refresh)
 	}
 }

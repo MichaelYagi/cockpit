@@ -298,3 +298,29 @@ func TestShutdownClosesEventStreams(t *testing.T) {
 	}
 	c.CloseIdleConnections()
 }
+
+// Events survive an agent restart.
+func TestEventsPersistAcrossRestart(t *testing.T) {
+	root := shortDir(t)
+	o := testOptions(t, root)
+	r := start(t, o)
+	c := socketClient(r.ep.SocketPath)
+	resp, err := c.Post("http://cockpit/api/v1/keys", "application/json", strings.NewReader(`{"name":"persisted","scopes":["metrics:read"]}`))
+	if err != nil || resp.StatusCode != 201 {
+		t.Fatalf("create key: %v", err)
+	}
+	resp.Body.Close()
+	c.CloseIdleConnections()
+	r.stop(t)
+
+	r = start(t, testOptions(t, root))
+	defer r.stop(t)
+	c = socketClient(r.ep.SocketPath)
+	defer c.CloseIdleConnections()
+	_, body := fetch(t, c, "http://cockpit/api/v1/events?type=key.created")
+	var evs apiv1.EventsResponse
+	_ = json.Unmarshal(body, &evs)
+	if len(evs.Items) != 1 || !strings.Contains(evs.Items[0].Message, "persisted") {
+		t.Errorf("events after restart: %s", body)
+	}
+}

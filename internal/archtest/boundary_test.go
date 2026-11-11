@@ -155,5 +155,23 @@ func TestEventsDependsOnDomainOnly(t *testing.T) {
 
 // Storage implements interfaces owned by domain packages.
 func TestStorageDependsOnDomainOnly(t *testing.T) {
-	rule(t, "internal/storage/...", hasPrefix("internal/core", "internal/auth"))
+	rule(t, "internal/storage/...", hasPrefix("internal/core", "internal/auth", "internal/history", "internal/events", "internal/ulid", "internal/settings", "internal/config", "internal/netaddr"))
+}
+
+// History records snapshots through an interface; it never reaches the
+// engine, collectors, storage implementation or the API.
+func TestHistoryDependsOnDomainOnly(t *testing.T) {
+	rule(t, "internal/history/...", hasPrefix("internal/core"))
+}
+
+// Settings validates through config and notifies through a callback; it
+// never reaches the engine, health, storage implementation or the API.
+func TestSettingsDependencies(t *testing.T) {
+	rule(t, "internal/settings/...", hasPrefix("internal/core", "internal/config", "internal/netaddr"))
+}
+
+// Reports are post-processed from wire types alone (D21), so the same
+// code serves the API and any client.
+func TestReportUsesWireTypesOnly(t *testing.T) {
+	rule(t, "internal/report/...", hasPrefix("pkg/apiv1"))
 }

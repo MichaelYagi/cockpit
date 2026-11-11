@@ -34,28 +34,31 @@ func Health(src HealthSource, machineID core.MachineID, now func() time.Time) ht
 		if !allowParams(w, r) {
 			return
 		}
-		rep := src.Current()
-		out := apiv1.HealthResponse{
-			Meta:        apiv1.Meta{SchemaVersion: apiv1.SchemaVersion, MachineID: string(machineID), GeneratedAt: now().UTC()},
-			Status:      string(rep.Status),
-			EvaluatedAt: rep.EvaluatedAt.UTC(),
-			Checks:      make([]apiv1.HealthCheck, 0, len(rep.Checks)),
-		}
-		for _, c := range rep.Checks {
-			hc := apiv1.HealthCheck{ID: c.ID, Name: c.Name, Status: string(c.Status), Availability: string(c.Availability),
-				Reason: c.Reason, Summary: c.Summary, Findings: make([]apiv1.Finding, 0, len(c.Findings))}
-			for _, f := range c.Findings {
-				ev := f.Evidence
-				if ev == nil {
-					ev = map[string]string{}
-				}
-				hc.Findings = append(hc.Findings, apiv1.Finding{ID: f.ID, Check: f.CheckID, Severity: string(f.Severity),
-					Subject: f.Subject, Summary: f.Summary, Evidence: ev, Recommendation: f.Recommendation, Since: f.Since.UTC()})
-			}
-			out.Checks = append(out.Checks, hc)
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		httpx.WriteJSON(w, http.StatusOK, healthResponse(src.Current(), machineID, now().UTC()))
 	}
+}
+
+func healthResponse(rep *health.Report, machineID core.MachineID, now time.Time) apiv1.HealthResponse {
+	out := apiv1.HealthResponse{
+		Meta:        apiv1.Meta{SchemaVersion: apiv1.SchemaVersion, MachineID: string(machineID), GeneratedAt: now},
+		Status:      string(rep.Status),
+		EvaluatedAt: rep.EvaluatedAt.UTC(),
+		Checks:      make([]apiv1.HealthCheck, 0, len(rep.Checks)),
+	}
+	for _, c := range rep.Checks {
+		hc := apiv1.HealthCheck{ID: c.ID, Name: c.Name, Status: string(c.Status), Availability: string(c.Availability),
+			Reason: c.Reason, Summary: c.Summary, Findings: make([]apiv1.Finding, 0, len(c.Findings))}
+		for _, f := range c.Findings {
+			ev := f.Evidence
+			if ev == nil {
+				ev = map[string]string{}
+			}
+			hc.Findings = append(hc.Findings, apiv1.Finding{ID: f.ID, Check: f.CheckID, Severity: string(f.Severity),
+				Subject: f.Subject, Summary: f.Summary, Evidence: ev, Recommendation: f.Recommendation, Since: f.Since.UTC()})
+		}
+		out.Checks = append(out.Checks, hc)
+	}
+	return out
 }
 
 // ---- /events ----
@@ -68,7 +71,7 @@ type EventSource interface {
 // Events serves GET /events.
 func Events(src EventSource, machineID core.MachineID, now func() time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !allowParams(w, r, "limit", "cursor", "severity", "since") {
+		if !allowParams(w, r, "limit", "cursor", "severity", "since", "until", "type") {
 			return
 		}
 		limit, ok := intParam(w, r, "limit", 50, 1, 500)
@@ -79,7 +82,19 @@ func Events(src EventSource, machineID core.MachineID, now func() time.Time) htt
 		if !ok {
 			return
 		}
-		f := events.Filter{Since: since}
+		until, ok := timeParam(w, r, "until")
+		if !ok {
+			return
+		}
+		f := events.Filter{Since: since, Until: until}
+		switch typ := core.EventType(r.URL.Query().Get("type")); typ {
+		case "", core.EventFindingRaised, core.EventFindingResolved, core.EventCollectorDegraded, core.EventCollectorRecovered,
+			core.EventKeyCreated, core.EventKeyRotated, core.EventKeyRevoked, core.EventSettingsChanged:
+			f.Type = typ
+		default:
+			badParam(w, r, "type", "is not a known event type")
+			return
+		}
 		switch sev := r.URL.Query().Get("severity"); sev {
 		case "":
 		case "info", "warning", "critical":
@@ -102,19 +117,23 @@ func Events(src EventSource, machineID core.MachineID, now func() time.Time) htt
 			httpx.WriteError(w, r, http.StatusInternalServerError, apiv1.CodeInternal, "An unexpected error occurred.")
 			return
 		}
-		out := apiv1.EventsResponse{
-			Meta:  apiv1.Meta{SchemaVersion: apiv1.SchemaVersion, MachineID: string(machineID), GeneratedAt: now().UTC()},
-			Items: make([]apiv1.Event, 0, len(evs)),
-		}
-		for _, e := range evs {
-			out.Items = append(out.Items, apiv1.Event{ID: e.ID, Time: e.Time.UTC(), Type: string(e.Type),
-				Severity: string(e.Severity), Subject: e.Subject, Message: e.Message})
-		}
-		if next != "" {
-			out.NextCursor = &next
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		httpx.WriteJSON(w, http.StatusOK, eventsResponse(evs, next, machineID, now().UTC()))
 	}
+}
+
+func eventsResponse(evs []core.Event, next string, machineID core.MachineID, now time.Time) apiv1.EventsResponse {
+	out := apiv1.EventsResponse{
+		Meta:  apiv1.Meta{SchemaVersion: apiv1.SchemaVersion, MachineID: string(machineID), GeneratedAt: now},
+		Items: make([]apiv1.Event, 0, len(evs)),
+	}
+	for _, e := range evs {
+		out.Items = append(out.Items, apiv1.Event{ID: e.ID, Time: e.Time.UTC(), Type: string(e.Type),
+			Severity: string(e.Severity), Subject: e.Subject, Message: e.Message})
+	}
+	if next != "" {
+		out.NextCursor = &next
+	}
+	return out
 }
 
 // ---- /keys (socket only) ----

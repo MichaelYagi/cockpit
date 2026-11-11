@@ -1,0 +1,39 @@
+# Privileged SMART helper for cockpit-agent (D20). Runs smartctl as root and
+# writes results to /var/lib/cockpit-monitor/smart/ (0750 root:cockpit-monitor,
+# files 0640), which the unprivileged agent reads. Started by
+# cockpit-smart.timer.
+[Unit]
+Description=Cockpit SMART helper
+Documentation=https://github.com/MichaelYagi/cockpit/blob/main/docs/SETUP.md
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cockpit smart-helper --dir /var/lib/cockpit-monitor/smart --group cockpit-monitor
+TimeoutStartSec=10min
+
+# smartctl needs raw device access (CAP_SYS_RAWIO for ATA pass-through,
+# CAP_SYS_ADMIN for NVMe admin commands). CAP_DAC_OVERRIDE reaches the
+# agent-owned state directory and CAP_CHOWN sets the results' group.
+CapabilityBoundingSet=CAP_SYS_RAWIO CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_CHOWN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cockpit-monitor
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+IPAddressDeny=any
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+UMask=0027

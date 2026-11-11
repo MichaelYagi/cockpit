@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -303,6 +304,47 @@ api:
 	for _, f := range []string{"health.confirm", "health.storage", "health.memory.available_percent", "api.rate_limit.per_key_rps"} {
 		if !got[f] {
 			t.Errorf("missing %s in %v", f, ve.Errors)
+		}
+	}
+}
+
+func TestFilesystemFilterValidation(t *testing.T) {
+	good := write(t, `
+collection:
+  filesystems:
+    exclude_types: [btrfs, fuse.mergerfs]
+    include_types: [tmpfs]
+    exclude_mount_points: ["/snap/**", "/var/lib/docker/*"]
+`)
+	res, err := Load(Source{ConfigPath: good, Env: envMap(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := res.Config.Collection.Filesystems; len(f.ExcludeTypes) != 2 || f.IncludeTypes[0] != "tmpfs" || f.ExcludeMountPoints[0] != "/snap/**" {
+		t.Errorf("parsed %+v", f)
+	}
+
+	bad := write(t, `
+collection:
+  filesystems:
+    exclude_types: ["Bad Type", tmpfs]
+    include_types: [nfs4, tmpfs]
+    exclude_mount_points: ["relative/*", "/bad[pattern"]
+`)
+	_, err = Load(Source{ConfigPath: bad, Env: envMap(nil)})
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want ValidationError, got %v", err)
+	}
+	msgs := map[string][]string{}
+	for _, fe := range ve.Errors {
+		msgs[fe.Field] = append(msgs[fe.Field], fe.Message)
+	}
+	all := fmt.Sprint(msgs)
+	for _, want := range []string{`"Bad Type" is not a filesystem type name`, `"nfs4" is a network filesystem`, `"tmpfs" is also in exclude_types`,
+		`"relative/*" must be an absolute path`, `"/bad[pattern" must be an absolute path`} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in %v", want, all)
 		}
 	}
 }

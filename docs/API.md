@@ -34,10 +34,10 @@ Keys are never accepted in URLs or query strings.
 | Scope | Routes |
 |---|---|
 | *(public)* | `GET /livez`, `GET /openapi.json` |
-| `system:read` | `/status`, `/system`, `/hardware`, `/services` |
-| `metrics:read` | `/metrics`, `/storage`, `/network`, `/sensors`, `/health`, `/events`, `/events/stream` |
+| `system:read` | `/status`, `/system`, `/hardware`, `/services`, `/report` (metric parts need `metrics:read` too) |
+| `metrics:read` | `/metrics`, `/metrics/history…`, `/storage`, `/network`, `/sensors`, `/health`, `/events`, `/events/stream` |
 | `processes:read` | `/processes` (D14) |
-| `admin` | `/keys…`, privileged fields in `/status` |
+| `admin` | `/keys…`, `/settings`, privileged fields in `/status` and `/report` |
 
 No scope implies another (D8). Keys may hold `system:read`,
 `metrics:read` and `processes:read`; `admin` is reserved for the socket
@@ -66,7 +66,7 @@ principal.
 | GET | `/network` | `metrics:read` | Interfaces (addresses, counters, rates), routes, DNS (passive; nothing is probed) |
 | GET | `/sensors` | `metrics:read` | Temperatures, fans, voltages |
 | GET | `/health` | `metrics:read` | Overall status, checks (D11 plus failed services and network errors), active findings |
-| GET | `/events` | `metrics:read` | Recent events (in-memory), paginated, `?severity=&since=` |
+| GET | `/events` | `metrics:read` | Events, newest first, paginated, `?severity=&since=&until=&type=`; persisted since Phase 3 |
 | GET | `/events/stream` | `metrics:read` | Live events as Server-Sent Events (D17, Phase 2) |
 | GET | `/processes` | `processes:read` | Processes, sorted/searchable, snapshot-bound cursors; no command lines (D14, Phase 2) |
 | GET | `/keys` | `admin` (socket) | Key metadata. Never the key or its hash |
@@ -74,10 +74,48 @@ principal.
 | POST | `/keys/{id}/rotate` | `admin` (socket) | Issue a replacement key (same name/scopes), revoke the old one immediately. Full key shown once |
 | DELETE | `/keys/{id}` | `admin` (socket) | Revoke. Idempotent |
 
-### Later phases
+### Phase 3
 
-`/metrics/history` (Phase 3). WebSocket is not planned: all streaming is
-server-to-client, which SSE covers.
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| GET | `/metrics/history` | `metrics:read` | Stored series (`?series=` up to 10, `from`, `to` up to 90 days, `resolution=auto\|raw\|1m\|1h`); points carry avg/min/max (D18) |
+| GET | `/metrics/history/series` | `metrics:read` | Recorded series names and units |
+| GET | `/settings` | `admin` (socket) | Effective health thresholds and whether they come from the file or an override (D19) |
+| PUT | `/settings` | `admin` (socket) | Replace the thresholds: validated like the file, persisted, applied at once, recorded as a `settings.changed` event |
+| DELETE | `/settings` | `admin` (socket) | Return to the file's thresholds |
+| GET | `/report` | `system:read` | Diagnostic report, `?format=json\|markdown&anonymize=true\|false` (D21; see below) |
+
+WebSocket is not planned: all streaming is server-to-client, which SSE
+covers.
+
+### Diagnostic report
+
+`/report` is built from the other endpoints' responses, so each part has
+the same schema as the endpoint it comes from:
+
+- Always (`system:read`): `status`, `system`, `hardware`, `services`.
+- With `metrics:read` as well: `metrics` (CPU, memory, pressure, sensors,
+  GPU), `storage`, `network`, `health` and the latest 100 `events`.
+- Over the socket (`admin`): `settings` and the admin part of `status`.
+
+Parts the caller cannot read are absent and listed in `omitted` with a
+reason, rather than failing the request. Sensitive fields stay redacted
+(D9) in every format.
+
+`anonymize=true` replaces, with placeholders that are stable within one
+report: host names and DNS search domains (`host-1`,
+`domain-1.example`), non-loopback, non-multicast IP addresses (RFC 5737 /
+RFC 3849 documentation addresses, keeping prefix lengths and ports),
+MAC-like strings (`02:00:00:00:00:01`), user names taken from `/home/…`
+paths (`user-1`), and the machine ID. Identifiers are collected from the
+fields that hold them and then replaced wherever they appear, including
+event messages, so version numbers are never mistaken for addresses.
+Anonymization cannot recognise identifiers that appear only in free text
+(for example a host name inside a service description); review a report
+before sharing it.
+
+`format=markdown` returns `text/markdown`. Every string from the agent is
+escaped, so device names or event text cannot inject Markdown or HTML.
 
 ## 5. Resource shape
 

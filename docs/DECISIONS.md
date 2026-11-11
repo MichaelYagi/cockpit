@@ -303,3 +303,76 @@ heartbeat, so revoked or expired keys are disconnected within 15 seconds.
 Streams close cleanly on shutdown. `Last-Event-ID` is not supported in
 Phase 2; clients resume with `GET /events?since=`.
 
+## D18 — Metric history design
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** A recorder samples the current snapshot every 10 seconds
+(not every collection) into SQLite. Series are a fixed, documented set
+named by dotted keys (e.g. `cpu.usage_percent`,
+`net.eth0.rx_bytes_per_second`, `fs./home.used_percent`). Three tiers:
+
+| Tier | Resolution | Kept | Stored |
+|---|---|---|---|
+| raw | 10 s | 24 hours | value |
+| 1m | 1 minute | 7 days | min, avg, max |
+| 1h | 1 hour | 90 days | min, avg, max |
+
+Writes are batched (one transaction per 30 seconds). Rollups and
+retention run every minute. History is enabled by default and can be
+disabled (`history.enabled: false`). Queries pick the finest tier that
+covers the range within 2,000 points per series.
+
+**Why.** Fixed series keep storage predictable (roughly 30 MB at steady
+state for a typical machine) and avoid an open-ended metrics database.
+
+## D19 — Settings changes through the admin socket
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** Health thresholds can be changed at runtime through
+`GET /settings` and `PUT /settings`, mounted only on the Unix socket
+(`admin`, like key management). Changes are validated with the same rules
+as the configuration file, stored in SQLite, applied immediately, logged
+and recorded as events. Stored settings override the file; `DELETE
+/settings` returns to the file's values. The TUI requires confirmation
+before saving.
+
+**Why.** Principle 5 requires mutating operations to be separately
+authorized and confirmed; the socket is the existing admin boundary.
+
+## D20 — SMART data through a privileged helper
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** In system mode, `cockpit-smart.service` (run by
+`cockpit-smart.timer`, hourly) executes `cockpit smart-helper` as root,
+which runs `smartctl --json` for each disk and writes the results to
+`/var/lib/cockpit-monitor/smart/` (directory `0750`, files `0640`, group
+`cockpit-monitor`). The agent stays unprivileged and reads these files;
+results older than 3 hours are treated as stale. Without the helper, the
+agent falls back to running `smartctl` itself (Phase 1 behavior).
+Because `/var/lib/cockpit-monitor` belongs to the agent's user, the helper
+creates `smart/` itself (not through `StateDirectory=`, which would chown
+it), refuses a symlink or a directory not owned by root or writable by
+others, and writes only relative to the opened directory.
+
+**Why.** Resolves Q1 without giving the long-running, network-facing
+agent elevated privileges.
+
+## D21 — Diagnostic reports
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** `GET /report` and `cockpit report` produce a point-in-time
+report: status, system, hardware, services, health, recent events,
+current metrics and the effective health thresholds (no secrets). The
+route requires `system:read`, keeping D8's one scope per route; the
+metric-based parts are included only when the caller also holds
+`metrics:read`, and the thresholds only over the socket. Parts left out
+are listed in `omitted` with a reason.
+Formats: JSON and Markdown. Sensitive fields stay redacted (D9).
+`anonymize=true` additionally replaces host names, IP addresses, MAC-like
+strings, user names and mount points under `/home` with stable
+placeholders. Files are written `0600`.
+

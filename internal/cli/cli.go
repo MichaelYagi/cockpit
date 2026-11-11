@@ -52,6 +52,8 @@ Commands:
   agent          Run the monitoring agent and API server
   tui            Open the terminal UI (connects to a running agent)
   keys           Create, list, rotate and revoke API keys (local admin)
+  report         Write a diagnostic report (Markdown or JSON)
+  smart-helper   Read disk health as root for the agent (run by cockpit-smart.timer)
   config check   Validate configuration and print the effective settings
   version        Print version information
   help           Show this help
@@ -73,6 +75,10 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return runTUI(ctx, rest, env)
 	case "keys":
 		return runKeys(ctx, rest, env)
+	case "report":
+		return runReport(ctx, rest, env)
+	case "smart-helper":
+		return runSMARTHelper(ctx, rest, env)
 	case "config":
 		if len(rest) == 0 || rest[0] != "check" {
 			fmt.Fprintln(env.Stderr, `usage: cockpit config check [flags]`)

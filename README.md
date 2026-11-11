@@ -64,6 +64,7 @@ One binary, several modes:
 cockpit agent          # monitoring engine + API server
 cockpit tui            # terminal UI (API client)
 cockpit keys ...       # create / list / rotate / revoke API keys (local admin)
+cockpit report         # diagnostic report (Markdown or JSON, optionally anonymized)
 cockpit config check   # validate configuration
 cockpit version
 ```

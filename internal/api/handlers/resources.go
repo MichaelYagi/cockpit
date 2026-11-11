@@ -64,9 +64,11 @@ func (h *Resources) System(w http.ResponseWriter, r *http.Request) {
 	if !allowParams(w, r) {
 		return
 	}
-	now := h.Now().UTC()
-	s := h.Snapshots.Current()
-	httpx.WriteJSON(w, http.StatusOK, apiv1.SystemResponse{
+	httpx.WriteJSON(w, http.StatusOK, h.system(h.Snapshots.Current(), h.Now().UTC()))
+}
+
+func (h *Resources) system(s *core.Snapshot, now time.Time) apiv1.SystemResponse {
+	return apiv1.SystemResponse{
 		Meta: h.meta(now),
 		System: section(s.System, now, func(v *core.SystemInfo) *apiv1.System {
 			out := &apiv1.System{
@@ -82,7 +84,7 @@ func (h *Resources) System(w http.ResponseWriter, r *http.Request) {
 			}
 			return out
 		}),
-	})
+	}
 }
 
 // ---- /hardware ----
@@ -92,9 +94,11 @@ func (h *Resources) Hardware(w http.ResponseWriter, r *http.Request) {
 	if !allowParams(w, r) {
 		return
 	}
-	now := h.Now().UTC()
-	s := h.Snapshots.Current()
-	httpx.WriteJSON(w, http.StatusOK, apiv1.HardwareResponse{
+	httpx.WriteJSON(w, http.StatusOK, h.hardware(h.Snapshots.Current(), h.Now().UTC()))
+}
+
+func (h *Resources) hardware(s *core.Snapshot, now time.Time) apiv1.HardwareResponse {
+	return apiv1.HardwareResponse{
 		Meta: h.meta(now),
 		CPU:  h.cpuInventory(s, now),
 		MemoryModules: section(s.MemoryModules, now, func(v *core.MemoryModules) *[]apiv1.MemoryModule {
@@ -145,7 +149,7 @@ func (h *Resources) Hardware(w http.ResponseWriter, r *http.Request) {
 			}
 			return &out
 		}),
-	})
+	}
 }
 
 // cpuInventory prefers the detailed CPU collector and falls back to what
@@ -305,8 +309,10 @@ func (h *Resources) Metrics(w http.ResponseWriter, r *http.Request) {
 			want[s] = true
 		}
 	}
-	now := h.Now().UTC()
-	s := h.Snapshots.Current()
+	httpx.WriteJSON(w, http.StatusOK, h.metrics(h.Snapshots.Current(), h.Now().UTC(), want))
+}
+
+func (h *Resources) metrics(s *core.Snapshot, now time.Time, want map[string]bool) apiv1.MetricsResponse {
 	out := apiv1.MetricsResponse{Meta: h.meta(now)}
 	if want["cpu"] {
 		out.CPU = ptrTo(section(s.CPU, now, cpuMetrics))
@@ -329,7 +335,7 @@ func (h *Resources) Metrics(w http.ResponseWriter, r *http.Request) {
 	if want["gpu"] {
 		out.GPU = ptrTo(section(s.GPUs, now, h.gpus))
 	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	return out
 }
 
 // Storage serves GET /storage.
@@ -337,14 +343,16 @@ func (h *Resources) Storage(w http.ResponseWriter, r *http.Request) {
 	if !allowParams(w, r) {
 		return
 	}
-	now := h.Now().UTC()
-	s := h.Snapshots.Current()
-	httpx.WriteJSON(w, http.StatusOK, apiv1.StorageResponse{
+	httpx.WriteJSON(w, http.StatusOK, h.storage(h.Snapshots.Current(), h.Now().UTC()))
+}
+
+func (h *Resources) storage(s *core.Snapshot, now time.Time) apiv1.StorageResponse {
+	return apiv1.StorageResponse{
 		Meta:         h.meta(now),
 		BlockDevices: section(s.BlockDevices, now, h.blockDevices),
 		Filesystems:  section(s.Filesystems, now, filesystems),
 		DiskHealth:   section(s.DiskHealth, now, diskHealth),
-	})
+	}
 }
 
 // Network serves GET /network.
@@ -352,9 +360,11 @@ func (h *Resources) Network(w http.ResponseWriter, r *http.Request) {
 	if !allowParams(w, r) {
 		return
 	}
-	now := h.Now().UTC()
-	s := h.Snapshots.Current()
-	httpx.WriteJSON(w, http.StatusOK, apiv1.NetworkResponse{
+	httpx.WriteJSON(w, http.StatusOK, h.networkResponse(h.Snapshots.Current(), h.Now().UTC()))
+}
+
+func (h *Resources) networkResponse(s *core.Snapshot, now time.Time) apiv1.NetworkResponse {
+	return apiv1.NetworkResponse{
 		Meta:       h.meta(now),
 		Interfaces: section(s.Network, now, h.network),
 		Routes: section(s.Routes, now, func(v *core.Routes) *[]apiv1.Route {
@@ -369,7 +379,7 @@ func (h *Resources) Network(w http.ResponseWriter, r *http.Request) {
 			d := &apiv1.DNS{Nameservers: append([]string{}, v.Nameservers...), Search: append([]string{}, v.Search...), Resolver: v.Resolver}
 			return d
 		}),
-	})
+	}
 }
 
 // Sensors serves GET /sensors.
@@ -393,10 +403,13 @@ func (h *Resources) Services(w http.ResponseWriter, r *http.Request) {
 		badParam(w, r, "state", "must be active, failed or inactive")
 		return
 	}
-	now := h.Now().UTC()
-	httpx.WriteJSON(w, http.StatusOK, apiv1.ServicesResponse{
+	httpx.WriteJSON(w, http.StatusOK, h.services(h.Snapshots.Current(), h.Now().UTC(), state))
+}
+
+func (h *Resources) services(s *core.Snapshot, now time.Time, state string) apiv1.ServicesResponse {
+	return apiv1.ServicesResponse{
 		Meta: h.meta(now),
-		Services: section(h.Snapshots.Current().Services, now, func(v *core.Services) *apiv1.ServiceList {
+		Services: section(s.Services, now, func(v *core.Services) *apiv1.ServiceList {
 			out := &apiv1.ServiceList{Items: []apiv1.Service{}}
 			for _, s := range *v {
 				out.Total++
@@ -416,5 +429,5 @@ func (h *Resources) Services(w http.ResponseWriter, r *http.Request) {
 			}
 			return out
 		}),
-	})
+	}
 }

@@ -387,3 +387,17 @@ func TestRunWaitsForFirstData(t *testing.T) {
 	cancel()
 	<-done
 }
+
+func TestSetThresholdsAppliesToNextEvaluation(t *testing.T) {
+	s := healthy() // "/" is 52.6% full
+	e, _, _ := newEval(t, s, 1)
+	if c := check(t, e.Evaluate(), CheckStorageCapacity); c.Status != StatusOK {
+		t.Fatalf("before %+v", c)
+	}
+	th := defaultThresholds
+	th.StorageWarnPct, th.StorageCriticalPct = 40, 95
+	e.SetThresholds(th, 1)
+	if c := check(t, e.Evaluate(), CheckStorageCapacity); c.Status != StatusWarning {
+		t.Errorf("new threshold not applied: %+v", c)
+	}
+}

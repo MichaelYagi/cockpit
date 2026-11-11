@@ -184,7 +184,11 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "application/json")
+	accept := "application/json"
+	if _, raw := out.(*[]byte); raw {
+		accept = "text/markdown, application/json;q=0.9"
+	}
+	req.Header.Set("Accept", accept)
 	req.Header.Set("User-Agent", c.userAgent)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -216,6 +220,10 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return apiErr
 	}
 	if out == nil {
+		return nil
+	}
+	if raw, ok := out.(*[]byte); ok {
+		*raw = data
 		return nil
 	}
 	if err := json.Unmarshal(data, out); err != nil {

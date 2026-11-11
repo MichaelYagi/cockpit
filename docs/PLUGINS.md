@@ -51,6 +51,9 @@ type Env struct {
     Now      func() time.Time
     Logger   *slog.Logger
     Tools    ToolFinder // resolves optional external tools (e.g. smartctl)
+    // SMARTResultsDir holds the privileged SMART helper's results (D20);
+    // empty when no helper is configured (user mode).
+    SMARTResultsDir string
 }
 
 type Collector interface {

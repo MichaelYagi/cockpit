@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -47,11 +49,35 @@ var skipFSTypes = map[string]bool{
 	"squashfs": true, "iso9660": true, "rootfs": true,
 }
 
-// networkFSTypes can block for a long time when a server is unreachable,
-// so they are skipped rather than risking a stuck statfs call.
-var networkFSTypes = map[string]bool{
-	"nfs": true, "nfs4": true, "cifs": true, "smb3": true, "smbfs": true,
-	"fuse.sshfs": true, "ceph": true, "glusterfs": true, "fuse.glusterfs": true, "afs": true,
+// skipType applies the built-in skip list and the configured filter (Q5).
+// Network filesystems are always skipped: a statfs on a hung server can
+// block for minutes.
+func skipType(f collector.FilesystemFilter, t string) bool {
+	switch {
+	case core.IsNetworkFilesystem(t), slices.Contains(f.ExcludeTypes, t):
+		return true
+	case skipFSTypes[t]:
+		return !slices.Contains(f.IncludeTypes, t)
+	}
+	return false
+}
+
+// excludedMount reports whether a configured pattern matches mountPoint.
+// Patterns use path.Match syntax; a trailing "/**" also matches everything
+// below the directory.
+func excludedMount(patterns []string, mountPoint string) bool {
+	for _, p := range patterns {
+		if dir, ok := strings.CutSuffix(p, "/**"); ok {
+			if mountPoint == dir || strings.HasPrefix(mountPoint, dir+"/") || dir == "" {
+				return true
+			}
+			continue
+		}
+		if ok, _ := path.Match(p, mountPoint); ok {
+			return true
+		}
+	}
+	return false
 }
 
 type filesystemsCollector struct {
@@ -101,12 +127,14 @@ func (c *filesystemsCollector) Collect(ctx context.Context) collector.Result {
 		if ctx.Err() != nil {
 			break
 		}
-		if skipFSTypes[m.fsType] || networkFSTypes[m.fsType] || seen[m.majorMinor] {
+		filter := c.env.Filesystems
+		if skipType(filter, m.fsType) || seen[m.majorMinor] || excludedMount(filter.ExcludeMountPoints, m.mountPoint) {
 			continue
 		}
 		// Overlays are container or system layers; only a root overlay (as
-		// in a container) represents the machine's storage.
-		if m.fsType == "overlay" && m.mountPoint != "/" {
+		// in a container) represents the machine's storage, unless overlays
+		// are explicitly included.
+		if m.fsType == "overlay" && m.mountPoint != "/" && !slices.Contains(filter.IncludeTypes, "overlay") {
 			continue
 		}
 		st, err := c.statfs(m.mountPoint)
