@@ -283,7 +283,11 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 		return ExitUsage
 	}
 
-	res, err := config.Load(config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home})
+	src := config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home}
+	if *socket != "" {
+		src.Flags.SocketPath = socket // validate the socket actually used, not the default
+	}
+	res, err := config.Load(src)
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
 		return ExitError

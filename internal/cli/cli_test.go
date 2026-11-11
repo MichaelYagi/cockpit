@@ -99,7 +99,7 @@ func TestAgentRejectsRemoteWithoutTLS(t *testing.T) {
 }
 
 func TestTUIWithoutAgent(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "ckp")
+	dir, _ := os.MkdirTemp(shortTemp(), "ckp")
 	defer os.RemoveAll(dir)
 	env, _, errb := testEnv("/h", nil)
 	code := Run(context.Background(), []string{"tui", "--once", "--socket", filepath.Join(dir, "missing.sock")}, env)
@@ -118,7 +118,7 @@ func TestTUIRequiresKeyFromEnvForTCP(t *testing.T) {
 
 // End to end: agent and TUI placeholder in one test, talking over the socket.
 func TestAgentAndTUI(t *testing.T) {
-	root, _ := os.MkdirTemp("", "ckp")
+	root, _ := os.MkdirTemp(shortTemp(), "ckp")
 	defer os.RemoveAll(root)
 	sock := filepath.Join(root, "run", "agent.sock")
 	agentArgs := []string{"agent", "--state-dir", filepath.Join(root, "state"), "--runtime-dir", filepath.Join(root, "run"), "--tcp-address", "127.0.0.1:0"}
@@ -165,7 +165,7 @@ func TestAgentAndTUI(t *testing.T) {
 // startAgent runs "cockpit agent" in the background and returns its socket.
 func startAgent(t *testing.T) string {
 	t.Helper()
-	root, _ := os.MkdirTemp("", "ckp")
+	root, _ := os.MkdirTemp(shortTemp(), "ckp")
 	sock := filepath.Join(root, "run", "agent.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
@@ -324,7 +324,7 @@ func TestTUINeedsTerminal(t *testing.T) {
 // With no agent running on the default socket, the TUI starts an embedded
 // agent on a private socket, uses it through the API, and stops it on exit.
 func TestTUIEmbeddedAgent(t *testing.T) {
-	home, _ := os.MkdirTemp("", "ckp")
+	home, _ := os.MkdirTemp(shortTemp(), "ckp")
 	defer os.RemoveAll(home)
 	runtime := filepath.Join(home, "rt")
 	if err := os.MkdirAll(runtime, 0o700); err != nil {
@@ -356,7 +356,7 @@ func TestTUIEmbeddedAgent(t *testing.T) {
 }
 
 func TestTUIExplicitSocketDoesNotEmbed(t *testing.T) {
-	home, _ := os.MkdirTemp("", "ckp")
+	home, _ := os.MkdirTemp(shortTemp(), "ckp")
 	defer os.RemoveAll(home)
 	env, _, errb := testEnv(home, nil)
 	code := Run(context.Background(), []string{"tui", "--once", "--socket", filepath.Join(home, "none.sock")}, env)
@@ -417,7 +417,7 @@ type tlsAgentInfo struct{ root, sock, addr, fp, tlsDir string }
 // loopback port.
 func startTLSAgent(t *testing.T) tlsAgentInfo {
 	t.Helper()
-	root, _ := os.MkdirTemp("", "ckpt")
+	root, _ := os.MkdirTemp(shortTemp(), "ckpt")
 	t.Cleanup(func() { os.RemoveAll(root) })
 	tlsDir := filepath.Join(root, "tls")
 	code, out, errOut := run(t, "", "tls", "init", "--dir", tlsDir, "--host", "127.0.0.1")
@@ -588,4 +588,13 @@ func replaceMachineID(yaml string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// shortTemp is a base for test directories that hold sockets: macOS's
+// default temporary directory is too long for sun_path (104 bytes).
+func shortTemp() string {
+	if goruntime.GOOS == "darwin" {
+		return "/tmp"
+	}
+	return ""
 }
