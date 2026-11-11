@@ -324,3 +324,23 @@ func TestFilesystemsRootOverlayKept(t *testing.T) {
 		t.Errorf("container root overlay dropped: %+v", fss)
 	}
 }
+
+func TestFilesystemsSameFSDifferentDevice(t *testing.T) {
+	mi := `40 1 0:60 / /mnt/c rw - 9p C:\\ rw
+41 1 0:61 / /usr/lib/wsl/drivers ro - 9p drivers ro
+42 1 0:62 / /mnt/d rw - 9p D:\\ rw
+`
+	root := tree(t, map[string]string{"proc/self/mountinfo": mi})
+	c := newFilesystems(env(root))
+	c.statfs = func(p string) (fsStats, error) {
+		id := [2]int32{1, 0} // WSL reports the same fsid for every drive share
+		if p == "/mnt/d" {
+			return fsStats{total: 900, free: 100, avail: 100, fsid: id}, nil
+		}
+		return fsStats{total: 500, free: 200, avail: 200, fsid: id}, nil
+	}
+	fss := record[core.Filesystems](t, c.Collect(context.Background()))
+	if len(fss) != 2 || fss[0].MountPoint != "/mnt/c" || fss[1].MountPoint != "/mnt/d" {
+		t.Errorf("got %+v", fss)
+	}
+}

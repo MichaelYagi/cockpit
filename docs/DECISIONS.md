@@ -236,7 +236,7 @@ Documentation is updated in the same change as any behavior it describes.
 
 ## D13 — Hand-written /proc and /sys parsers instead of prometheus/procfs
 
-**Status:** Proposed (2026-11-11) — implemented in Phase 1, awaiting approval
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Linux collectors parse `/proc` and `/sys` with small,
 hand-written pure functions (`internal/platform/linux/parse.go`) instead of

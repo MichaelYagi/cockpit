@@ -25,6 +25,7 @@ type statfsFunc func(path string) (fsStats, error)
 
 type fsStats struct {
 	total, free, avail, files, filesFree uint64
+	fsid                                 [2]int32
 }
 
 func realStatfs(path string) (fsStats, error) {
@@ -33,7 +34,7 @@ func realStatfs(path string) (fsStats, error) {
 		return fsStats{}, err
 	}
 	bs := uint64(s.Bsize) //nolint:gosec // block size is positive
-	return fsStats{total: s.Blocks * bs, free: s.Bfree * bs, avail: s.Bavail * bs, files: s.Files, filesFree: s.Ffree}, nil
+	return fsStats{total: s.Blocks * bs, free: s.Bfree * bs, avail: s.Bavail * bs, files: s.Files, filesFree: s.Ffree, fsid: s.Fsid.Val}, nil
 }
 
 // skipFSTypes are pseudo, in-memory or image filesystems that do not
@@ -89,6 +90,11 @@ func (c *filesystemsCollector) Collect(ctx context.Context) collector.Result {
 	// per device.
 	sort.SliceStable(mounts, func(i, j int) bool { return len(mounts[i].mountPoint) < len(mounts[j].mountPoint) })
 	seen := map[string]bool{}
+	// Some filesystems (e.g. WSL drive shares over 9p) are mounted twice
+	// with different device numbers. Treat mounts with the same filesystem
+	// ID and identical block counts as one. A false miss only shows a
+	// duplicate; it never hides a distinct filesystem.
+	sameFS := map[fsStats]bool{}
 	var out core.Filesystems
 	denied := 0
 	for _, m := range mounts {
@@ -112,6 +118,12 @@ func (c *filesystemsCollector) Collect(ctx context.Context) collector.Result {
 		}
 		if st.total == 0 {
 			continue
+		}
+		if key := (fsStats{total: st.total, free: st.free, avail: st.avail, files: st.files, filesFree: st.filesFree, fsid: st.fsid}); st.fsid != [2]int32{} {
+			if sameFS[key] {
+				continue
+			}
+			sameFS[key] = true
 		}
 		seen[m.majorMinor] = true
 		out = append(out, core.Filesystem{

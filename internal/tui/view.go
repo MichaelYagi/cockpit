@@ -174,13 +174,35 @@ func column(boxes []box, w, h int) string {
 		heights[best]--
 		total--
 	}
+	// Still too tall: drop whole boxes from the end rather than cut one
+	// in half, and say so.
+	used, keep := 0, 0
+	for i := range boxes {
+		if used+heights[i]+3 > h {
+			break
+		}
+		used += heights[i] + 3
+		keep++
+	}
+	// Leave a line for the "not shown" note when something was dropped.
+	if keep < len(boxes) && used >= h && keep > 1 {
+		keep--
+		used -= heights[keep] + 3
+	}
 	var out []string
-	for i, b := range boxes {
+	for i, b := range boxes[:keep] {
 		lines := b.lines
 		if len(lines) > heights[i] {
 			lines = append(append([]string(nil), lines[:max(0, heights[i]-1)]...), sMuted.Render(fmt.Sprintf("… %d more", len(b.lines)-heights[i]+1)))
 		}
 		out = append(out, panel(b.title, strings.Join(lines, "\n"), w, 0, false))
+	}
+	if dropped := len(boxes) - keep; dropped > 0 && used < h {
+		var names []string
+		for _, b := range boxes[keep:] {
+			names = append(names, b.title)
+		}
+		out = append(out, sMuted.Render(truncate(" Not shown at this size: "+strings.Join(names, ", ")+". Enlarge the terminal or use the other screens.", w)))
 	}
 	return strings.Join(out, "\n")
 }
@@ -234,7 +256,7 @@ func wrapText(s string, width int) []string {
 	return lines
 }
 
-func kv(k, v string) string { return sMuted.Render(pad(k, 7)) + v }
+func kv(k, v string) string { return sMuted.Render(pad(k, max(7, len(k)+1))) + v }
 
 func waiting() []string { return []string{sMuted.Render("waiting for data…")} }
 
@@ -255,6 +277,9 @@ func (m *Model) screenView(w, h int) string {
 }
 
 func (m *Model) overview(w, h int) string {
+	if w < 100 {
+		return m.compactOverview(w, h)
+	}
 	cw := w
 	if w >= 100 {
 		cw = w / 2
@@ -272,6 +297,39 @@ func (m *Model) overview(w, h int) string {
 		{title: "Temperature", lines: m.temperatureLines(inner), flex: true},
 	}
 	return columns(left, right, w, h)
+}
+
+// compactOverview fits the essentials into 80x24: CPU/memory and health
+// side by side, then storage and network. Host, OS and uptime are in the
+// header.
+func (m *Model) compactOverview(w, h int) string {
+	lw := w / 2
+	rw := w - lw
+	var left []string
+	left = append(left, m.cpuLines(lw-4)...)
+	if len(left) > 3 {
+		left = left[:3] // usage, trend, load
+	}
+	mem := m.memoryLines(lw - 4)
+	if len(mem) > 2 {
+		mem = mem[:2] // used, available
+	}
+	left = append(left, mem...)
+	right := m.healthSummary(rw - 4)
+	for len(left) < len(right) {
+		left = append(left, "")
+	}
+	for len(right) < len(left) {
+		right = append(right, "")
+	}
+	top := lipgloss.JoinHorizontal(lipgloss.Top,
+		panel("CPU · Memory", strings.Join(left, "\n"), lw, 0, false),
+		panel("Health", strings.Join(right, "\n"), rw, 0, false))
+	rest := h - lipgloss.Height(top)
+	return top + "\n" + column([]box{
+		{title: "Storage", lines: m.filesystemLines(w-4, 4), flex: true},
+		{title: "Network", lines: m.networkSummary(w - 4), flex: true},
+	}, w, rest)
 }
 
 func (m *Model) systemLines(inner int) []string {
@@ -422,7 +480,9 @@ func (m *Model) networkSummary(inner int) []string {
 		kv("rx", padLeft(rate(&rx), 12)+" "+sparkline(m.rxHist, sw, 0)),
 		kv("tx", padLeft(rate(&tx), 12)+" "+sparkline(m.txHist, sw, 0)),
 	}
-	for _, n := range *s.Data {
+	ifaces := append([]apiv1.NetworkInterface(nil), (*s.Data)...)
+	sort.SliceStable(ifaces, func(i, j int) bool { return ifaces[i].OperState == "up" && ifaces[j].OperState != "up" })
+	for _, n := range ifaces {
 		if n.Loopback {
 			continue
 		}
@@ -585,8 +645,8 @@ func (m *Model) networkScreen(w, h int) string {
 			errText = sWarn.Render(padLeft(fmt.Sprint(errs), 10))
 		}
 		name := n.Name
-		if n.Loopback {
-			name += sMuted.Render(" (lo)")
+		if n.Loopback && n.Name != "lo" {
+			name += sMuted.Render(" (loopback)")
 		}
 		lines = append(lines, pad(name, 14)+pad(stateText(n.OperState), 10)+padLeft(speed, 10)+padLeft(rate(n.RxBytesPerSecond), 13)+padLeft(rate(n.TxBytesPerSecond), 13)+
 			padLeft(bytes(n.RxBytes), 12)+padLeft(bytes(n.TxBytes), 12)+errText)
@@ -637,7 +697,20 @@ func (m *Model) accessScreen(w, h int) string {
 	case len(m.keys) == 0:
 		keyLines = []string{sMuted.Render("No API keys yet. Press n to create one.")}
 	default:
-		keyLines = append(keyLines, sMuted.Render(pad("  ID", 15)+pad("NAME", 20)+pad("SCOPES", 26)+pad("STATUS", 11)+pad("LAST USED", 13)+"EXPIRES"))
+		// Column widths: ID, name, scopes, status, last used.
+		cw := [5]int{13, 20, 26, 11, 13}
+		scopeText := func(s []string) string { return strings.Join(s, ",") }
+		if w-4 < 104 {
+			cw = [5]int{13, 15, 15, 10, 10}
+			scopeText = func(s []string) string { // "metrics:read" -> "metrics"
+				short := make([]string, len(s))
+				for i, x := range s {
+					short[i] = strings.TrimSuffix(x, ":read")
+				}
+				return strings.Join(short, ",")
+			}
+		}
+		keyLines = append(keyLines, sMuted.Render(pad("  ID", cw[0]+2)+pad("NAME", cw[1])+pad("SCOPES", cw[2])+pad("STATUS", cw[3])+pad("LAST USED", cw[4])+"EXPIRES"))
 		for i, k := range m.keys {
 			st := badge(lvOK, "active")
 			switch {
@@ -658,7 +731,7 @@ func (m *Model) accessScreen(w, h int) string {
 			if i == m.selected {
 				cursor = sAccent.Render("▶ ")
 			}
-			keyLines = append(keyLines, cursor+pad(k.ID, 13)+pad(k.Name, 20)+pad(strings.Join(k.Scopes, ","), 26)+pad(st, 11)+pad(sMuted.Render(last), 13)+sMuted.Render(exp))
+			keyLines = append(keyLines, cursor+pad(k.ID, cw[0])+pad(k.Name, cw[1])+pad(scopeText(k.Scopes), cw[2])+pad(st, cw[3])+pad(sMuted.Render(last), cw[4])+sMuted.Render(exp))
 		}
 		keyLines = append(keyLines, "", sMuted.Render("Keys are shown in full only once, when created or rotated."))
 	}

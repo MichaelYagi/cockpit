@@ -252,6 +252,11 @@ func TestLayoutFitsTerminal(t *testing.T) {
 						t.Errorf("%dx%d %s line %d is %d wide: %q", sz[0], sz[1], screenNames[s], i, w, ansi.Strip(l))
 					}
 				}
+				// Every panel that opens must close: no panel is cut in half.
+				plain := ansi.Strip(out)
+				if o, c := strings.Count(plain, "╭"), strings.Count(plain, "╰"); o != c {
+					t.Errorf("%dx%d %s: %d panels opened, %d closed:\n%s", sz[0], sz[1], screenNames[s], o, c, plain)
+				}
 			}
 		}
 	}
@@ -283,6 +288,9 @@ func TestOverviewContent(t *testing.T) {
 	}
 	if strings.Contains(out, "a-very-long-interface-name0") && !strings.Contains(out, "down") {
 		t.Error("down interface without state")
+	}
+	if strings.Index(out, "eth0        ● up") > strings.Index(out, "○ down") {
+		t.Error("active interfaces must be listed before inactive ones")
 	}
 }
 
@@ -467,5 +475,39 @@ func TestHelpers(t *testing.T) {
 	}
 	if got := wrapText("one two three four", 10); strings.Join(got, "|") != "one two|three four" {
 		t.Errorf("wrap %q", got)
+	}
+}
+
+// At the minimum size the overview still shows the essentials.
+func TestOverviewAtMinimumSize(t *testing.T) {
+	m := setup(t, &fakeAPI{}, MinWidth, MinHeight)
+	out := screenText(m)
+	for _, want := range []string{"CPU · Memory", "Health", "Storage", "Network", "37.5%", "62.5%", "▲ WARNING"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("80x24 overview missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestKeyTableFitsNarrowTerminal(t *testing.T) {
+	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{{ID: "k3p9x2m7q4ta", Name: "grafana", Scopes: []string{"metrics:read", "system:read"}, Active: true}}}
+	m := setup(t, api, MinWidth, MinHeight)
+	press(t, m, "5")
+	out := screenText(m)
+	for _, want := range []string{"EXPIRES", "metrics,system", "never", "clients 1 active"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("narrow key table missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestColumnDropsWholeBoxes(t *testing.T) {
+	boxes := []box{{title: "A", lines: []string{"1", "2", "3"}}, {title: "B", lines: []string{"1", "2", "3"}}, {title: "C", lines: []string{"1"}}}
+	out := ansi.Strip(column(boxes, 40, 8))
+	if strings.Count(out, "╭") != strings.Count(out, "╰") || !strings.Contains(out, "Not shown at this size: B, C") {
+		t.Errorf("column:\n%s", out)
+	}
+	if len(strings.Split(out, "\n")) > 8 {
+		t.Errorf("column exceeded height:\n%s", out)
 	}
 }
