@@ -1,212 +1,254 @@
-# Linux Cockpit --- Claude Code Project Guide
+# Cockpit — Claude Code Project Guide
 
 ## Project intent
 
-Build **Linux Cockpit**, a modular, API-first machine monitoring
-platform. Its primary interface is a polished, keyboard-first terminal
-UI inspired by the visual clarity of `btop`, but less crowded and more
-structured.
+Build **Cockpit**, a modular, API-first machine monitoring platform. Its
+primary interface is a polished, keyboard-first terminal UI inspired by the
+visual clarity of `btop`, but less crowded and more structured.
 
-The product is not just a hardware information screen. It should help
-users understand: - What hardware and operating system a machine has. -
-What the machine is doing now. - Whether the machine is healthy. - What
-has changed or gone wrong over time. - How other applications and
-machines can consume its data securely.
+Cockpit is unrelated to the Red Hat Cockpit web console. System identifiers
+use `cockpit-monitor` / `cockpit-agent` to avoid collisions (D1).
+
+The product helps users understand:
+
+- What hardware and operating system a machine has.
+- What the machine is doing now.
+- Whether the machine is healthy.
+- What has changed or gone wrong over time.
+- How other applications and machines can consume its data securely.
+
+**Approved decisions live in `docs/DECISIONS.md` (D1–D12). They override
+anything else in this file if the two ever disagree.** Propose a new
+decision entry before deviating from one.
 
 ## Non-negotiable architecture principles
 
-1.  **API-first:** the TUI is an API client. It must not contain
-    monitoring or collection business logic.
-2.  **Local-first:** the MVP works on one machine without a cloud
-    account or external service.
-3.  **Modular collectors:** hardware and operating-system data is
-    gathered by independent collectors behind stable interfaces.
-4.  **Portable contracts:** API models are normalized and do not expose
-    Linux-specific implementation details.
-5.  **Read-only by default:** monitoring endpoints are read-only. Any
-    future mutating operation must be separately authorized and
-    explicitly confirmed.
-6.  **Secure by default:** remote API access requires TLS and
-    authentication. Never expose a plaintext API key after its one-time
-    creation display.
-7.  **Graceful degradation:** unavailable sensors, permissions,
-    commands, or hardware are reported as unsupported/unavailable, not
-    treated as fatal errors.
-8.  **Observable:** collection errors, API activity, health findings,
-    and system events should be diagnosable.
-9.  **No shell parsing as the primary architecture:** prefer `/proc`,
-    `/sys`, netlink, system APIs, and well-defined libraries. Use
-    external utilities only where appropriate and document the
-    dependency.
+1. **API-first:** the TUI is an API client. It contains no monitoring or
+   collection logic.
+2. **Local-first:** works on one machine without a cloud account or
+   external service.
+3. **Modular collectors:** data is gathered by independent collectors behind
+   stable interfaces.
+4. **Portable contracts:** API models are normalized and do not expose
+   Linux-specific implementation details.
+5. **Read-only by default:** monitoring endpoints are read-only. Any future
+   mutating operation must be separately authorized and explicitly
+   confirmed.
+6. **Secure by default:** TCP access always requires an API key, including
+   from localhost (D4). Remote access additionally requires TLS. Key
+   management is available only on the local Unix socket (D3). A plaintext
+   key is shown only once.
+7. **Graceful degradation:** unavailable sensors, permissions, commands or
+   hardware are reported as unavailable, never treated as fatal.
+8. **Observable:** collection errors, API activity, health findings and
+   system events are diagnosable.
+9. **No shell parsing as the primary architecture:** use `/proc`, `/sys`,
+   netlink, system APIs and well-defined libraries. External tools are
+   optional, run without a shell, use structured output (e.g.
+   `smartctl --json`), and are documented.
 
-## Initial technology direction
+## Names and paths (D1)
 
--   Language: Go.
--   TUI: Bubble Tea, Lip Gloss, and Bubbles.
--   HTTP API: Chi (preferred) or another small, well-supported router.
--   API description: OpenAPI 3.x.
--   Configuration: YAML with validated defaults.
--   Local persistence: SQLite for API keys metadata, settings, event
-    history, and optional metric history.
--   Transport: HTTP on loopback by default; HTTPS for remote binding.
--   Streaming: Server-Sent Events for event/alert streams; WebSocket
-    only when bidirectional streaming is justified.
--   Service integration: systemd on Linux.
+| Item | Value |
+|---|---|
+| Module | `github.com/MichaelYagi/cockpit` |
+| Executable | `cockpit` (`agent`, `tui`, `keys`, `config check`, `version`) |
+| systemd unit | `cockpit-agent.service` |
+| System config / data / runtime | `/etc/cockpit-monitor/`, `/var/lib/cockpit-monitor/`, `/run/cockpit-monitor/` |
+| User-mode dirs | `$XDG_{CONFIG,STATE,RUNTIME}_HOME/cockpit-monitor/` |
+| Env prefix | `COCKPIT_` |
+| API key prefix | `ckp_` |
+| Default TCP address | `127.0.0.1:7878` |
+
+Never create system files, units or users named plain `cockpit`.
+
+## Technology
+
+- Go **1.27.4**, pinned in `go.mod` (`toolchain` directive) (D10).
+- TUI: Bubble Tea v2 (`charm.land/bubbletea/v2`), Lip Gloss, Bubbles.
+- HTTP: `github.com/go-chi/chi/v5`.
+- API contract: OpenAPI 3.1 in `api/openapi.yaml`, spec-first, hand-written
+  types, no codegen; conformance tested with `kin-openapi` (D6).
+- Config: YAML via `go.yaml.in/yaml/v3`, strict decoding.
+- Logging: `log/slog`.
+- Persistence: SQLite via `modernc.org/sqlite`, `CGO_ENABLED=0` (D7).
+- Linux data: `github.com/prometheus/procfs`, direct sysfs reads,
+  `golang.org/x/sys/unix`.
+- Streaming: SSE (Phase 2). No WebSocket planned.
+- Service integration: systemd (`cockpit-agent.service`).
 
 Do not add a dependency without explaining why it is needed. Keep the
-core binary reasonably small and avoid requiring a database server.
+binary reasonably small and never require a database server.
 
-## Repository boundaries
+## Repository layout
 
-Recommended layout:
-
-``` text
-cmd/
-  cockpit/             # TUI executable
-  agent/               # optional headless agent executable
+```text
+cmd/cockpit/                 # main: delegates to internal/cli
+api/openapi.yaml             # authoritative API contract (embedded and served)
 internal/
-  app/                 # application wiring and lifecycle
-  config/              # config loading, defaults, validation
-  core/                # domain models and interfaces
-  collectors/          # platform-specific metric collectors
-  health/               # rules and health evaluation
-  metrics/              # sampling and normalization
-  history/              # persistence and query service
-  events/               # event model and event bus
-  api/
-    auth/
-    handlers/
-    middleware/
-    routes/
-    openapi/
-  plugins/              # plugin registry and contracts
-  storage/              # persistence implementations
+  cli/                       # subcommands; the only place that starts an embedded agent
+  app/                       # agent wiring and ordered lifecycle
+  config/                    # defaults, YAML/env/flags, validation, paths
+  core/                      # platform-neutral domain types (imports nothing internal)
+  collector/                 # Collector contract, descriptor, result, env, fakes
   platform/
-    linux/
+    linux/                   # Linux collectors (+ testdata/ fixture trees)
+    unsupported/             # non-Linux default: everything unsupported
+  engine/                    # scheduling, timeouts, rates, staleness, snapshot store
+  health/                    # health checks, hysteresis, findings
+  events/                    # event bus and ring buffer
+  auth/                      # API keys and scopes (no HTTP)
+  storage/sqlite/            # key store (later history), migrations
+  history/                   # Phase 3
+  api/
+    server/                  # listeners: Unix socket, TCP, TLS; bind guards
+    middleware/              # request ID, recovery, logging, auth, scopes, rate limit, Host check
+    handlers/                # thin handlers: decode → service → map → encode
+    redact/                  # D9 sensitive-field policy
+  tui/                       # Bubble Tea app: theme/, components/, views/
 pkg/
-  client/               # public Go API client SDK
-  models/               # only if models are intentionally public
+  apiv1/                     # public wire types matching the spec
+  client/                    # public Go SDK (Unix socket, TCP, TLS)
 docs/
-  ARCHITECTURE.md
-  API.md
-  SECURITY.md
-  PLUGINS.md
-  ROADMAP.md
 ```
 
-Keep package dependencies pointing inward toward domain contracts. UI
-packages must depend on the API client, not collectors or storage
-implementations.
+## Package dependency rules
+
+- `internal/core` imports no other internal package.
+- `internal/platform/*` depends on `collector` and `core` only.
+- `internal/api` reads engine state through `engine.Reader` and
+  `events.Subscriber`; it never calls collectors.
+- `internal/app` is the only package that wires concrete implementations.
+- **`internal/tui` imports only `pkg/client`, `pkg/apiv1` and UI
+  libraries.** `pkg/*` never imports `internal/*`. Both rules are enforced
+  by a test.
 
 ## Collector contract
 
-A collector should: - Have a stable identifier and version. - Declare
-the metrics/capabilities it can provide. - Initialize and shut down
-cleanly. - Respect context cancellation and deadlines. - Return
-timestamped, typed data. - Report unsupported capabilities explicitly. -
-Avoid blocking the whole collection cycle. - Avoid retaining unbounded
-history in memory.
+See `docs/PLUGINS.md` for the full contract. Summary:
 
-A simple starting interface:
-
-``` go
+```go
 type Collector interface {
-    ID() string
-    Version() string
-    Capabilities() []Capability
-    Collect(ctx context.Context) (Snapshot, error)
+    Descriptor() Descriptor // ID, version, capabilities, class, default interval/timeout
+    Probe(ctx context.Context) map[core.Capability]core.CapabilityStatus
+    Collect(ctx context.Context) Result // typed records + per-capability status; no all-or-nothing error
     Close(ctx context.Context) error
 }
 ```
 
-Do not blindly adopt a sample interface if it makes testing, partial
-results, or platform differences harder. Propose changes before changing
-a public contract.
+- Collectors read through injected roots (`Env.ProcRoot`, `SysRoot`, …) so
+  they can be tested against fixtures.
+- Collectors return raw counters; the engine derives rates.
+- No `init()` registration; `linux.Collectors(env)` lists them explicitly.
+- Respect context deadlines; keep any state bounded.
+
+Propose changes before changing a public contract.
 
 ## API rules
 
--   Prefix all endpoints with `/api/v1`.
--   Return JSON using stable, documented schemas.
--   Include a request ID in responses/logs.
--   Use UTC RFC 3339 timestamps.
--   Use consistent error envelopes.
--   Paginate potentially large collections such as processes and events.
--   Validate query parameters and enforce sensible limits.
--   Do not return secrets, raw API key hashes, or sensitive hardware
-    identifiers by default.
--   Keep API handlers thin; business logic belongs in services.
+- All endpoints are under `/api/v1`. Change `api/openapi.yaml` first, in the
+  same change as the code.
+- JSON with stable, documented schemas; `snake_case`; units in field names.
+- `X-Request-ID` on every response and in logs.
+- UTC RFC 3339 timestamps.
+- Consistent error envelope (`docs/API.md` §7).
+- Availability reported per section (`status`, `collected_at`, `stale`,
+  `source`, `reason`).
+- Paginate large collections; validate parameters and enforce limits.
+- Sensitive fields (command lines, serials, MACs, WWNs, hardware UUIDs) are
+  omitted by default and listed in `redacted` (D9).
+- Every route declares one required scope (`system:read`, `metrics:read`,
+  `admin`) or is explicitly public. No scope implies another (D8).
+- Handlers are thin; business logic belongs in services.
 
-## API key rules
+## API key rules (D5)
 
--   Generate high-entropy random keys using `crypto/rand`.
--   Display the full key only once at creation/rotation time.
--   Persist only a secure hash (prefer a keyed HMAC-SHA-256 using a
-    server-side pepper stored separately from the database, or a
-    suitable password-hashing scheme); never persist plaintext.
--   Store a short non-secret key prefix/ID for identification.
--   Support name, scopes, creation time, optional expiry, last-used
-    time, and revocation.
--   Compare secrets in constant time where applicable.
--   Never log keys, Authorization headers, or request bodies containing
-    secrets.
--   Default to read-only scopes.
--   Require explicit user confirmation for revocation and rotation.
--   Do not enable remote binding without TLS and an explicit
-    configuration change.
+- Format `ckp_<12-char base32 id>_<43-char base62 secret>`; 256-bit secret
+  from `crypto/rand`.
+- Store only `SHA-256(full key)` plus metadata (name, scopes, created,
+  expiry, last used, revoked, rotated-from).
+- Look up by ID; compare hashes with `crypto/subtle`.
+- Show the full key once at creation or rotation; never again.
+- Never log keys, `Authorization` headers, or request bodies containing
+  keys.
+- Key management (create, list, rotate, revoke) only over the Unix socket.
+  Phase 1 keys may hold only read scopes.
+- Rotation and revocation require explicit confirmation in the TUI and CLI.
+- Never enable remote binding without TLS and an explicit configuration
+  change.
 
 ## TUI design direction
 
-Visual language: - Dark charcoal background, not pure black. - Fine,
-subtle panel borders. - Cyan/teal for neutral information; green for
-healthy; amber for warnings; red for critical states. - Use color
-sparingly and never rely on color alone to communicate status. - Compact
-but readable typography and consistent spacing. - Live sparklines and
-compact graphs where supported by terminal capabilities. -
-Keyboard-first navigation, with mouse support where practical. -
-Responsive layout: reflow or simplify panels at narrow terminal
-widths. - Provide a useful minimum-size message rather than rendering
-broken layouts.
+Visual language:
 
-Initial navigation: - Overview - Hardware - Performance - Health -
-Storage - Network - Processes - Services - Events / Logs - API Access -
-Settings
+- Dark charcoal background, not pure black.
+- Fine, subtle panel borders.
+- Cyan/teal for neutral information; green healthy; amber warning; red
+  critical.
+- Use color sparingly and never rely on color alone for status.
+- Compact but readable; consistent spacing.
+- Live sparklines and compact graphs where the terminal supports them.
+- Keyboard-first, with mouse support where practical.
+- Reflow or simplify panels at narrow widths; show a minimum-size message
+  instead of a broken layout.
 
-The TUI must display API server status, bind address, port, active
-client count where available, request statistics, and API key
-management. The full API key is shown only immediately after creation.
+Navigation: Overview, Hardware, Performance, Health, Storage, Network,
+Processes, Services, Events / Logs, API Access, Settings. Screens without
+an implementation are hidden, not shown empty.
+
+The TUI shows API server status, listeners, active client count, request
+statistics and API key management. A full key is shown only immediately
+after creation or rotation.
 
 ## Development workflow for Claude Code
 
-Before implementation: 1. Inspect the existing repository and report its
-current structure. 2. Read this file and the relevant documents under
-`docs/`. 3. Identify the smallest coherent implementation slice. 4.
-State assumptions and any architectural impact before changing public
-interfaces.
+Before implementation:
 
-During implementation: - Prefer small, testable changes. - Add unit
-tests for domain logic and collectors. - Add HTTP handler and
-authentication tests. - Use interfaces at real boundaries, not
-everywhere. - Handle context cancellation and goroutine shutdown. -
-Avoid global mutable state. - Do not introduce a plugin execution
-sandbox or dynamic third-party code loading in the MVP. - Keep secrets
-out of logs, test snapshots, fixtures, and error messages. - Run
-`gofmt`, `go vet`, and relevant tests.
+1. Inspect the repository and report its current structure.
+2. Read this file and the relevant documents under `docs/`.
+3. Identify the smallest coherent implementation slice.
+4. State assumptions and any architectural impact before changing public
+   interfaces.
+5. Do not start a new phase until the previous one is reviewed and approved.
 
-Before completing a task: - Summarize files changed and design
-decisions. - List tests run and their results. - Identify limitations
-and follow-up work. - Do not claim a command or test passed unless it
-was actually run.
+During implementation:
+
+- Small, testable changes.
+- Unit tests for domain logic and collectors; handler, auth and contract
+  tests for the API (see `docs/TESTING.md`).
+- Interfaces at real boundaries only.
+- Handle context cancellation and goroutine shutdown.
+- No global mutable state.
+- No plugin sandbox or dynamic third-party code loading in the MVP.
+- Keep secrets and real host identifiers out of logs, fixtures, test
+  snapshots and error messages.
+- Run `gofmt`, `go vet`, staticcheck and relevant tests.
+- Work from a Linux filesystem path, not `/mnt/c/...` under WSL.
+
+Before completing a task:
+
+- Summarize files changed and design decisions.
+- List tests run and their results.
+- Identify limitations and follow-up work.
+- Never claim a command or test passed unless it was actually run.
+- Update docs in the same change as the behavior they describe.
 
 ## MVP acceptance criteria
 
-The first usable release should: - Run on a supported Linux distribution
-without requiring root for ordinary metrics. - Show CPU, memory, load,
-uptime, filesystem capacity, network rates, and available
-temperatures. - Show detected hardware inventory with
-source/availability metadata. - Expose the same information through
-authenticated REST endpoints. - Bind to loopback by default. - Generate,
-list, and revoke API keys; show a newly generated key once. - Provide a
-polished TUI that consumes the API. - Handle missing sensors and
-permissions without crashing. - Include OpenAPI documentation and setup
-instructions. - Include tests for collectors, API auth, API handlers,
-and key lifecycle.
+The first usable release:
+
+- Runs on a supported Linux distribution without root for ordinary metrics.
+- Shows CPU, memory, load, uptime, filesystem capacity, network rates and
+  available temperatures.
+- Shows detected hardware inventory with source and availability metadata.
+- Runs the four Phase 1 health checks (D11) and reports `unknown` with a
+  reason when a check cannot run.
+- Exposes the same information through authenticated REST endpoints.
+- Binds TCP to loopback by default and requires keys on every TCP request.
+- Creates, lists, rotates and revokes API keys over the local socket; shows
+  a new key once.
+- Provides a polished TUI that consumes the API.
+- Handles missing sensors and permissions without crashing.
+- Includes the OpenAPI document and setup instructions.
+- Includes tests for collectors, API auth, handlers, contracts and key
+  lifecycle.
