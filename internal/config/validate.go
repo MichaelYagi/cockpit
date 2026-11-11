@@ -142,6 +142,13 @@ func validate(c *Config, p *Paths, v *validator) {
 	ordered("health.memory.available_percent", h.Memory.WarnAvailablePercent, h.Memory.CriticalAvailablePercent, 0, 100, false)
 	ordered("health.memory.pressure_percent", h.Memory.WarnPressurePercent, h.Memory.CriticalPressurePercent, 0, 100, true)
 	ordered("health.storage", h.Storage.WarnPercent, h.Storage.CriticalPercent, 1, 100, true)
+	hr := c.History.Retention
+	inRange(v, "history.retention.raw", hr.Raw, time.Hour, 7*24*time.Hour)
+	inRange(v, "history.retention.minute", hr.Minute, 24*time.Hour, 90*24*time.Hour)
+	inRange(v, "history.retention.hour", hr.Hour, 7*24*time.Hour, 3650*24*time.Hour)
+	if hr.Minute < hr.Raw || hr.Hour < hr.Minute {
+		v.add("history.retention", "coarser resolutions must be kept at least as long as finer ones")
+	}
 	ordered("health.network", h.Network.WarnErrorsPerMinute, h.Network.CriticalErrorsPerMinute, 0.1, 1e6, true)
 	if h.Disk.WarnPercentageUsed < 1 || h.Disk.WarnPercentageUsed > 100 {
 		v.add("health.disk.warn_percentage_used", "must be between 1 and 100")

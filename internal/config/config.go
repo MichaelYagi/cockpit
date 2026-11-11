@@ -24,6 +24,7 @@ type Config struct {
 	API        API        `yaml:"api"`
 	Collection Collection `yaml:"collection"`
 	Health     Health     `yaml:"health"`
+	History    History    `yaml:"history"`
 	Logging    Logging    `yaml:"logging"`
 	TUI        TUI        `yaml:"tui"`
 }
@@ -144,6 +145,19 @@ type DiskHealth struct {
 	WarnPercentageUsed int `yaml:"warn_percentage_used"` // NVMe endurance used
 }
 
+// History configures metric history (D18).
+type History struct {
+	Enabled   bool             `yaml:"enabled"`
+	Retention HistoryRetention `yaml:"retention"`
+}
+
+// HistoryRetention is how long each resolution is kept.
+type HistoryRetention struct {
+	Raw    time.Duration `yaml:"raw"`    // 10-second samples
+	Minute time.Duration `yaml:"minute"` // 1-minute aggregates
+	Hour   time.Duration `yaml:"hour"`   // 1-hour aggregates
+}
+
 // TUI configures the terminal client.
 type TUI struct {
 	Refresh time.Duration `yaml:"refresh"`
@@ -168,6 +182,7 @@ func Defaults() Config {
 			Disk:    DiskHealth{WarnPercentageUsed: 90},
 			Network: NetworkHealth{WarnErrorsPerMinute: 10, CriticalErrorsPerMinute: 100},
 		},
+		History: History{Enabled: true, Retention: HistoryRetention{Raw: 24 * time.Hour, Minute: 7 * 24 * time.Hour, Hour: 90 * 24 * time.Hour}},
 		Collection: Collection{
 			Defaults: CollectorSettings{Interval: 2 * time.Second, Timeout: time.Second},
 		},

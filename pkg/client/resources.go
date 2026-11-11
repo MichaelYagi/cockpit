@@ -167,3 +167,31 @@ func (c *Client) Services(ctx context.Context, state string) (*apiv1.ServicesRes
 	}
 	return get[apiv1.ServicesResponse](ctx, c, path)
 }
+
+// HistoryQuery selects stored history. Zero From/To mean the last hour;
+// an empty Resolution means automatic.
+type HistoryQuery struct {
+	Series     []string
+	From, To   time.Time
+	Resolution string // auto | raw | 1m | 1h
+}
+
+// History returns stored metric history. Requires metrics:read.
+func (c *Client) History(ctx context.Context, q HistoryQuery) (*apiv1.HistoryResponse, error) {
+	v := url.Values{"series": {strings.Join(q.Series, ",")}}
+	if !q.From.IsZero() {
+		v.Set("from", q.From.UTC().Format(time.RFC3339))
+	}
+	if !q.To.IsZero() {
+		v.Set("to", q.To.UTC().Format(time.RFC3339))
+	}
+	if q.Resolution != "" {
+		v.Set("resolution", q.Resolution)
+	}
+	return get[apiv1.HistoryResponse](ctx, c, "/metrics/history?"+v.Encode())
+}
+
+// HistorySeries lists recorded series. Requires metrics:read.
+func (c *Client) HistorySeries(ctx context.Context) (*apiv1.HistorySeriesList, error) {
+	return get[apiv1.HistorySeriesList](ctx, c, "/metrics/history/series")
+}

@@ -65,6 +65,8 @@ type Deps struct {
 	// Listeners reports open listeners for the admin part of /status.
 	Listeners func() []apiv1.Listener
 	Processes handlers.ProcessSource
+	// History is nil when metric history is disabled.
+	History handlers.HistorySource
 	// Event streaming (D17).
 	Subscriber      handlers.Subscriber
 	KeyChecker      handlers.KeyChecker
@@ -92,6 +94,7 @@ func Routes(d Deps) []Route {
 	}
 	res := &handlers.Resources{Snapshots: d.Snapshots, MachineID: machineID, Policy: d.Redaction, Now: d.Now}
 	keys := &handlers.Keys{Service: d.Keys, Now: d.Now, Logger: d.Logger}
+	hist := &handlers.History{Source: d.History, MachineID: machineID, Now: d.Now, Logger: d.Logger}
 	if d.Streams == nil {
 		d.Streams = handlers.NewStreamLimits()
 	}
@@ -120,6 +123,8 @@ func Routes(d Deps) []Route {
 		{Method: get, Path: "/hardware", Scope: sys, Handler: res.Hardware},
 		{Method: get, Path: "/services", Scope: sys, Handler: res.Services},
 		{Method: get, Path: "/metrics", Scope: met, Handler: res.Metrics},
+		{Method: get, Path: "/metrics/history", Scope: met, Handler: hist.Query},
+		{Method: get, Path: "/metrics/history/series", Scope: met, Handler: hist.Series},
 		{Method: get, Path: "/storage", Scope: met, Handler: res.Storage},
 		{Method: get, Path: "/network", Scope: met, Handler: res.Network},
 		{Method: get, Path: "/sensors", Scope: met, Handler: res.Sensors},

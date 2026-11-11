@@ -29,6 +29,7 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/engine"
 	"github.com/MichaelYagi/cockpit/internal/events"
 	"github.com/MichaelYagi/cockpit/internal/health"
+	"github.com/MichaelYagi/cockpit/internal/history"
 	"github.com/MichaelYagi/cockpit/internal/netaddr"
 	"github.com/MichaelYagi/cockpit/internal/platform"
 	"github.com/MichaelYagi/cockpit/internal/storage/sqlite"
@@ -156,6 +157,14 @@ func Run(ctx context.Context, o Options) (err error) {
 	bg.Add(1)
 	go func() { defer bg.Done(); evaluator.Run(bgCtx, cfg.Health.Interval) }()
 
+	var recorder *history.Recorder
+	if cfg.History.Enabled {
+		r := cfg.History.Retention
+		recorder = history.NewRecorder(db, eng, history.Retention{Raw: r.Raw, Minute: r.Minute, Hour: r.Hour}, o.Now, log.With("component", "history"))
+		bg.Add(1)
+		go func() { defer bg.Done(); recorder.Run(bgCtx) }()
+	}
+
 	// 4. API listeners.
 	specJSON, err := openapi.JSON()
 	if err != nil {
@@ -174,6 +183,9 @@ func Run(ctx context.Context, o Options) (err error) {
 			}
 			return []apiv1.Listener{}
 		},
+	}
+	if recorder != nil {
+		deps.History = db
 	}
 	rl := cfg.API.RateLimit
 	limits := middleware.NewLimits(middleware.LimitConfig{PerKeyRPS: rl.PerKeyRPS, PerKeyBurst: rl.PerKeyBurst,

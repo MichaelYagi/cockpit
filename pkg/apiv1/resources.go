@@ -541,3 +541,51 @@ type Service struct {
 	ActiveState string `json:"active_state"`
 	SubState    string `json:"sub_state"`
 }
+
+// ---- /metrics/history ----
+
+// HistoryResponse is GET /metrics/history.
+type HistoryResponse struct {
+	Meta
+	Status      string          `json:"status"`
+	Reason      string          `json:"reason,omitempty"`
+	From        time.Time       `json:"from"`
+	To          time.Time       `json:"to"`
+	Resolution  string          `json:"resolution"` // raw | 1m | 1h
+	StepSeconds int             `json:"step_seconds"`
+	Series      []HistorySeries `json:"series"`
+}
+
+// HistorySeries is one series' points.
+type HistorySeries struct {
+	Name   string         `json:"name"`
+	Unit   string         `json:"unit"`
+	Points []HistoryPoint `json:"points"`
+}
+
+// HistoryPoint is a value (raw: min=avg=max) or a bucket aggregate.
+type HistoryPoint struct {
+	Time time.Time `json:"t"`
+	Min  float64   `json:"min"`
+	Avg  float64   `json:"avg"`
+	Max  float64   `json:"max"`
+}
+
+// HistorySeriesList is GET /metrics/history/series.
+type HistorySeriesList struct {
+	Meta
+	Status string              `json:"status"`
+	Reason string              `json:"reason,omitempty"`
+	Items  []HistorySeriesInfo `json:"items"`
+}
+
+// HistorySeriesInfo describes a recorded series.
+type HistorySeriesInfo struct {
+	Name  string    `json:"name"`
+	Unit  string    `json:"unit"`
+	First time.Time `json:"first"`
+	Last  time.Time `json:"last"`
+}
+
+// HistoryResolutions are the valid values of ?resolution=.
+var HistoryResolutions = []string{"auto", "raw", "1m", "1h"}

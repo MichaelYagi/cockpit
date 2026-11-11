@@ -201,6 +201,70 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/metrics/history:
+    get:
+      operationId: getMetricHistory
+      tags: [machine]
+      summary: Stored metric history
+      description: |
+        Samples are recorded every 10 seconds and rolled up to 1-minute and
+        1-hour min/avg/max buckets (D18). `resolution=auto` picks the finest
+        resolution that keeps each series within 2000 points. When history
+        is disabled, `status` is `not_configured` and series are empty.
+      x-cockpit-scope: metrics:read
+      parameters:
+        - name: series
+          in: query
+          required: true
+          description: Comma-separated series names (at most 10); see /metrics/history/series.
+          schema: { type: string, maxLength: 2600 }
+          example: cpu.usage_percent,memory.used_percent
+        - name: from
+          in: query
+          required: false
+          description: Start (RFC 3339). Default one hour before `to`. The range may be at most 90 days.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: End (RFC 3339). Default now.
+          schema: { type: string, format: date-time }
+        - name: resolution
+          in: query
+          required: false
+          schema: { type: string, enum: [auto, raw, 1m, 1h], default: auto }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/metrics/history/series:
+    get:
+      operationId: listHistorySeries
+      tags: [machine]
+      summary: Recorded history series
+      x-cockpit-scope: metrics:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistorySeriesList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/storage:
     get:
       operationId: getStorage
@@ -1490,6 +1554,61 @@ components:
         load_state: { type: string, examples: [loaded, not-found, masked] }
         active_state: { type: string, examples: [active, inactive, failed, activating] }
         sub_state: { type: string, examples: [running, exited, dead] }
+    HistoryResponse:
+      type: object
+      additionalProperties: false
+      required: [schema_version, machine_id, generated_at, status, from, to, resolution, step_seconds, series]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        status: { $ref: "#/components/schemas/Availability" }
+        reason: { type: string }
+        from: { $ref: "#/components/schemas/Timestamp" }
+        to: { $ref: "#/components/schemas/Timestamp" }
+        resolution: { type: string, enum: [raw, 1m, 1h] }
+        step_seconds: { type: integer, minimum: 1 }
+        series:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, unit, points]
+            properties:
+              name: { type: string }
+              unit: { type: string, enum: ["", percent, bytes, bytes_per_second, celsius, watts] }
+              points:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [t, min, avg, max]
+                  properties:
+                    t: { $ref: "#/components/schemas/Timestamp" }
+                    min: { type: number }
+                    avg: { type: number }
+                    max: { type: number }
+    HistorySeriesList:
+      type: object
+      additionalProperties: false
+      required: [schema_version, machine_id, generated_at, status, items]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        status: { $ref: "#/components/schemas/Availability" }
+        reason: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, unit, first, last]
+            properties:
+              name: { type: string, examples: [cpu.usage_percent, net.eth0.rx_bytes_per_second] }
+              unit: { type: string }
+              first: { $ref: "#/components/schemas/Timestamp" }
+              last: { $ref: "#/components/schemas/Timestamp" }
     Scope:
       type: string
       enum: [system:read, metrics:read, processes:read, admin]

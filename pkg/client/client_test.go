@@ -188,6 +188,11 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 			return err
 		},
 		func() error { _, err := c.Services(ctx, "failed"); return err },
+		func() error {
+			_, err := c.History(ctx, HistoryQuery{Series: []string{"cpu.usage_percent"}, From: exp.Add(-time.Hour), To: exp, Resolution: "1m"})
+			return err
+		},
+		func() error { _, err := c.HistorySeries(ctx); return err },
 		func() error { _, err := c.ListKeys(ctx); return err },
 		func() error {
 			_, err := c.CreateKey(ctx, apiv1.CreateAPIKeyRequest{Name: "n", Scopes: []string{"metrics:read"}, ExpiresAt: &exp})
