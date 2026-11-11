@@ -319,6 +319,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.streamLive, m.streamErr = true, ""
 		return m, m.waitStream()
 	case streamEventMsg:
+		sanitize(&msg.e)
 		m.addEvent(msg.e)
 		return m, m.waitStream()
 	case streamLaggedMsg:
@@ -359,6 +360,7 @@ func (m *Model) apply(r resultMsg) {
 	}
 	m.lastErr = ""
 	m.lastOK = m.opts.Now()
+	sanitize(r.v)
 	switch v := r.v.(type) {
 	case *apiv1.Status:
 		m.status = v
@@ -676,6 +678,8 @@ func (m *Model) applyAction(a actionMsg) tea.Cmd {
 		m.flashMsg(lvCrit, "Failed: "+errText(a.err))
 		return nil
 	}
+	sanitize(a.created)
+	sanitize(a.revoked)
 	switch a.action {
 	case "create", "rotate":
 		m.revealed, m.modal = a.created, modalReveal

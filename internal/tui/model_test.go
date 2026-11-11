@@ -241,7 +241,7 @@ func drive(t *testing.T, m *Model, cmd tea.Cmd) {
 	}
 }
 
-func setup(t *testing.T, api *fakeAPI, w, h int) *Model {
+func setup(t *testing.T, api API, w, h int) *Model {
 	t.Helper()
 	m := New(api, Options{Target: "/run/test.sock", Now: func() time.Time { return t0 }})
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
@@ -701,5 +701,61 @@ func TestCompactTabsFitAndClick(t *testing.T) {
 	drive(t, m, cmd)
 	if m.screen != scrAccess {
 		t.Errorf("click on compact tab -> %v", m.screen)
+	}
+}
+
+// Process names, device strings and service descriptions come from other
+// users or hardware; escape sequences in them must never reach the
+// terminal.
+func TestHostileStringsAreSanitized(t *testing.T) {
+	evil := "\x1b]0;pwned\x07\x1b[2Jevil\x9bname\xff"
+	api := &hostileAPI{fakeAPI: &fakeAPI{admin: true}, evil: evil}
+	m := setup(t, api, 120, 40)
+	for _, key := range []string{"2", "6"} {
+		press(t, m, key)
+		out := m.render()
+		for _, bad := range []string{"\x1b]0;pwned", "\x1b[2J", "\x07", "\x9b", "\xff"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("screen %s contains raw control sequence %q", key, bad)
+			}
+		}
+		if !strings.Contains(ansi.Strip(out), "evil") {
+			t.Errorf("screen %s lost the visible text", key)
+		}
+	}
+	e := apiv1.Event{ID: "x", Message: evil}
+	m.Update(streamEventMsg{e: e})
+	if strings.Contains(m.eventList[0].Message, "\x1b") {
+		t.Error("stream event not sanitized")
+	}
+}
+
+type hostileAPI struct {
+	*fakeAPI
+	evil string
+}
+
+func (h *hostileAPI) Processes(ctx context.Context, q client.ProcessesQuery) (*apiv1.ProcessesResponse, error) {
+	r, err := h.fakeAPI.Processes(ctx, q)
+	if err == nil {
+		r.Items[0].Name = h.evil
+	}
+	return r, err
+}
+
+func (h *hostileAPI) Hardware(ctx context.Context) (*apiv1.HardwareResponse, error) {
+	r, err := h.fakeAPI.Hardware(ctx)
+	if err == nil {
+		r.USBDevices = avail([]apiv1.USBDevice{{Path: "1-1", Product: h.evil}})
+	}
+	return r, err
+}
+
+func TestCleanText(t *testing.T) {
+	if cleanText("normal text · ünïcode ✓") != "normal text · ünïcode ✓" {
+		t.Error("clean text altered")
+	}
+	if got := cleanText("a\x1bb\tc\x00"); got != "a�b�c�" {
+		t.Errorf("%q", got)
 	}
 }
