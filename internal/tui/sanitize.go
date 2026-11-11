@@ -33,8 +33,14 @@ func walk(v reflect.Value) {
 		}
 	case reflect.Map:
 		if v.Type().Elem().Kind() == reflect.String && v.Type().Key().Kind() == reflect.String {
+			// Keys come from the API too (labels, evidence), so both are cleaned.
 			for _, k := range v.MapKeys() {
-				v.SetMapIndex(k, reflect.ValueOf(cleanText(v.MapIndex(k).String())).Convert(v.Type().Elem()))
+				val := cleanText(v.MapIndex(k).String())
+				ck := cleanText(k.String())
+				if ck != k.String() {
+					v.SetMapIndex(k, reflect.Value{})
+				}
+				v.SetMapIndex(reflect.ValueOf(ck).Convert(v.Type().Key()), reflect.ValueOf(val).Convert(v.Type().Elem()))
 			}
 			return
 		}

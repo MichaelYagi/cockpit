@@ -143,6 +143,9 @@ func Run(ctx context.Context, o Options) (err error) {
 	if paths.Mode == config.ModeSystem {
 		env.SMARTResultsDir = SMARTResultsDir(paths) // written by cockpit-smart.service (D20)
 	}
+	if cfg.Collection.UPS.Enabled {
+		env.UPSAddress = cfg.Collection.UPS.Address
+	}
 	fsf := cfg.Collection.Filesystems
 	env.Filesystems = collector.FilesystemFilter{ExcludeTypes: fsf.ExcludeTypes, IncludeTypes: fsf.IncludeTypes, ExcludeMountPoints: fsf.ExcludeMountPoints}
 	eng, err := engine.New(o.Collectors(env), engine.Options{

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/collector"
@@ -24,13 +25,23 @@ var nvidiaFields = []string{"name", "uuid", "pci.bus_id", "driver_version", "mem
 type gpuCollector struct {
 	env collector.Env
 	run runFunc
+
+	mu     sync.Mutex
+	energy map[string]energySample // Intel hwmon energy by PCI address
 }
 
-func newGPU(env collector.Env) *gpuCollector { return &gpuCollector{env: env, run: realRun} }
+type energySample struct {
+	microjoules uint64
+	at          time.Time
+}
+
+func newGPU(env collector.Env) *gpuCollector {
+	return &gpuCollector{env: env, run: realRun, energy: map[string]energySample{}}
+}
 
 func (c *gpuCollector) Descriptor() collector.Descriptor {
 	return collector.Descriptor{
-		ID: "linux.gpu", Version: version, Source: "sysfs, nvidia-smi, amdgpu",
+		ID: "linux.gpu", Version: version, Source: "sysfs, nvidia-smi, amdgpu, i915/xe",
 		Capabilities: []core.Capability{core.CapGPUDevices, core.CapGPUMetrics},
 		Class:        collector.Sampler, DefaultInterval: 5 * time.Second, MinInterval: 5 * time.Second, DefaultTimeout: 4 * time.Second,
 	}
@@ -70,11 +81,27 @@ func (c *gpuCollector) Collect(ctx context.Context) collector.Result {
 			metrics += len(rows)
 		}
 	}
+	seen := map[string]bool{}
 	for i := range gpus {
-		if gpus[i].Driver == "amdgpu" && c.amd(&gpus[i]) {
-			metrics++
+		switch gpus[i].Driver {
+		case "amdgpu":
+			if c.amd(&gpus[i]) {
+				metrics++
+			}
+		case "i915", "xe":
+			seen[gpus[i].PCIAddress] = true
+			if c.intel(&gpus[i]) {
+				metrics++
+			}
 		}
 	}
+	c.mu.Lock()
+	for addr := range c.energy { // bounded: forget GPUs that are gone
+		if !seen[addr] {
+			delete(c.energy, addr)
+		}
+	}
+	c.mu.Unlock()
 
 	if len(gpus) == 0 {
 		res.Status[core.CapGPUDevices] = core.CapabilityStatus{Availability: core.Unsupported, Reason: "No GPU was found."}
@@ -214,6 +241,68 @@ func (c *gpuCollector) amd(g *core.GPU) bool {
 	}
 	if found {
 		g.MetricsSource = "amdgpu"
+	}
+	return found
+}
+
+// intel reads i915 and xe sysfs metrics: the current and maximum GPU
+// frequency, and power from the hwmon energy counter (discrete GPUs).
+// Utilization needs perf events, which an unprivileged agent cannot use,
+// so it stays unavailable.
+func (c *gpuCollector) intel(g *core.GPU) bool {
+	dev := filepath.Join("bus", "pci", "devices", g.PCIAddress)
+	found := false
+	mhz := func(paths ...string) *float64 {
+		for _, p := range paths {
+			if v, err := readUint(c.env.SysRoot, filepath.Join(dev, p)); err == nil {
+				f := float64(v)
+				return &f
+			}
+		}
+		return nil
+	}
+	// i915: drm/cardN/gt_cur_freq_mhz; xe: tile0/gt0/freq0/cur_freq.
+	var card string
+	if cards, err := listDir(c.env.SysRoot, filepath.Join(dev, "drm")); err == nil {
+		for _, n := range cards {
+			if strings.HasPrefix(n, "card") {
+				card = filepath.Join("drm", n)
+				break
+			}
+		}
+	}
+	g.FrequencyMHz = mhz(filepath.Join(card, "gt_cur_freq_mhz"), "tile0/gt0/freq0/cur_freq")
+	g.MaxFrequencyMHz = mhz(filepath.Join(card, "gt_RP0_freq_mhz"), "tile0/gt0/freq0/rp0_freq", filepath.Join(card, "gt_max_freq_mhz"), "tile0/gt0/freq0/max_freq")
+	if card == "" {
+		g.FrequencyMHz, g.MaxFrequencyMHz = mhz("tile0/gt0/freq0/cur_freq"), mhz("tile0/gt0/freq0/rp0_freq", "tile0/gt0/freq0/max_freq")
+	}
+	found = g.FrequencyMHz != nil
+
+	if hw, err := listDir(c.env.SysRoot, filepath.Join(dev, "hwmon")); err == nil && len(hw) > 0 {
+		h := filepath.Join(dev, "hwmon", hw[0])
+		if v, err := readUint(c.env.SysRoot, filepath.Join(h, "power1_max")); err == nil && v > 0 {
+			w := float64(v) / 1e6
+			g.PowerLimitWatts = &w
+		}
+		if v, err := readUint(c.env.SysRoot, filepath.Join(h, "energy1_input")); err == nil {
+			now := c.env.Now()
+			c.mu.Lock()
+			prev, ok := c.energy[g.PCIAddress]
+			c.energy[g.PCIAddress] = energySample{microjoules: v, at: now}
+			c.mu.Unlock()
+			if dt := now.Sub(prev.at).Seconds(); ok && dt > 0 && v >= prev.microjoules {
+				w := float64(v-prev.microjoules) / 1e6 / dt
+				g.PowerWatts = &w
+			}
+			found = true
+		}
+		if v, err := readInt(c.env.SysRoot, filepath.Join(h, "temp1_input")); err == nil {
+			t := float64(v) / 1000
+			g.TemperatureCelsius, found = &t, true
+		}
+	}
+	if found {
+		g.MetricsSource = g.Driver
 	}
 	return found
 }

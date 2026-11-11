@@ -44,6 +44,10 @@ type Collector struct {
 	ID           string       `json:"id"`
 	Version      string       `json:"version"`
 	Capabilities []Capability `json:"capabilities"`
+	// External marks an extension collector built with the public SDK
+	// (D23); SDKVersion is the SDK major version it targets.
+	External   bool `json:"external"`
+	SDKVersion int  `json:"sdk_version,omitempty"`
 }
 
 // Availability values.

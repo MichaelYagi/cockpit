@@ -205,6 +205,7 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 		},
 		func() error { _, err := c.ResetSettings(ctx); return err },
 		func() error { _, err := c.Report(ctx, true); return err },
+		func() error { _, err := c.Containers(ctx); return err },
 		func() error { _, err := c.ReportMarkdown(ctx, false); return err },
 		func() error { _, err := c.ListKeys(ctx); return err },
 		func() error {

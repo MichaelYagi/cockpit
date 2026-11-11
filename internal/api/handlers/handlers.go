@@ -82,7 +82,7 @@ func mapCollectors(in []core.CollectorStatus) []apiv1.Collector {
 			caps = append(caps, apiv1.Capability{Name: string(name), Status: string(s.Availability), Reason: s.Reason})
 		}
 		sort.Slice(caps, func(i, j int) bool { return caps[i].Name < caps[j].Name })
-		out = append(out, apiv1.Collector{ID: c.ID, Version: c.Version, Capabilities: caps})
+		out = append(out, apiv1.Collector{ID: c.ID, Version: c.Version, Capabilities: caps, External: c.External, SDKVersion: c.SDKVersion})
 	}
 	return out
 }

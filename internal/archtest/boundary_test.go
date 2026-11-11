@@ -175,3 +175,10 @@ func TestSettingsDependencies(t *testing.T) {
 func TestReportUsesWireTypesOnly(t *testing.T) {
 	rule(t, "internal/report/...", hasPrefix("pkg/apiv1"))
 }
+
+// Extension collectors reach the agent only through the public SDK and
+// the adapter (D23).
+func TestExtensionDependencies(t *testing.T) {
+	rule(t, "internal/extension/...", hasPrefix("internal/collector", "internal/core", "pkg/collectorsdk"))
+	rule(t, "pkg/collectorsdk/...", func(string) bool { return false })
+}

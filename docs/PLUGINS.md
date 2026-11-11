@@ -2,10 +2,11 @@
 
 ## 1. Terminology
 
-A **collector** gathers a defined set of telemetry for one platform. A
-**plugin** is a broader future extension that may register collectors,
-health checks, or integrations. The MVP has only statically compiled,
-trusted collectors. Dynamic third-party loading is out of scope.
+A **collector** gathers a defined set of telemetry for one platform.
+**Built-in** collectors live in `internal/platform`. **Extension**
+collectors are third-party code written against the public SDK
+(`pkg/collectorsdk`) and compiled into a custom build (§8, D23). All
+collectors are compiled in and trusted. Nothing is loaded at runtime.
 
 ## 2. Design goals
 
@@ -76,9 +77,9 @@ type Result struct {
 - `core.Record` is a sealed interface: only types in `internal/core`
   implement it. Adding a domain means adding a record type and updating the
   OpenAPI spec, which is appropriate because the contract changes too.
-- For future third-party collectors, a single generic record type
-  (`core.GenericMetric{Name, Labels, Value, Unit}`) will be added rather
-  than opening the sealed set.
+- Extension collectors use the one open record type,
+  `core.GenericMetrics` (D22), instead of opening the sealed set. See
+  §3.1.
 - Collectors return **raw counters**. Rates are computed by the engine.
 - Collectors are stateless between calls where possible. Any state they
   keep must be bounded.
@@ -87,6 +88,41 @@ type Result struct {
   capabilities; other collectors are unaffected.
 - Collectors are listed explicitly by `linux.Collectors(env)`. There is no
   `init()` self-registration.
+
+### 3.1 Generic metrics (D22)
+
+A collector whose descriptor sets `GenericMetrics: true` returns a
+`core.GenericMetrics` record: a list of
+
+```go
+core.GenericMetric{
+    Name:   "custom.example.open_files", // must start with the collector ID + "."
+    Kind:   core.Gauge,                  // or core.Counter
+    Unit:   "count",
+    Labels: map[string]string{"kind": "allocated"},
+    Value:  4096,
+}
+```
+
+| Rule | Limit |
+|---|---|
+| Name | lower-case dotted, `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$`, at most 128 characters, prefixed with the collector ID |
+| Kind | `gauge`, or `counter` (only increases; the engine derives a per-second rate and skips one rate after a reset) |
+| Unit | `bytes`, `bytes_per_second`, `percent`, `ratio`, `celsius`, `watts`, `volts`, `hertz`, `rpm`, `seconds`, `count`, `per_second`; counters use `bytes`, `count` or `seconds` |
+| Labels | at most 8; names `^[a-z][a-z0-9_]{0,31}$`; values at most 128 bytes |
+| Value | finite; counters not negative |
+| Series | at most 500 distinct name + label combinations per collector |
+
+Metrics that break a rule are dropped and counted. The first reason is
+reported as `dropped_series` and `problem` in the API and logged once
+when it changes. The rest of the collection is still published. Such a
+collector may declare its own capabilities named `<ID>.<name>`. Their
+best status is the set's availability. `HistoryMetrics` lists metric names to
+record in history: gauges by value, counters by rate, named
+`<name>[.<label values>]_<unit>`, within the overall 200-series limit.
+
+Generic metrics appear in `GET /metrics?sections=custom`, the diagnostic
+report and the TUI's Performance screen.
 
 ## 4. Capabilities
 
@@ -117,15 +153,20 @@ A collector declares what it can **potentially** provide. `Probe` and each
 | `linux.pci` | 2 | `hardware.pci` | `/sys/bus/pci`, `pci.ids` when installed |
 | `linux.usb` | 2 | `hardware.usb` | `/sys/bus/usb`, `usb.ids` when installed |
 | `linux.dmi` | 2 | `hardware.board`, `hardware.memory_modules` | `/sys/class/dmi/id`, SMBIOS type 17 (root-only) |
-| `linux.gpu` | 2 | `gpu.devices`, `gpu.metrics` | PCI/DRM; `nvidia-smi` CSV query; `amdgpu` sysfs (D16); at least every 5s |
+| `linux.gpu` | 2 | `gpu.devices`, `gpu.metrics` | PCI/DRM; `nvidia-smi` CSV query; `amdgpu` sysfs (D16); Intel `i915`/`xe` frequency, and power from hwmon energy (Phase 4); at least every 5s |
+| `linux.containers` | 4 | `containers.list` | cgroup v2: `cpu.stat`, `memory.current`/`max`, `io.stat`, `pids.current` of Docker, Podman, containerd and CRI-O scopes; bounded walk, at most 500 containers, every 5s |
+| `linux.zfs` | 4 | `storage.zfs` | `/proc/spl/kstat/zfs/<pool>/state`, `arcstats`; `zpool list -j` / `zpool status -j` (optional, OpenZFS 2.3+), every 30s |
+| `linux.power` | 4 | `power.supplies` | `/sys/class/power_supply` (serial numbers are never read), every 10s |
+| `linux.ups` | 4 | `power.ups` | Network UPS Tools protocol, read-only (`LIST UPS`, `LIST VAR`), off unless `collection.ups.enabled` |
 | `linux.netconfig` | 2 | `network.routes`, `network.dns` | `/proc/net/route`, `/proc/net/ipv6_route`, `resolv.conf` |
 
 Filesystem collection skips pseudo, in-memory and image filesystems
 (`proc`, `sysfs`, `cgroup2`, `tmpfs`, `squashfs`, `rootfs`, …), overlays
 other than the root filesystem, and network filesystems (`nfs`, `cifs`,
 `sshfs`, …) whose `statfs` can hang. Bind mounts of the same device are
-reported once, at the shortest mount point. The skip lists are fixed in
-Phase 1.
+reported once, at the shortest mount point. Since Phase 3 the type and
+mount-point lists are configurable (`collection.filesystems`, Q5); network
+filesystems are always skipped.
 
 ### External tools
 
@@ -175,10 +216,120 @@ Every collector has:
 
 Fixture data must not contain real host identifiers.
 
-## 8. Future extension model
+## 8. Writing an extension collector (D23)
 
-Candidates: NVIDIA/AMD GPU, Docker/Podman, Kubernetes node metrics,
-ZFS/mdraid, UPS, fan controllers, VMs, enterprise sensors.
+Extension collectors live in your own Go module and are compiled into a
+custom build. Nothing is loaded at runtime. They use only the public
+packages `pkg/collectorsdk` and `custom`. `internal/` stays private, and a
+collector written against SDK version 1 keeps building as long as the
+agent supports that version.
 
-Before implementing dynamic plugins, write a separate security design. A Go
-interface is not a safe boundary for untrusted code.
+**1. Write the collector.**
+
+```go
+package main
+
+import (
+    "context"
+    "os"
+    "strconv"
+    "strings"
+    "time"
+
+    "github.com/MichaelYagi/cockpit/custom"
+    "github.com/MichaelYagi/cockpit/pkg/collectorsdk"
+)
+
+type files struct{}
+
+func (files) Descriptor() collectorsdk.Descriptor {
+    return collectorsdk.Descriptor{
+        ID: "custom.files", Version: "1.0.0", SDKVersion: collectorsdk.Version,
+        Capabilities: []string{"custom.files.handles"},
+        Interval:     10 * time.Second,
+        Source:       "procfs",
+        History:      []string{"custom.files.open"},
+    }
+}
+
+func (files) Probe(context.Context) map[string]collectorsdk.Status {
+    if _, err := os.Stat("/proc/sys/fs/file-nr"); err != nil {
+        return map[string]collectorsdk.Status{"custom.files.handles": {
+            Availability: collectorsdk.Unsupported, Reason: "This kernel does not report file handles."}}
+    }
+    return map[string]collectorsdk.Status{"custom.files.handles": {Availability: collectorsdk.Available}}
+}
+
+func (files) Collect(ctx context.Context) collectorsdk.Result {
+    b, err := os.ReadFile("/proc/sys/fs/file-nr")
+    f := strings.Fields(string(b))
+    if err != nil || len(f) < 1 {
+        return collectorsdk.Result{Status: map[string]collectorsdk.Status{"custom.files.handles": {
+            Availability: collectorsdk.TemporarilyUnavailable, Reason: "Could not read file handle counts."}}}
+    }
+    open, _ := strconv.ParseFloat(f[0], 64)
+    return collectorsdk.Result{
+        Metrics: []collectorsdk.Metric{{Name: "custom.files.open", Kind: collectorsdk.Gauge, Unit: "count", Value: open}},
+        Status:  map[string]collectorsdk.Status{"custom.files.handles": {Availability: collectorsdk.Available}},
+    }
+}
+
+func (files) Close(context.Context) error { return nil }
+
+func main() { os.Exit(custom.Main(files{})) }
+```
+
+**2. Build and run it.** `CGO_ENABLED=0 go build -o cockpit .` produces
+the normal `cockpit` binary (`agent`, `tui`, `keys`, `report`, …) with
+your collector added. It also runs in the TUI's embedded agent.
+
+**3. Check it.**
+
+```sh
+./cockpit tui --once              # lists "custom.files 1.0.0 (extension, SDK v1)"
+curl --unix-socket "$XDG_RUNTIME_DIR/cockpit-monitor/agent.sock" \
+  'http://localhost/api/v1/metrics?sections=custom'
+```
+
+The Performance screen shows the values. `/status` reports the
+collector with `"external": true` and its `sdk_version`.
+
+**Rules.**
+
+- The ID is `custom.<name>`. Capability and metric names start with the ID
+  plus a dot. Metric rules and limits are in §3.1; metrics that break them
+  are dropped and reported, never fatal.
+- Interval: default 10 s, minimum 1 s. Timeout: default 5 s, at most the
+  interval. A call that overruns or panics marks the collector
+  `temporarily_unavailable`; the agent carries on.
+- Return raw counters as `Counter` metrics; the agent computes rates.
+- Report what is missing with a status and a safe reason. Don't fail
+  silently, and don't put secrets or host identifiers in reasons, metric
+  names or labels.
+- Don't start goroutines that outlive `Collect`, and keep any state
+  bounded. `Close` runs at shutdown.
+- `custom.Main` refuses to start if a collector targets another SDK major
+  version or breaks the naming rules, with a message saying which.
+
+**Trust.** Extension code runs inside the agent process with the agent's
+privileges and can read whatever the agent can, including the key
+database. Build in only code you would trust as a dependency. There is no
+sandbox, and a Go interface is not a security boundary.
+
+A complete, tested example lives in `examples/collector/`. It is a
+separate module that reports kernel file handle use and the context
+switch rate, with fixture-based tests. `make examples` (part of
+`make check` and CI) vets, tests and builds it against this checkout:
+
+```sh
+cd examples/collector && CGO_ENABLED=0 go build -o cockpit . && ./cockpit tui
+```
+
+## 9. Future extension model
+
+Candidates not yet covered: Kubernetes node metrics, mdraid, fan
+controllers, VMs, enterprise sensors.
+
+Runtime plugin loading is not planned. Before considering it, write a
+separate security design: a Go interface is not a safe boundary for
+untrusted code.

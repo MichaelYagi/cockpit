@@ -40,9 +40,11 @@ const (
 	FlushInterval  = 30 * time.Second
 	RollupInterval = time.Minute
 	MaxSeries      = 200
-	MaxPoints      = 2000
-	MaxRange       = 90 * 24 * time.Hour
-	maxBuffered    = 2000
+	// HistoryContainers is how many of the busiest containers are recorded.
+	HistoryContainers = 5
+	MaxPoints         = 2000
+	MaxRange          = 90 * 24 * time.Hour
+	maxBuffered       = 2000
 )
 
 // Sample is one raw value.
@@ -86,19 +88,48 @@ type Store interface {
 
 // Unit returns the unit of a series, from its name suffix.
 func Unit(series string) string {
-	switch {
-	case strings.HasSuffix(series, "_bytes_per_second"):
-		return "bytes_per_second"
-	case strings.HasSuffix(series, "_percent"):
-		return "percent"
-	case strings.HasSuffix(series, "_bytes"):
-		return "bytes"
-	case strings.HasSuffix(series, "_celsius"):
-		return "celsius"
-	case strings.HasSuffix(series, "_watts"):
-		return "watts"
+	for _, u := range unitSuffixes {
+		if strings.HasSuffix(series, "_"+u) {
+			return u
+		}
 	}
 	return ""
+}
+
+// unitSuffixes are checked in order, so compound units come first.
+var unitSuffixes = []string{"bytes_per_second", "seconds_per_second", "per_second", "percent", "bytes", "celsius", "watts",
+	"volts", "hertz", "rpm", "seconds", "ratio", "count"}
+
+// CustomSeries names the history series of a generic metric (D22): the
+// metric name, its label values in label-name order, and a unit suffix so
+// Unit can recover the unit. Characters outside [A-Za-z0-9_:/-] become "_".
+func CustomSeries(name string, labels map[string]string, unit string) string {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(name)
+	for _, k := range keys {
+		b.WriteByte('.')
+		v := labels[k]
+		if len(v) > 64 {
+			v = v[:64]
+		}
+		for _, r := range v {
+			if r < 0x80 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_:/-", r)) {
+				b.WriteRune(r)
+			} else {
+				b.WriteByte('_')
+			}
+		}
+	}
+	out := b.String()
+	if unit != "" && !strings.HasSuffix(out, "_"+unit) {
+		out += "_" + unit
+	}
+	return out
 }
 
 // Extract returns the recorded series values from a snapshot. Only
@@ -174,6 +205,66 @@ func Extract(s *core.Snapshot, now time.Time) map[string]float64 {
 			if gpu.PowerWatts != nil {
 				out[p+"power_watts"] = *gpu.PowerWatts
 			}
+		}
+	}
+	if c := s.Containers.Data; c != nil && ok(s.Containers.Meta) {
+		// The busiest containers only, so a host running hundreds stays
+		// within the series limit.
+		busy := make([]core.ContainerMetrics, 0, len(*c))
+		for _, x := range *c {
+			if x.CPUPercent != nil {
+				busy = append(busy, x)
+			}
+		}
+		sort.Slice(busy, func(i, j int) bool { return *busy[i].CPUPercent > *busy[j].CPUPercent })
+		for _, x := range busy[:min(len(busy), HistoryContainers)] {
+			p := "containers." + x.Runtime + "." + x.ID[:min(12, len(x.ID))] + "."
+			out[p+"cpu_percent"] = *x.CPUPercent
+			if x.MemoryBytes != nil {
+				out[p+"memory_bytes"] = float64(*x.MemoryBytes)
+			}
+		}
+	}
+	if z := s.ZFS.Data; z != nil && ok(s.ZFS.Meta) {
+		for _, p := range z.Pools {
+			if p.SizeBytes != nil && p.AllocatedBytes != nil && *p.SizeBytes > 0 {
+				out["zfs."+p.Name+".used_percent"] = float64(*p.AllocatedBytes) / float64(*p.SizeBytes) * 100
+			}
+		}
+	}
+	if ps := s.Power.Data; ps != nil && ok(s.Power.Meta) {
+		for _, p := range *ps {
+			if p.Type == "battery" && p.CapacityPercent != nil {
+				out["power."+p.Name+".capacity_percent"] = *p.CapacityPercent
+			}
+		}
+	}
+	if us := s.UPS.Data; us != nil && ok(s.UPS.Meta) {
+		for _, u := range *us {
+			if u.ChargePercent != nil {
+				out["ups."+u.Name+".charge_percent"] = *u.ChargePercent
+			}
+			if u.LoadPercent != nil {
+				out["ups."+u.Name+".load_percent"] = *u.LoadPercent
+			}
+		}
+	}
+	for _, set := range s.Custom {
+		if !ok(set.Meta) {
+			continue
+		}
+		for _, m := range set.Metrics {
+			if !m.History {
+				continue
+			}
+			v, unit := m.Value, m.Unit
+			if m.Kind == core.Counter {
+				if m.RatePerSecond == nil {
+					continue
+				}
+				v, unit = *m.RatePerSecond, core.RateUnit(m.Unit)
+			}
+			out[CustomSeries(m.Name, m.Labels, unit)] = v
 		}
 	}
 	if len(out) > MaxSeries { // keep storage bounded on unusual machines

@@ -49,6 +49,10 @@ const (
 	CapSensorsThermal     Capability = "sensors.thermal"
 	CapSensorsFan         Capability = "sensors.fan"
 	CapProcessesList      Capability = "processes.list"
+	CapContainers         Capability = "containers.list"
+	CapStorageZFS         Capability = "storage.zfs"
+	CapPowerSupplies      Capability = "power.supplies"
+	CapPowerUPS           Capability = "power.ups"
 	CapServicesSystemd    Capability = "services.systemd"
 	CapHardwareCPU        Capability = "hardware.cpu"
 	CapHardwarePCI        Capability = "hardware.pci"
@@ -70,7 +74,8 @@ func KnownCapabilities() []Capability {
 		CapStorageDevices, CapStorageFilesystems, CapStorageSMART,
 		CapNetworkInterfaces, CapNetworkThroughput,
 		CapSensorsThermal, CapSensorsFan,
-		CapProcessesList, CapServicesSystemd,
+		CapProcessesList, CapContainers, CapServicesSystemd,
+		CapStorageZFS, CapPowerSupplies, CapPowerUPS,
 		CapHardwareCPU, CapHardwarePCI, CapHardwareUSB, CapHardwareBoard, CapHardwareMemory,
 		CapGPUDevices, CapGPUMetrics,
 		CapNetworkRoutes, CapNetworkDNS,

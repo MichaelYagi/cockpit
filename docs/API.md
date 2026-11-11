@@ -36,7 +36,7 @@ Keys are never accepted in URLs or query strings.
 | *(public)* | `GET /livez`, `GET /openapi.json` |
 | `system:read` | `/status`, `/system`, `/hardware`, `/services`, `/report` (metric parts need `metrics:read` too) |
 | `metrics:read` | `/metrics`, `/metrics/history…`, `/storage`, `/network`, `/sensors`, `/health`, `/events`, `/events/stream` |
-| `processes:read` | `/processes` (D14) |
+| `processes:read` | `/processes` (D14), `/containers` (D24) |
 | `admin` | `/keys…`, `/settings`, privileged fields in `/status` and `/report` |
 
 No scope implies another (D8). Keys may hold `system:read`,
@@ -84,6 +84,17 @@ principal.
 | PUT | `/settings` | `admin` (socket) | Replace the thresholds: validated like the file, persisted, applied at once, recorded as a `settings.changed` event |
 | DELETE | `/settings` | `admin` (socket) | Return to the file's thresholds |
 | GET | `/report` | `system:read` | Diagnostic report, `?format=json\|markdown&anonymize=true\|false` (D21; see below) |
+
+### Phase 4
+
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| GET | `/status` | `system:read` | Collectors now carry `external` (built with the collector SDK, D23) and `sdk_version` |
+| GET | `/containers` | `processes:read` | Docker, Podman (rootful and rootless), containerd and CRI-O containers from cgroup v2, busiest first, at most 500: CPU % of one core, memory and limit, I/O rates, PIDs, rootless owner. No names or images (D24) |
+| GET | `/metrics?sections=power,ups` | `metrics:read` | Batteries and mains from sysfs; UPS from a Network UPS Tools server when enabled (D25) |
+| GET | `/storage` | `metrics:read` | Gains `zfs`: pool state, capacity and error counts (OpenZFS 2.3+ JSON), ARC size and hit rate (D25) |
+| GET | `/health` | `metrics:read` | Gains the `zfs_pools` and `ups` checks |
+| GET | `/metrics?sections=custom` | `metrics:read` | Generic metrics from extension collectors (D22): one set per collector with availability, `dropped_series` and `problem`; each metric has `name`, `kind`, `unit`, `labels`, `value`, and for counters `rate_per_second` and `rate_unit` |
 
 WebSocket is not planned: all streaming is server-to-client, which SSE
 covers.
@@ -251,6 +262,22 @@ socket is not limited. Defaults are in `docs/SECURITY.md` §9.
 
 `pkg/client` is the Go SDK and the only way the TUI talks to the agent. It
 supports Unix-socket, TCP and TLS transports, never follows redirects, and
-refuses to send a key over plain HTTP to a non-loopback host. `curl` and
-Python examples are in `docs/SETUP.md`. Response semantics do not change
-within `v1`.
+refuses to send a key over plain HTTP to a non-loopback host. Examples:
+
+- **Go:** `go doc -all github.com/MichaelYagi/cockpit/pkg/client`. The
+  `Example…` functions cover TCP and socket clients, metrics, history and
+  the event stream.
+- **Python:** `examples/python/cockpit_client.py` (standard library only).
+- **TypeScript:** `examples/typescript/cockpit-client.ts` (no
+  dependencies; Node 23.6+ runs it directly).
+- **curl:** `docs/SETUP.md`.
+
+The Python and TypeScript examples run in CI against a live agent, so
+they stay in step with the API.
+
+**Versioning (D26).** Releases are tagged `vX.Y.Z`. `pkg/client`,
+`pkg/apiv1` and `pkg/collectorsdk` follow semantic versioning: while the
+version is `0.x`, a minor release may break them, and `CHANGELOG.md` lists
+every such change. From `v1.0.0` on they break only with a major version.
+The REST API is versioned separately: `/api/v1` only gains fields and
+endpoints (§1), whatever the package versions.

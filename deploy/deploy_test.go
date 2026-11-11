@@ -222,3 +222,24 @@ func TestUnitsVerify(t *testing.T) {
 		}
 	}
 }
+
+// In a release archive the binary sits next to deploy/; install.sh finds
+// it without --binary.
+func TestInstallFromArchiveLayout(t *testing.T) {
+	archive := t.TempDir()
+	if out, err := exec.Command("cp", "-R", ".", filepath.Join(archive, "deploy")).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(archive, "cockpit"), []byte("#!/bin/sh\necho archive\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	cmd := exec.Command("sh", filepath.Join(archive, "deploy", "install.sh"), "--no-start")
+	cmd.Env = append(os.Environ(), "DESTDIR="+root)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "usr/local/bin/cockpit")); !strings.Contains(string(data), "archive") {
+		t.Error("archive binary not installed")
+	}
+}

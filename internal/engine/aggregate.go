@@ -31,6 +31,10 @@ const (
 	secGPUs
 	secRoutes
 	secDNS
+	secContainers
+	secZFS
+	secPower
+	secUPS
 	numSections
 )
 
@@ -55,6 +59,10 @@ var sectionCaps = [numSections][]core.Capability{
 	secGPUs:           {core.CapGPUDevices},
 	secRoutes:         {core.CapNetworkRoutes},
 	secDNS:            {core.CapNetworkDNS},
+	secContainers:     {core.CapContainers},
+	secZFS:            {core.CapStorageZFS},
+	secPower:          {core.CapPowerSupplies},
+	secUPS:            {core.CapPowerUPS},
 }
 
 func sectionOf(r core.Record) (section, bool) {
@@ -95,6 +103,14 @@ func sectionOf(r core.Record) (section, bool) {
 		return secRoutes, true
 	case *core.DNSConfig:
 		return secDNS, true
+	case core.ContainerSamples:
+		return secContainers, true
+	case *core.ZFSInfo:
+		return secZFS, true
+	case core.PowerSupplies:
+		return secPower, true
+	case core.UPSList:
+		return secUPS, true
 	}
 	return 0, false
 }
@@ -128,9 +144,13 @@ type aggregator struct {
 	prevCPUAt time.Time
 	prevNet   map[string]core.NetInterface
 	prevNetAt time.Time
+	prevCtr   map[string]core.ContainerSample
+	prevCtrAt time.Time
 
 	degraded map[string]bool  // "collector|capability" currently degraded
 	pending  map[*runner]bool // scheduled collectors that have not reported yet
+
+	custom map[*runner]*customState // collectors reporting generic metrics (D22)
 }
 
 func newAggregator(e *Engine, probes []map[core.Capability]core.CapabilityStatus) *aggregator {
@@ -140,6 +160,12 @@ func newAggregator(e *Engine, probes []map[core.Capability]core.CapabilityStatus
 	}
 	for i, r := range e.runners {
 		a.caps[r.desc.ID] = probes[i]
+		if r.desc.GenericMetrics {
+			if a.custom == nil {
+				a.custom = map[*runner]*customState{}
+			}
+			a.custom[r] = newCustomState(r, probes[i])
+		}
 		for s := section(0); s < numSections; s++ {
 			if provides(r.desc, s) && a.owner[s] == nil {
 				a.owner[s] = r
@@ -240,6 +266,9 @@ func (a *aggregator) apply(o outcome) {
 		// Otherwise the last good data (if any) is kept and becomes stale.
 		a.meta[s] = meta
 	}
+	if cs := a.custom[r]; cs != nil {
+		cs.apply(a.e.opts.Logger, r, caps, o.result.Records, at)
+	}
 }
 
 // derive converts a record into section data, computing rates.
@@ -289,6 +318,19 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 		return &c
 	case core.MemoryModules:
 		c := append(core.MemoryModules(nil), v...)
+		return &c
+	case core.ContainerSamples:
+		m := a.containers(v, at)
+		return &m
+	case *core.ZFSInfo:
+		c := *v
+		c.Pools = append([]core.ZFSPool(nil), v.Pools...)
+		return &c
+	case core.PowerSupplies:
+		c := append(core.PowerSupplies(nil), v...)
+		return &c
+	case core.UPSList:
+		c := append(core.UPSList(nil), v...)
 		return &c
 	case core.GPUs:
 		c := append(core.GPUs(nil), v...)
@@ -413,13 +455,23 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.GPUs = sec[core.GPUs](a, secGPUs)
 	snap.Routes = sec[core.Routes](a, secRoutes)
 	snap.DNS = sec[core.DNSConfig](a, secDNS)
+	snap.Containers = sec[[]core.ContainerMetrics](a, secContainers)
+	snap.ZFS = sec[core.ZFSInfo](a, secZFS)
+	snap.Power = sec[core.PowerSupplies](a, secPower)
+	snap.UPS = sec[core.UPSList](a, secUPS)
 
+	for _, r := range a.e.runners {
+		if cs := a.custom[r]; cs != nil {
+			snap.Custom = append(snap.Custom, cs.set)
+		}
+	}
 	for _, r := range a.e.runners {
 		caps := make(map[core.Capability]core.CapabilityStatus, len(a.caps[r.desc.ID]))
 		for k, v := range a.caps[r.desc.ID] {
 			caps[k] = v
 		}
-		snap.Collectors = append(snap.Collectors, core.CollectorStatus{ID: r.desc.ID, Version: r.desc.Version, Capabilities: caps})
+		snap.Collectors = append(snap.Collectors, core.CollectorStatus{ID: r.desc.ID, Version: r.desc.Version, Capabilities: caps,
+			External: r.desc.External, SDKVersion: r.desc.SDKVersion})
 	}
 	return snap
 }
@@ -458,4 +510,36 @@ func (a *aggregator) transitions(r *runner, before, after map[core.Capability]co
 				Subject: "collector:" + r.desc.ID, Message: string(c) + " is available again"})
 		}
 	}
+}
+
+// containers derives CPU and I/O rates per container ID.
+func (a *aggregator) containers(cur core.ContainerSamples, at time.Time) []core.ContainerMetrics {
+	window := 0.0
+	if a.prevCtr != nil && at.After(a.prevCtrAt) {
+		window = at.Sub(a.prevCtrAt).Seconds()
+	}
+	rate := func(now, before *uint64) *float64 {
+		if now == nil || before == nil || *now < *before || window <= 0 {
+			return nil
+		}
+		v := float64(*now-*before) / window
+		return &v
+	}
+	out := make([]core.ContainerMetrics, len(cur))
+	next := make(map[string]core.ContainerSample, len(cur))
+	for i, c := range cur {
+		out[i] = core.ContainerMetrics{ContainerSample: c}
+		if p, ok := a.prevCtr[c.ID]; ok && window > 0 {
+			out[i].WindowSeconds = window
+			if c.CPUUsageUsec >= p.CPUUsageUsec {
+				v := float64(c.CPUUsageUsec-p.CPUUsageUsec) / 1e6 / window * 100
+				out[i].CPUPercent = &v
+			}
+			out[i].IOReadBytesPerSecond = rate(c.IOReadBytes, p.IOReadBytes)
+			out[i].IOWriteBytesPerSecond = rate(c.IOWriteBytes, p.IOWriteBytes)
+		}
+		next[c.ID] = c
+	}
+	a.prevCtr, a.prevCtrAt = next, at
+	return out
 }

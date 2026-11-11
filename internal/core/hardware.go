@@ -99,7 +99,9 @@ type GPU struct {
 	PowerWatts         *float64
 	PowerLimitWatts    *float64
 	FanPercent         *float64
-	MetricsSource      string // "nvidia-smi", "amdgpu", or "" when no metrics
+	FrequencyMHz       *float64
+	MaxFrequencyMHz    *float64
+	MetricsSource      string // "nvidia-smi", "amdgpu", "i915", "xe", or "" when no metrics
 	UUID               string // sensitive
 }
 

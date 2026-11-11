@@ -3,6 +3,9 @@
 #
 #   sudo ./deploy/install.sh [--binary PATH] [--prefix DIR] [--smart-helper] [--no-start]
 #
+# --binary defaults to bin/cockpit in a source checkout, or the cockpit
+# binary next to deploy/ in a release archive.
+#
 # Installs the binary, systemd units and the cockpit-monitor system user,
 # then enables and starts the agent. --smart-helper also enables the hourly
 # SMART helper timer (D20), which runs smartctl as root. Running it again
@@ -12,13 +15,13 @@
 # system-changing step (user creation, systemctl); used by the tests.
 set -eu
 
-binary=./bin/cockpit
+binary=""
 prefix=/usr/local
 smart=no
 start=yes
 
 usage() {
-	sed -n '2,13s/^# \{0,1\}//p' "$0"
+	sed -n '2,16s/^# \{0,1\}//p' "$0"
 	exit "${1:-0}"
 }
 
@@ -35,6 +38,15 @@ done
 
 dest=${DESTDIR:-}
 here=$(cd "$(dirname "$0")" && pwd)
+# Default binary: a source checkout's bin/cockpit, or the cockpit next to
+# deploy/ in a release archive.
+if [ -z "$binary" ]; then
+	if [ -x "$here/../bin/cockpit" ]; then
+		binary=$here/../bin/cockpit
+	else
+		binary=$here/../cockpit
+	fi
+fi
 bindir=$prefix/bin
 unitdir=/etc/systemd/system
 sysusersdir=/etc/sysusers.d

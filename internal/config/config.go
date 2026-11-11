@@ -79,7 +79,17 @@ type Collection struct {
 	Defaults    CollectorSettings            `yaml:"defaults"`
 	Collectors  map[string]CollectorOverride `yaml:"collectors"`
 	Filesystems Filesystems                  `yaml:"filesystems"`
+	UPS         UPS                          `yaml:"ups"`
 }
+
+// UPS configures reading a Network UPS Tools server (D25). Off by default.
+type UPS struct {
+	Enabled bool   `yaml:"enabled"`
+	Address string `yaml:"address"` // host:port of upsd
+}
+
+// DefaultUPSAddress is upsd's standard port on the local machine.
+const DefaultUPSAddress = "127.0.0.1:3493"
 
 // Filesystems adjusts which mounts are monitored (Q5). Excluded mounts
 // are left out of the API, history and the storage health check.
@@ -200,6 +210,7 @@ func Defaults() Config {
 		History: History{Enabled: true, Retention: HistoryRetention{Raw: 24 * time.Hour, Minute: 7 * 24 * time.Hour, Hour: 90 * 24 * time.Hour}},
 		Collection: Collection{
 			Defaults: CollectorSettings{Interval: 2 * time.Second, Timeout: time.Second},
+			UPS:      UPS{Address: DefaultUPSAddress},
 		},
 		Logging: Logging{Level: "info", Format: "text"},
 		TUI:     TUI{Refresh: time.Second},

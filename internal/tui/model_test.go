@@ -47,6 +47,18 @@ type fakeAPI struct {
 	resets      int
 
 	procQueries []client.ProcessesQuery
+	custom      *[]apiv1.CustomMetricsSet
+	containers  *apiv1.ContainersResponse
+	zfs         *apiv1.ZFS
+	power       *[]apiv1.PowerSupply
+	ups         *[]apiv1.UPS
+}
+
+func (f *fakeAPI) Containers(context.Context) (*apiv1.ContainersResponse, error) {
+	if f.containers == nil {
+		return nil, &client.APIError{StatusCode: 403, Code: apiv1.CodeInsufficientScope, Message: "This key does not have the processes:read scope."}
+	}
+	return f.containers, nil
 }
 
 var errDown = errors.New("dial unix /run/x.sock: connect: no such file or directory")
@@ -124,6 +136,9 @@ func (f *fakeAPI) Metrics(context.Context, ...string) (*apiv1.MetricsResponse, e
 		GPU: ptr(avail([]apiv1.GPU{{Vendor: "NVIDIA", Name: "NVIDIA GeForce RTX 3060", Driver: "nvidia", DriverVersion: "610.88",
 			MemoryTotalBytes: ptr(uint64(12 << 30)), MemoryUsedBytes: ptr(uint64(3 << 30)), UtilizationPercent: ptr(64.0),
 			TemperatureCelsius: ptr(61.0), PowerWatts: ptr(120.0), PowerLimitWatts: ptr(170.0), MetricsSource: "nvidia-smi"}})),
+		Custom: f.custom,
+		Power:  &apiv1.Section[[]apiv1.PowerSupply]{Status: "available", Data: f.power},
+		UPS:    &apiv1.Section[[]apiv1.UPS]{Status: "available", Data: f.ups},
 	}, nil
 }
 
@@ -132,6 +147,7 @@ func (f *fakeAPI) Storage(context.Context) (*apiv1.StorageResponse, error) {
 		BlockDevices: avail([]apiv1.BlockDevice{{Name: "nvme0n1", Model: "Test SSD", Transport: "nvme", Rotational: ptr(false), SizeBytes: 1 << 40, Redacted: []string{"serial"}}}),
 		Filesystems:  avail([]apiv1.Filesystem{}),
 		DiskHealth:   missing[[]apiv1.DiskHealth]("not_configured", "smartctl (smartmontools 7.0 or newer) is not installed."),
+		ZFS:          apiv1.Section[apiv1.ZFS]{Status: "available", Data: f.zfs},
 	}, nil
 }
 
@@ -982,5 +998,110 @@ func TestSettingsNeedSocket(t *testing.T) {
 	press(t, m, "+")
 	if m.opts.Refresh != 1500*time.Millisecond {
 		t.Errorf("refresh %v", m.opts.Refresh)
+	}
+}
+
+func TestExtensionMetricsPanel(t *testing.T) {
+	api := &fakeAPI{custom: &[]apiv1.CustomMetricsSet{
+		{Collector: "custom.demo", DroppedSeries: 2, Problem: "bad unit", Section: avail([]apiv1.CustomMetric{
+			{Name: "custom.demo.open_files", Kind: "gauge", Unit: "count", Labels: map[string]string{}, Value: 4096},
+			{Name: "custom.demo.read", Kind: "counter", Unit: "bytes", Labels: map[string]string{"dev": "sda", "evil\x1b[31m": "x\x1b]0;pwn\a"},
+				Value: 9e9, RatePerSecond: ptr(2.5e6), RateUnit: "bytes_per_second"},
+		})},
+		{Collector: "custom.idle", Section: missing[[]apiv1.CustomMetric]("permission_denied", "Needs access to /dev/thing.")},
+	}}
+	m := setup(t, api, 140, 60)
+	press(t, m, key(scrPerformance))
+	out := screenText(m)
+	for _, want := range []string{"Extension metrics", "custom.demo", "2 dropped: bad unit", "open_files", "4096", "read {dev=sda", "2.4 MiB/s",
+		"custom.idle", "Needs access"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("panel missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(m.View().Content, "\x1b[31m") || strings.Contains(m.View().Content, "\x1b]0;") {
+		t.Error("escape sequence from a label reached the terminal")
+	}
+}
+
+func TestContainersView(t *testing.T) {
+	limit := uint64(512 << 20)
+	api := &fakeAPI{containers: &apiv1.ContainersResponse{Containers: avail(apiv1.ContainerList{Total: 2, NamesReason: "Names come from the engine socket.", Items: []apiv1.Container{
+		{Runtime: "docker", ID: strings.Repeat("a", 64), CPUPercent: ptr(75.0), MemoryBytes: ptr(uint64(100 << 20)), MemoryLimitBytes: &limit, PIDs: ptr(uint64(7)),
+			IOReadBytesPerSecond: ptr(2048.0)},
+		{Runtime: "podman", ID: strings.Repeat("b", 64), Rootless: true, UID: ptr(1000)},
+	}})}}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrProcesses))
+	press(t, m, "c")
+	out := screenText(m)
+	for _, want := range []string{"Containers · 2 running", "docker", "aaaaaaaaaaaa", "75.0", "100.0 MiB", "512.0 MiB", "2.0 KiB/s", "uid 1000 (rootless)",
+		"Names come from", "c processes"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, strings.Repeat("a", 13)) {
+		t.Error("full container ID shown")
+	}
+	press(t, m, "c")
+	if !strings.Contains(screenText(m), "Processes · sorted by") {
+		t.Error("c did not return to processes")
+	}
+
+	denied := setup(t, &fakeAPI{}, 120, 40)
+	press(t, denied, key(scrProcesses))
+	press(t, denied, "c")
+	if out := screenText(denied); !strings.Contains(out, "processes:read") {
+		t.Errorf("scope error not shown:\n%s", out)
+	}
+}
+
+func TestZFSAndPowerBoxes(t *testing.T) {
+	api := &fakeAPI{
+		zfs: &apiv1.ZFS{Pools: []apiv1.ZFSPool{
+			{Name: "tank", State: "DEGRADED", SizeBytes: ptr(uint64(1 << 40)), AllocatedBytes: ptr(uint64(1 << 39)), ReadErrors: ptr(uint64(0)), WriteErrors: ptr(uint64(0)), ChecksumErrors: ptr(uint64(3))},
+			{Name: "backup", State: "ONLINE"},
+		}, ARC: &apiv1.ZFSARC{SizeBytes: 1 << 30, MaxBytes: 4 << 30, HitPercent: ptr(97.5)}, DetailReason: ""},
+		power: &[]apiv1.PowerSupply{{Name: "BAT0", Type: "battery", Status: "discharging", CapacityPercent: ptr(42.0), HoursRemaining: ptr(1.5), PowerWatts: ptr(9.5)},
+			{Name: "AC", Type: "mains", Online: ptr(false)}},
+		ups: &[]apiv1.UPS{{Name: "rack", Status: []string{"OB", "LB"}, OnBattery: true, LowBattery: true, ChargePercent: ptr(12.0), RuntimeSeconds: ptr(180.0)}},
+	}
+	m := setup(t, api, 140, 60)
+	out := screenText(m)
+	for _, want := range []string{"Power", "BAT0", "42%", "discharging", "1h30m0s left", "9.5 W", "on battery", "UPS rack", "LOW BATTERY", "3m0s runtime"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("overview missing %q:\n%s", want, out)
+		}
+	}
+	press(t, m, key(scrStorage))
+	out = screenText(m)
+	for _, want := range []string{"ZFS pools", "tank", "DEGRADED", "50.0% of 1.0 TiB", "errors r0 w0 c3", "backup", "ONLINE", "ARC 1.0 GiB of 4.0 GiB max · 97.5% hits"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("storage missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestNoZFSOrPowerBoxesWithoutData(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 140, 60)
+	if strings.Contains(screenText(m), "Power") {
+		t.Error("power box without data")
+	}
+	press(t, m, key(scrStorage))
+	if strings.Contains(screenText(m), "ZFS pools") {
+		t.Error("zfs box without pools")
+	}
+}
+
+func TestIntelGPULines(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 140, 60)
+	m.metrics.GPU = &apiv1.Section[[]apiv1.GPU]{Status: "available", Data: &[]apiv1.GPU{{Name: "Intel Arc A380", Driver: "i915", MetricsSource: "i915",
+		FrequencyMHz: ptr(1200.0), MaxFrequencyMHz: ptr(2450.0), PowerWatts: ptr(14.0)}}}
+	out := strings.Join(m.gpuLines(60), "\n")
+	for _, want := range []string{"Intel Arc A380", "1200 MHz of 2450", "14 W", "needs perf access"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
 	}
 }

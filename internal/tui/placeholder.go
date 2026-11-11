@@ -21,6 +21,7 @@ func PrintSummary(ctx context.Context, c *client.Client, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	sanitize(st) // API text is untrusted, here as in the interactive UI
 	fmt.Fprintf(w, "Cockpit agent %s (API %s)\n", st.Agent.Version, st.Agent.APIVersion)
 	fmt.Fprintf(w, "  machine:  %s\n", st.MachineID)
 	fmt.Fprintf(w, "  uptime:   %s\n", (time.Duration(st.Agent.UptimeSeconds) * time.Second).String())
@@ -28,7 +29,11 @@ func PrintSummary(ctx context.Context, c *client.Client, w io.Writer) error {
 		fmt.Fprintln(w, "  collectors: none")
 	}
 	for _, col := range st.Collectors {
-		fmt.Fprintf(w, "  collector %s %s\n", col.ID, col.Version)
+		ext := ""
+		if col.External {
+			ext = fmt.Sprintf(" (extension, SDK v%d)", col.SDKVersion)
+		}
+		fmt.Fprintf(w, "  collector %s %s%s\n", col.ID, col.Version, ext)
 		for _, cp := range col.Capabilities {
 			line := fmt.Sprintf("    %-22s %s", cp.Name, label(cp.Status))
 			if cp.Reason != "" {

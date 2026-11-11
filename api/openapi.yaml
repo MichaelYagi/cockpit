@@ -100,6 +100,7 @@ paths:
                 collectors:
                   - id: linux.sensors
                     version: 1.0.0
+                    external: false
                     capabilities:
                       - name: sensors.thermal
                         status: unsupported
@@ -226,7 +227,7 @@ paths:
           description: Comma-separated list of sections to include.
           schema:
             type: string
-            pattern: "^(cpu|memory|memory_pressure|filesystems|network|sensors|gpu)(,(cpu|memory|memory_pressure|filesystems|network|sensors|gpu))*$"
+            pattern: "^(cpu|memory|memory_pressure|filesystems|network|sensors|gpu|custom|power|ups)(,(cpu|memory|memory_pressure|filesystems|network|sensors|gpu|custom|power|ups))*$"
           example: cpu,memory
       responses:
         "200":
@@ -510,6 +511,31 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/containers:
+    get:
+      operationId: listContainers
+      tags: [machine]
+      summary: Containers and their resource use
+      description: >-
+        Docker, Podman (rootful and rootless), containerd and CRI-O containers
+        found in the cgroup v2 hierarchy, busiest first, at most 500 (D24).
+        CPU percent is of one core. Names and images are not reported:
+        they come from the container engine's API socket, which Cockpit
+        does not use. Unsupported on cgroup v1 hosts.
+      x-cockpit-scope: processes:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContainersResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/keys:
     get:
       operationId: listKeys
@@ -785,13 +811,15 @@ components:
     Collector:
       type: object
       additionalProperties: false
-      required: [id, version, capabilities]
+      required: [id, version, capabilities, external]
       properties:
         id: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9_]*)+$" }
         version: { type: string }
         capabilities:
           type: array
           items: { $ref: "#/components/schemas/Capability" }
+        external: { type: boolean, description: True for an extension collector built with the public collector SDK (D23). }
+        sdk_version: { type: integer, minimum: 1, description: Collector SDK major version an extension collector targets. }
     Capability:
       type: object
       additionalProperties: false
@@ -1125,7 +1153,7 @@ components:
     GPU:
       type: object
       additionalProperties: false
-      required: [vendor, name, pci_address, driver, driver_version, memory_total_bytes, memory_used_bytes, utilization_percent, temperature_celsius, power_watts, power_limit_watts, fan_percent, metrics_source]
+      required: [vendor, name, pci_address, driver, driver_version, memory_total_bytes, memory_used_bytes, utilization_percent, temperature_celsius, power_watts, power_limit_watts, fan_percent, frequency_mhz, max_frequency_mhz, metrics_source]
       properties:
         vendor: { type: string, examples: [NVIDIA, AMD, Intel] }
         name: { type: string }
@@ -1139,7 +1167,9 @@ components:
         power_watts: { type: [number, "null"], minimum: 0 }
         power_limit_watts: { type: [number, "null"], minimum: 0 }
         fan_percent: { type: [number, "null"], minimum: 0 }
-        metrics_source: { type: string, enum: ["", nvidia-smi, amdgpu] }
+        frequency_mhz: { type: [number, "null"], minimum: 0, description: Current GPU clock (Intel i915/xe). }
+        max_frequency_mhz: { type: [number, "null"], minimum: 0 }
+        metrics_source: { type: string, enum: ["", nvidia-smi, amdgpu, i915, xe] }
         uuid: { type: string, x-cockpit-sensitive: true }
         redacted: { $ref: "#/components/schemas/Redacted" }
     MemoryInventory:
@@ -1190,6 +1220,118 @@ components:
         network: { $ref: "#/components/schemas/NetworkInterfacesSection" }
         sensors: { $ref: "#/components/schemas/SensorsSection" }
         gpu: { $ref: "#/components/schemas/GPUsSection" }
+        custom:
+          type: array
+          description: Generic metrics from extension collectors (D22), one entry per collector. Empty when no extension collectors are built in.
+          items: { $ref: "#/components/schemas/CustomMetricsSet" }
+        power: { $ref: "#/components/schemas/PowerSection" }
+        ups: { $ref: "#/components/schemas/UPSSection" }
+    PowerSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/PowerSupply" }
+            - type: "null"
+    UPSSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/UPS" }
+            - type: "null"
+    PowerSupply:
+      type: object
+      additionalProperties: false
+      description: A battery, mains adapter or USB supply from sysfs (D25).
+      required: [name, type, online, capacity_percent, power_watts, energy_now_wh, energy_full_wh, hours_remaining]
+      properties:
+        name: { type: string }
+        type: { type: string, examples: [battery, mains, usb] }
+        online: { type: [boolean, "null"] }
+        status: { type: string, examples: [charging, discharging, full, not_charging] }
+        capacity_percent: { type: [number, "null"] }
+        health: { type: string }
+        power_watts: { type: [number, "null"] }
+        energy_now_wh: { type: [number, "null"] }
+        energy_full_wh: { type: [number, "null"] }
+        hours_remaining: { type: [number, "null"], description: While discharging with a known power draw. }
+        model: { type: string }
+    UPS:
+      type: object
+      additionalProperties: false
+      description: A UPS read from a Network UPS Tools server (D25). Serial numbers are never read.
+      required: [name, status, on_battery, low_battery, charge_percent, runtime_seconds, load_percent, input_volts, output_volts]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        status:
+          type: array
+          description: NUT status flags, e.g. OL (on line), OB (on battery), LB (low battery), CHRG.
+          items: { type: string }
+        on_battery: { type: boolean }
+        low_battery: { type: boolean }
+        charge_percent: { type: [number, "null"] }
+        runtime_seconds: { type: [number, "null"] }
+        load_percent: { type: [number, "null"] }
+        input_volts: { type: [number, "null"] }
+        output_volts: { type: [number, "null"] }
+        model: { type: string }
+    CustomMetricsSet:
+      type: object
+      additionalProperties: false
+      description: One collector's generic metrics with its availability (see docs/API.md §5).
+      required: [collector, status, collected_at, stale, source, data, dropped_series]
+      properties:
+        collector: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9_]*)+$" }
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean, description: True when the data is older than twice the collection interval. }
+        source: { type: string }
+        reason: { type: string }
+        dropped_series: { type: integer, minimum: 0, description: "Metrics rejected in the last collection: invalid, duplicated, or over the 500-series limit." }
+        problem: { type: string, description: "The first rejection reason, when any metric was dropped." }
+        data:
+          anyOf:
+            - type: array
+              maxItems: 500
+              items: { $ref: "#/components/schemas/CustomMetric" }
+            - type: "null"
+    CustomMetric:
+      type: object
+      additionalProperties: false
+      required: [name, kind, unit, labels, value, rate_per_second]
+      properties:
+        name: { type: string, maxLength: 128, pattern: "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)+$" }
+        kind: { type: string, enum: [gauge, counter] }
+        unit:
+          type: string
+          enum: [bytes, bytes_per_second, percent, ratio, celsius, watts, volts, hertz, rpm, seconds, count, per_second]
+        labels:
+          type: object
+          maxProperties: 8
+          additionalProperties: { type: string, maxLength: 128 }
+        value: { type: number, description: The gauge reading or the counter total. }
+        rate_per_second: { type: [number, "null"], description: "Counters only, from the second sample on; in rate_unit." }
+        rate_unit: { type: string, enum: [bytes_per_second, per_second, seconds_per_second] }
     CPUMetricsSection:
       type: object
       additionalProperties: false
@@ -1480,7 +1622,7 @@ components:
       type: object
       additionalProperties: false
       description: GET /storage.
-      required: [schema_version, machine_id, generated_at, block_devices, filesystems, disk_health]
+      required: [schema_version, machine_id, generated_at, block_devices, filesystems, disk_health, zfs]
       properties:
         schema_version: { $ref: "#/components/schemas/SchemaVersion" }
         machine_id: { $ref: "#/components/schemas/MachineID" }
@@ -1488,6 +1630,58 @@ components:
         block_devices: { $ref: "#/components/schemas/BlockDevicesSection" }
         filesystems: { $ref: "#/components/schemas/FilesystemsSection" }
         disk_health: { $ref: "#/components/schemas/DiskHealthSection" }
+        zfs: { $ref: "#/components/schemas/ZFSSection" }
+    ZFSSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - { $ref: "#/components/schemas/ZFS" }
+            - type: "null"
+    ZFS:
+      type: object
+      additionalProperties: false
+      description: ZFS pools and the ARC (D25).
+      required: [pools, arc]
+      properties:
+        pools:
+          type: array
+          items: { $ref: "#/components/schemas/ZFSPool" }
+        arc:
+          anyOf:
+            - type: object
+              additionalProperties: false
+              required: [size_bytes, target_bytes, max_bytes, hits, misses, hit_percent]
+              properties:
+                size_bytes: { type: integer, minimum: 0 }
+                target_bytes: { type: integer, minimum: 0 }
+                max_bytes: { type: integer, minimum: 0 }
+                hits: { type: integer, minimum: 0, description: Since the module loaded. }
+                misses: { type: integer, minimum: 0 }
+                hit_percent: { type: [number, "null"] }
+            - type: "null"
+        detail_reason: { type: string, description: Why capacity or error counts are missing. }
+    ZFSPool:
+      type: object
+      additionalProperties: false
+      required: [name, state, size_bytes, allocated_bytes, free_bytes, read_errors, write_errors, checksum_errors]
+      properties:
+        name: { type: string }
+        state: { type: string, examples: [ONLINE, DEGRADED, FAULTED] }
+        size_bytes: { type: [integer, "null"] }
+        allocated_bytes: { type: [integer, "null"] }
+        free_bytes: { type: [integer, "null"] }
+        read_errors: { type: [integer, "null"] }
+        write_errors: { type: [integer, "null"] }
+        checksum_errors: { type: [integer, "null"] }
     NetworkResponse:
       type: object
       additionalProperties: false
@@ -1530,7 +1724,7 @@ components:
       additionalProperties: false
       required: [id, name, status, availability, findings]
       properties:
-        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health, services, network_errors] }
+        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health, services, network_errors, zfs_pools, ups] }
         name: { type: string }
         status: { $ref: "#/components/schemas/HealthStatus" }
         availability:
@@ -1766,6 +1960,56 @@ components:
             properties:
               section: { type: string, enum: [metrics, storage, network, health, events, settings] }
               reason: { type: string }
+    ContainersResponse:
+      type: object
+      additionalProperties: false
+      description: GET /containers.
+      required: [schema_version, machine_id, generated_at, containers]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        containers:
+          type: object
+          additionalProperties: false
+          description: Data with its availability (see docs/API.md §5).
+          required: [status, collected_at, stale, source, data]
+          properties:
+            status: { $ref: "#/components/schemas/Availability" }
+            collected_at: { type: [string, "null"], format: date-time }
+            stale: { type: boolean }
+            source: { type: string }
+            reason: { type: string }
+            data:
+              anyOf:
+                - { $ref: "#/components/schemas/ContainerList" }
+                - type: "null"
+    ContainerList:
+      type: object
+      additionalProperties: false
+      required: [total, items, names_reason]
+      properties:
+        total: { type: integer, minimum: 0 }
+        items:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/Container" }
+        names_reason: { type: string }
+    Container:
+      type: object
+      additionalProperties: false
+      required: [runtime, id, rootless, uid, cpu_percent, memory_bytes, memory_limit_bytes, io_read_bytes_per_second, io_write_bytes_per_second, pids]
+      properties:
+        runtime: { type: string, enum: [docker, podman, containerd, cri-o] }
+        id: { type: string, pattern: "^[0-9a-f]{64}$" }
+        rootless: { type: boolean }
+        uid: { type: [integer, "null"], description: Owner of a rootless container. }
+        cpu_percent: { type: [number, "null"], description: "Percent of one core; null on the first sample." }
+        memory_bytes: { type: [integer, "null"] }
+        memory_limit_bytes: { type: [integer, "null"], description: Null when unlimited or unknown. }
+        io_read_bytes_per_second: { type: [number, "null"] }
+        io_write_bytes_per_second: { type: [number, "null"] }
+        pids: { type: [integer, "null"] }
     SettingsResponse:
       type: object
       additionalProperties: false

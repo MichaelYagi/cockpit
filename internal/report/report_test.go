@@ -142,9 +142,18 @@ func TestMarkdownSections(t *testing.T) {
 		{ID: "cpu_temperature", Name: "CPU temperature", Status: "unknown", Availability: apiv1.Unsupported, Reason: "No sensors."},
 	}}
 	r.Omitted = []apiv1.ReportOmission{{Section: "settings", Reason: "Socket only."}}
+	sz, al := uint64(1<<40), uint64(1<<39)
+	r.Storage.ZFS = apiv1.Section[apiv1.ZFS]{Status: apiv1.Available, Data: &apiv1.ZFS{Pools: []apiv1.ZFSPool{{Name: "tank", State: "DEGRADED", SizeBytes: &sz, AllocatedBytes: &al}}}}
+	charge := 42.0
+	r.Metrics.UPS = &apiv1.Section[[]apiv1.UPS]{Status: apiv1.Available, Data: &[]apiv1.UPS{{Name: "rack", Status: []string{"OB"}, ChargePercent: &charge}}}
+	rate := 30.0
+	r.Metrics.Custom = &[]apiv1.CustomMetricsSet{{Collector: "custom.demo", DroppedSeries: 1, Problem: "bad unit",
+		Section: apiv1.Section[[]apiv1.CustomMetric]{Status: apiv1.Available, Data: &[]apiv1.CustomMetric{
+			{Name: "custom.demo.read", Kind: "counter", Unit: "bytes", Labels: map[string]string{"dev": "a"}, Value: 900, RatePerSecond: &rate, RateUnit: "bytes_per_second"},
+		}}}}
 	md := string(Markdown(r))
 	for _, want := range []string{"# Cockpit diagnostic report", "## System", "Web01.corp.example", "## Health", "WARNING", "No sensors.",
-		"used\\_percent: 90", "## Storage", "## Network", "## Recent events", "## Not included", "settings: Socket only."} {
+		"used\\_percent: 90", "## ZFS pools", "| tank | DEGRADED | 512.0 GiB | 1.0 TiB |", "## Power", "| rack | OB | 42.0% |", "## Extension metrics", "custom.demo.read", "dev=a", "30 bytes\\_per\\_second", "1 metrics dropped", "## Storage", "## Network", "## Recent events", "## Not included", "settings: Socket only."} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown missing %q", want)
 		}

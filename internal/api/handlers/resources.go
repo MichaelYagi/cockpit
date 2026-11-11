@@ -181,7 +181,7 @@ func (h *Resources) gpus(v *core.GPUs) *[]apiv1.GPU {
 		a := apiv1.GPU{Vendor: g.Vendor, Name: g.Name, PCIAddress: g.PCIAddress, Driver: g.Driver, DriverVersion: g.DriverVersion,
 			MemoryTotalBytes: g.MemoryTotalBytes, MemoryUsedBytes: g.MemoryUsedBytes, UtilizationPercent: g.UtilizationPercent,
 			TemperatureCelsius: g.TemperatureCelsius, PowerWatts: g.PowerWatts, PowerLimitWatts: g.PowerLimitWatts,
-			FanPercent: g.FanPercent, MetricsSource: g.MetricsSource}
+			FanPercent: g.FanPercent, FrequencyMHz: g.FrequencyMHz, MaxFrequencyMHz: g.MaxFrequencyMHz, MetricsSource: g.MetricsSource}
 		h.Policy.Field(redact.UUID, g.UUID, &a.UUID, &a.Redacted)
 		out = append(out, a)
 	}
@@ -335,6 +335,15 @@ func (h *Resources) metrics(s *core.Snapshot, now time.Time, want map[string]boo
 	if want["gpu"] {
 		out.GPU = ptrTo(section(s.GPUs, now, h.gpus))
 	}
+	if want["custom"] {
+		out.Custom = ptrTo(customSets(s.Custom, now))
+	}
+	if want["power"] {
+		out.Power = ptrTo(section(s.Power, now, power))
+	}
+	if want["ups"] {
+		out.UPS = ptrTo(section(s.UPS, now, upsList))
+	}
 	return out
 }
 
@@ -352,6 +361,7 @@ func (h *Resources) storage(s *core.Snapshot, now time.Time) apiv1.StorageRespon
 		BlockDevices: section(s.BlockDevices, now, h.blockDevices),
 		Filesystems:  section(s.Filesystems, now, filesystems),
 		DiskHealth:   section(s.DiskHealth, now, diskHealth),
+		ZFS:          section(s.ZFS, now, zfs),
 	}
 }
 
@@ -430,4 +440,72 @@ func (h *Resources) services(s *core.Snapshot, now time.Time, state string) apiv
 			return out
 		}),
 	}
+}
+
+// customSets maps generic metrics (D22).
+func customSets(in []core.CustomSet, now time.Time) []apiv1.CustomMetricsSet {
+	out := make([]apiv1.CustomMetricsSet, 0, len(in))
+	for _, cs := range in {
+		set := apiv1.CustomMetricsSet{Collector: cs.Collector, DroppedSeries: cs.Dropped, Problem: cs.Problem}
+		var data *[]core.CustomMetric
+		if cs.Metrics != nil {
+			data = &cs.Metrics
+		}
+		set.Section = section(core.Section[[]core.CustomMetric]{Meta: cs.Meta, Data: data}, now, func(v *[]core.CustomMetric) *[]apiv1.CustomMetric {
+			ms := make([]apiv1.CustomMetric, 0, len(*v))
+			for _, m := range *v {
+				labels := m.Labels
+				if labels == nil {
+					labels = map[string]string{}
+				}
+				cm := apiv1.CustomMetric{Name: m.Name, Kind: string(m.Kind), Unit: m.Unit, Labels: labels, Value: m.Value, RatePerSecond: m.RatePerSecond}
+				if m.Kind == core.Counter {
+					cm.RateUnit = core.RateUnit(m.Unit)
+				}
+				ms = append(ms, cm)
+			}
+			return &ms
+		})
+		out = append(out, set)
+	}
+	return out
+}
+
+func zfs(v *core.ZFSInfo) *apiv1.ZFS {
+	out := &apiv1.ZFS{Pools: make([]apiv1.ZFSPool, 0, len(v.Pools)), DetailReason: v.DetailReason}
+	for _, p := range v.Pools {
+		out.Pools = append(out.Pools, apiv1.ZFSPool{Name: p.Name, State: p.State, SizeBytes: p.SizeBytes, AllocatedBytes: p.AllocatedBytes,
+			FreeBytes: p.FreeBytes, ReadErrors: p.ReadErrors, WriteErrors: p.WriteErrors, ChecksumErrors: p.ChecksumErrors})
+	}
+	if a := v.ARC; a != nil {
+		arc := &apiv1.ZFSARC{SizeBytes: a.SizeBytes, TargetBytes: a.TargetBytes, MaxBytes: a.MaxBytes, Hits: a.Hits, Misses: a.Misses}
+		if t := a.Hits + a.Misses; t > 0 {
+			arc.HitPercent = ptrTo(float64(a.Hits) / float64(t) * 100)
+		}
+		out.ARC = arc
+	}
+	return out
+}
+
+func power(v *core.PowerSupplies) *[]apiv1.PowerSupply {
+	out := make([]apiv1.PowerSupply, 0, len(*v))
+	for _, p := range *v {
+		out = append(out, apiv1.PowerSupply{Name: p.Name, Type: p.Type, Online: p.Online, Status: p.Status, CapacityPercent: p.CapacityPercent,
+			Health: p.Health, PowerWatts: p.PowerWatts, EnergyNowWh: p.EnergyNowWh, EnergyFullWh: p.EnergyFullWh, HoursRemaining: p.HoursRemaining, Model: p.Model})
+	}
+	return &out
+}
+
+func upsList(v *core.UPSList) *[]apiv1.UPS {
+	out := make([]apiv1.UPS, 0, len(*v))
+	for _, u := range *v {
+		st := u.Status
+		if st == nil {
+			st = []string{}
+		}
+		out = append(out, apiv1.UPS{Name: u.Name, Description: u.Description, Status: st, OnBattery: u.OnBattery, LowBattery: u.LowBattery,
+			ChargePercent: u.ChargePercent, RuntimeSeconds: u.RuntimeSeconds, LoadPercent: u.LoadPercent, InputVolts: u.InputVolts,
+			OutputVolts: u.OutputVolts, Model: u.Model})
+	}
+	return &out
 }

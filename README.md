@@ -62,6 +62,7 @@ One binary, several modes:
 
 ```text
 cockpit agent          # monitoring engine + API server
+cockpit                # in a terminal: same as cockpit tui; otherwise help
 cockpit tui            # terminal UI (API client)
 cockpit keys ...       # create / list / rotate / revoke API keys (local admin)
 cockpit report         # diagnostic report (Markdown or JSON, optionally anonymized)
@@ -78,12 +79,19 @@ API like any other client.
 2. Hardware: CPU, memory, GPU, motherboard, storage, devices.
 3. Performance: utilization, load, throughput, top consumers.
 4. Health: thermal state, storage health, memory pressure, findings.
-5. Storage: devices, filesystems, capacity, SMART/NVMe when available.
+5. Storage: devices, filesystems, capacity, SMART/NVMe when available,
+   ZFS pools.
 6. Network: interfaces, addresses, throughput, errors.
-7. Processes: process list and usage, subject to permissions.
+7. Processes: process list and usage, subject to permissions; containers
+   from cgroup v2.
 8. Services: systemd service state.
 9. Events: health findings and system events over time.
 10. API Access: server status, keys, scopes, clients, request statistics.
+11. Settings: refresh rate and health thresholds (local admin).
+
+Also: batteries and UPS (Network UPS Tools), diagnostic reports, metric
+history, and extension collectors compiled in through a public SDK
+(`docs/PLUGINS.md`).
 
 ## Security defaults
 
@@ -109,3 +117,7 @@ API like any other client.
 - [Setup and usage](docs/SETUP.md)
 - [Testing strategy](docs/TESTING.md)
 - [Roadmap](docs/ROADMAP.md)
+
+## License
+
+MIT. See [LICENSE](LICENSE).

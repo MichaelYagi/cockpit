@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/core"
@@ -47,6 +48,16 @@ type Descriptor struct {
 	// MinInterval stops configuration from scheduling an expensive sampler
 	// (e.g. one that runs an external tool) more often than this.
 	MinInterval time.Duration
+	// GenericMetrics marks a collector that returns core.GenericMetrics
+	// (D22). Such a collector may declare its own capabilities, named
+	// "<ID>.<name>", and its metric names start with "<ID>.".
+	GenericMetrics bool
+	// HistoryMetrics names generic metrics to record in history (D18).
+	HistoryMetrics []string
+	// External marks an extension collector built with the public SDK
+	// (D23); SDKVersion is the SDK major version it targets.
+	External   bool
+	SDKVersion int
 }
 
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$`)
@@ -64,8 +75,14 @@ func (d Descriptor) Validate() error {
 		errs = append(errs, errors.New("at least one capability is required"))
 	}
 	for _, c := range d.Capabilities {
-		if !c.Known() {
+		own := d.GenericMetrics && strings.HasPrefix(string(c), d.ID+".") && idPattern.MatchString(string(c))
+		if !c.Known() && !own {
 			errs = append(errs, fmt.Errorf("unknown capability %q", c))
+		}
+	}
+	for _, n := range d.HistoryMetrics {
+		if !d.GenericMetrics || !strings.HasPrefix(n, d.ID+".") {
+			errs = append(errs, fmt.Errorf("history metric %q must be a generic metric of this collector", n))
 		}
 	}
 	if d.DefaultTimeout <= 0 {
@@ -104,6 +121,9 @@ type Env struct {
 	SMARTResultsDir string
 	// Filesystems adjusts which mounts are reported (Q5).
 	Filesystems FilesystemFilter
+	// UPSAddress is the Network UPS Tools server (host:port); empty when
+	// UPS monitoring is off (D25).
+	UPSAddress string
 }
 
 // FilesystemFilter adjusts the filesystem collector's built-in skip list.

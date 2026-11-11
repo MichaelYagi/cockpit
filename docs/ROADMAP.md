@@ -102,14 +102,13 @@ SMART) are reported, not fatal.
 
 ## Phase 3 — History and operational polish
 
-**Status: implemented, awaiting review.** Every milestone below is done,
+**Status: done, approved and merged (PR #4).** Every milestone below is done,
 verified with tests and against a real WSL2 host: history and charts, a
 real diagnostic report checked for leaks, and the agent run under the
 unit's seccomp and memory restrictions in a transient systemd unit. The
 units pass `systemd-analyze verify`; nothing was installed system-wide,
 so the full system service has not been run as root here. D18–D21 are
-implemented as written (D20 and D21 with the clarifications noted there)
-and await acceptance.
+accepted (D20 and D21 with the clarifications noted there).
 
 | # | Milestone | Depends on |
 |---|---|---|
@@ -129,11 +128,34 @@ adjust thresholds, and exports a redacted diagnostic report.
 
 ## Phase 4 — Extensibility
 
-- Collector SDK documentation, `core.GenericMetric`, compatibility metadata.
-- Bare `cockpit` opens the TUI in a terminal and prints help otherwise (Q2).
-- Example external collector compiled into a development build.
-- Published Go SDK; Python and TypeScript examples.
-- Docker/Podman, ZFS, UPS, additional GPU collectors.
+**Status: implemented, awaiting review.** Decisions D22–D26 accepted.
+Every milestone below is done and tested. Verified live on WSL2: the
+example extension build, containers (cgroup v2, none running), UPS
+through a fake upsd, and the Python and TypeScript clients. No ZFS pool,
+battery, Intel GPU, real UPS or running containers were available here,
+so those parsers are fixture-tested only. The `v0.4.0` tag is pushed
+after review.
+
+| # | Milestone | Depends on |
+|---|---|---|
+| 4A ✓ | Bare `cockpit` opens the TUI in a terminal and prints help otherwise (Q2) | — |
+| 4B ✓ | Generic metrics (D22): `core.GenericMetric`, counter rates, name/label/unit validation, per-collector series cap, `custom` section of `/metrics`, opt-in history, shown on the Performance screen | — |
+| 4C ✓ | Collector SDK (D23): `pkg/collectorsdk`, the internal adapter, `custom.Main`, SDK version checks, `external` and `sdk_version` in `/status`; PLUGINS.md rewritten as a guide for collector authors | 4B |
+| 4D ✓ | Example extension: a collector in its own module under `examples/collector/` (open file handles and entropy, from `/proc/sys`), built with `custom.Main` in CI and tested end to end | 4C |
+| 4E ✓ | Containers (D24): `linux.containers` from cgroup v2, `GET /containers` (`processes:read`), a Containers view in the Processes screen, history series for the busiest containers | — |
+| 4F ✓ | ZFS, batteries and UPS (D25): `linux.zfs`, `linux.power`, `linux.ups` (opt-in), health checks for pools and UPS, Storage and Overview additions | — |
+| 4G ✓ | More GPU metrics: Intel (`i915`/`xe`) frequency and power from sysfs; utilization reported unavailable where it needs perf privileges (extends D16) | — |
+| 4H ✓ | SDKs and releases (D26): `pkg/client` examples as Go example tests, stability policy, `CHANGELOG.md`, Python and TypeScript examples (no dependencies) run in CI against a live agent, release workflow with checksums, tag `v0.4.0` | 4C |
+| 4I ✓ | Docs, spec and security review; check the extension trust model and the new data for sensitive fields | all |
+
+**Exit criteria:** someone can build Cockpit with their own collector
+without forking, its metrics appear in the API, TUI and history with the
+same availability reporting as built-ins; containers, ZFS pools,
+batteries and UPS are monitored where present; and a versioned release
+with checksums and a documented Go SDK is published.
+
+**Not in Phase 4:** runtime plugin loading, the Docker/Podman API socket
+(Q8), write operations of any kind, Windows and macOS (Phase 5).
 
 ## Phase 5 — Multi-machine and cross-platform
 
@@ -147,10 +169,11 @@ adjust thresholds, and exports a redacted diagnostic report.
 | # | Question | Needed by | Current recommendation |
 |---|---|---|---|
 | Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. **Phase 3 done (D20):** `cockpit-smart.timer` runs `cockpit smart-helper` as root hourly and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
-| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 4 | **Decided (2026-11-11):** launch the TUI when stdin and stdout are terminals; otherwise print help. `cockpit help` and `-h` keep printing help. Scheduled for Phase 4. |
+| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 4 | **Done (4A):** launches the TUI when stdin and stdout are terminals; otherwise prints help. `cockpit help` and `-h` keep printing help. |
 | Q5 | Should the filesystem skip lists become configurable? | 3 | **Done (Phase 3):** `collection.filesystems` with `exclude_types`, `include_types` and `exclude_mount_points`. Network filesystems stay excluded. |
 | Q6 | Should a dedicated scope cover network addresses, routes and DNS? | 3 | No for now: documented as visible with `metrics:read`. Revisit with fleet mode. |
 | Q7 | Should command lines ever be exposed (behind a new scope)? | 3+ | Not until there is a clear need; they often contain secrets. |
+| Q8 | Should container names and images come from the Docker/Podman API socket? | 4+ | No in Phase 4: that socket is root-equivalent (D24). Revisit if a read-only, unprivileged source appears, or as an explicit opt-in with a documented risk. |
 | Q3 | Default TCP port | 0.6 | `7878` (avoids 9090, used by Red Hat Cockpit) |
 
 ## Non-goals for the MVP

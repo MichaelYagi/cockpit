@@ -23,10 +23,11 @@ make check          # gofmt, vet, staticcheck, race tests, cross-compile
 ## Quick start (user mode)
 
 ```sh
-./bin/cockpit tui
+./bin/cockpit              # same as "cockpit tui" in a terminal
 ```
 
-If no agent is running, the TUI starts an embedded one for the session.
+Without a terminal (in a script or pipe), plain `cockpit` prints the help
+text instead; `cockpit help` always does. If no agent is running, the TUI starts an embedded one for the session.
 It listens only on a private socket and stops when you quit. To keep
 monitoring when the TUI is closed, and to allow API access from other
 programs, run the agent separately:
@@ -49,6 +50,7 @@ programs, run the agent separately:
 | `↑`/`↓` (API Access) | Select a key |
 | `n` / `o` / `x` (API Access) | Create / rotate / revoke a key |
 | `s` / `/` / `k` (Processes) | Change sort / search / show kernel threads |
+| `c` (Processes) | Switch between processes and containers |
 | `f` (Services) | Failed services only / all |
 | `t` (Performance) | Chart range: 1h, 6h, 24h, 7d |
 | `v` / `m` (Events) | Minimum severity: all, warning, critical / load older events |
@@ -75,6 +77,24 @@ It is erased from the screen when you press Enter and cannot be shown again.
 The agent refuses to start if these directories are more permissive than
 shown or owned by another user. `cockpit config check` prints the effective
 configuration and paths.
+
+## Installing a release
+
+Each release (`vX.Y.Z` on GitHub) has Linux amd64 and arm64 archives and a
+`SHA256SUMS` file:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf cockpit_v0.4.0_linux_amd64.tar.gz && cd cockpit_v0.4.0_linux_amd64
+./cockpit                      # try it in user mode, or install the service:
+sudo ./deploy/install.sh       # finds ./cockpit next to deploy/
+```
+
+Maintainers cut a release by renaming the `CHANGELOG.md` heading from
+"unreleased" to the date, then pushing a tag: `git tag v0.4.0 && git push
+origin v0.4.0`. The release workflow runs the checks, builds with
+`make dist`, and publishes the archives with the changelog section as
+notes.
 
 ## System service
 
@@ -257,10 +277,18 @@ Unavailable data is reported with a reason, never as an error:
 | Disk health | Permission denied | Reading SMART data needs raw device access; in system mode enable the SMART helper (see System service) |
 | Disk health | Results more than 3 hours old | The SMART helper stopped running: `systemctl status cockpit-smart.timer` |
 | Memory pressure | Kernel without PSI (before 4.20, or `psi=0`) | Memory utilization is still checked |
-| GPU metrics | `nvidia-smi` not installed (NVIDIA) or no metrics source (e.g. Intel) | Install the NVIDIA driver utilities; the GPU is still listed |
+| GPU metrics | `nvidia-smi` not installed (NVIDIA) or no metrics source | Install the NVIDIA driver utilities; the GPU is still listed |
+| GPU busy % (Intel) | Needs perf events | Frequency and power are shown instead; busy % is not available to an unprivileged agent |
 | Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
 | Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
 | Services | Not running systemd | Nothing; other features still work |
+| Batteries | None present | Expected on desktops, servers and VMs |
+| UPS | Off by default | Set `collection.ups.enabled: true` (see UPS monitoring) |
+| UPS | No server answered | Start `upsd` or check `collection.ups.address` |
+| ZFS capacity and errors | zpool older than OpenZFS 2.3 | Pool state and ARC still work; capacity needs zpool's JSON output |
+| Containers | cgroup v1 host | Containers are found only through cgroup v2 |
+| Container names and images | Never shown | They come from the engine's API socket, which is root-equivalent and not used (D24) |
+| Container memory or I/O (rootless) | Controller not delegated to the user | Enable cgroup delegation for the user's systemd instance |
 | Processes (partial) | `/proc` mounted with `hidepid` | Run the agent with access to other users' processes, if appropriate |
 
 ## Choosing filesystems
@@ -280,6 +308,23 @@ collection:
 
 Excluded filesystems disappear from the API, the TUI, history and the
 storage health check. Changes need an agent restart.
+
+## UPS monitoring
+
+Cockpit reads UPS state from a Network UPS Tools server (`upsd`). It only
+lists UPS units and their variables and never sends commands. Enable it in
+the configuration file:
+
+```yaml
+collection:
+  ups:
+    enabled: true
+    address: 127.0.0.1:3493   # upsd's default
+```
+
+The Overview shows each UPS. The `ups` health check warns when a UPS runs
+on battery and reports critical at low battery. Batteries and power adapters
+(laptops) and ZFS pools need no setup.
 
 ## Configuration reference
 

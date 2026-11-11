@@ -13,6 +13,8 @@ import (
 	"log/slog"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,6 +50,8 @@ const (
 	CheckDiskHealth      = "disk_health"
 	CheckServices        = "services"
 	CheckNetworkErrors   = "network_errors"
+	CheckZFSPools        = "zfs_pools"
+	CheckUPS             = "ups"
 )
 
 // CheckResult is one check's outcome.
@@ -198,6 +202,8 @@ var checks = []checkDef{
 	{CheckDiskHealth, "Disk health", (*Evaluator).disk},
 	{CheckServices, "Services", (*Evaluator).services},
 	{CheckNetworkErrors, "Network errors", (*Evaluator).networkErrors},
+	{CheckZFSPools, "ZFS pools", (*Evaluator).zfsPools},
+	{CheckUPS, "UPS", (*Evaluator).ups},
 }
 
 // Evaluate runs every check once, updates findings and publishes events.
@@ -349,6 +355,8 @@ func summary(r CheckResult) string {
 // usable reports whether a section can be evaluated now.
 func usable(m core.SectionMeta, hasData bool, now time.Time) (core.Availability, string, bool) {
 	switch {
+	case m.Status == "": // no collector provides this section
+		return core.Unsupported, "Not collected on this platform.", false
 	case !hasData && m.Status == core.Available:
 		return core.TemporarilyUnavailable, "No data has been collected yet.", false
 	case !hasData:
@@ -624,6 +632,72 @@ func (e *Evaluator) networkErrors(s *core.Snapshot, now time.Time) ([]observatio
 			Evidence: map[string]string{"errors_per_minute": f1(rate), "rx_errors": fmt.Sprint(n.RxErrors), "tx_errors": fmt.Sprint(n.TxErrors),
 				"warn_per_minute": f1(th.NetWarnErrorsPerMin), "critical_per_minute": f1(th.NetCriticalErrorsPerMin)},
 			Recommendation: "Check the cable, port and link negotiation (duplex/speed); for wireless, check signal quality and interference.",
+		}})
+	}
+	return out, core.Available, ""
+}
+
+// zfsPools reports pools that are not ONLINE (D25): DEGRADED is a warning
+// (redundancy lost, data still served); FAULTED, UNAVAIL and SUSPENDED
+// are critical. OFFLINE and REMOVED pools were taken out deliberately.
+func (e *Evaluator) zfsPools(s *core.Snapshot, now time.Time) ([]observation, core.Availability, string) {
+	avail, reason, ok := usable(s.ZFS.Meta, s.ZFS.Data != nil, now)
+	if !ok {
+		return nil, avail, reason
+	}
+	var out []observation
+	for _, p := range s.ZFS.Data.Pools {
+		var sev core.Severity
+		switch p.State {
+		case "DEGRADED":
+			sev = core.SeverityWarning
+		case "FAULTED", "UNAVAIL", "SUSPENDED":
+			sev = core.SeverityCritical
+		}
+		ev := map[string]string{"state": p.State}
+		for k, v := range map[string]*uint64{"read_errors": p.ReadErrors, "write_errors": p.WriteErrors, "checksum_errors": p.ChecksumErrors} {
+			if v != nil {
+				ev[k] = strconv.FormatUint(*v, 10)
+			}
+		}
+		out = append(out, observation{subject: "zpool:" + p.Name, finding: core.Finding{
+			Severity: sev,
+			Summary:  "ZFS pool " + p.Name + " is " + p.State,
+			Evidence: ev,
+			Recommendation: "Run: zpool status -v " + p.Name + ". Replace or reconnect the failed device (zpool replace), then let the resilver finish. " +
+				"A SUSPENDED pool needs its devices back and zpool clear.",
+		}})
+	}
+	return out, core.Available, ""
+}
+
+// ups reports a UPS running on battery (warning) or with a low battery
+// (critical) (D25).
+func (e *Evaluator) ups(s *core.Snapshot, now time.Time) ([]observation, core.Availability, string) {
+	avail, reason, ok := usable(s.UPS.Meta, s.UPS.Data != nil, now)
+	if !ok {
+		return nil, avail, reason
+	}
+	var out []observation
+	for _, u := range *s.UPS.Data {
+		var sev core.Severity
+		summary := "UPS " + u.Name + " is on battery"
+		switch {
+		case u.LowBattery:
+			sev, summary = core.SeverityCritical, "UPS "+u.Name+" battery is low"
+		case u.OnBattery:
+			sev = core.SeverityWarning
+		}
+		ev := map[string]string{"status": strings.Join(u.Status, " ")}
+		if u.ChargePercent != nil {
+			ev["charge_percent"] = f1(*u.ChargePercent)
+		}
+		if u.RuntimeSeconds != nil {
+			ev["runtime_seconds"] = f1(*u.RuntimeSeconds)
+		}
+		out = append(out, observation{subject: "ups:" + u.Name, finding: core.Finding{
+			Severity: sev, Summary: summary, Evidence: ev,
+			Recommendation: "Check the mains supply. If power does not return before the battery runs out, shut down cleanly (upsmon can do this automatically).",
 		}})
 	}
 	return out, core.Available, ""

@@ -13,8 +13,10 @@ import (
 
 	"github.com/MichaelYagi/cockpit/internal/app"
 	"github.com/MichaelYagi/cockpit/internal/buildinfo"
+	"github.com/MichaelYagi/cockpit/internal/collector"
 	"github.com/MichaelYagi/cockpit/internal/config"
 	"github.com/MichaelYagi/cockpit/internal/logging"
+	"github.com/MichaelYagi/cockpit/internal/platform"
 	"github.com/MichaelYagi/cockpit/internal/tui"
 	"github.com/MichaelYagi/cockpit/pkg/client"
 )
@@ -34,6 +36,19 @@ type Env struct {
 	LookupEnv      func(string) (string, bool)
 	Environ        []string
 	Home           string
+	// Extensions are compiled-in extension collectors (D23), added to the
+	// platform's collectors by the agent and the embedded agent.
+	Extensions []collector.Collector
+}
+
+// collectors returns the agent's collector set, or nil for the default.
+func (e Env) collectors() func(collector.Env) []collector.Collector {
+	if len(e.Extensions) == 0 {
+		return nil
+	}
+	return func(ce collector.Env) []collector.Collector {
+		return append(platform.Collectors(ce), e.Extensions...)
+	}
 }
 
 // OSEnv returns the real process environment.
@@ -46,6 +61,7 @@ func OSEnv() Env {
 const usage = `Cockpit: API-first machine monitoring.
 
 Usage:
+  cockpit                 open the terminal UI (in a terminal)
   cockpit <command> [flags]
 
 Commands:
@@ -64,6 +80,11 @@ Run "cockpit <command> -h" for command flags.
 // Run executes the command line and returns the process exit code.
 func Run(ctx context.Context, args []string, env Env) int {
 	if len(args) == 0 {
+		// In a terminal, bare "cockpit" opens the TUI (Q2); scripts and
+		// pipes get the help text.
+		if env.Interactive {
+			return runTUI(ctx, nil, env)
+		}
 		fmt.Fprint(env.Stdout, usage)
 		return ExitOK
 	}
@@ -192,7 +213,7 @@ func runAgent(ctx context.Context, args []string, env Env) int {
 	if res.ConfigFileFound {
 		log.Info("loaded configuration", "file", res.Paths.ConfigFile)
 	}
-	if err := app.Run(ctx, app.Options{Config: res.Config, Paths: res.Paths, Logger: log}); err != nil {
+	if err := app.Run(ctx, app.Options{Config: res.Config, Paths: res.Paths, Logger: log, Collectors: env.collectors()}); err != nil {
 		log.Error("agent failed", "error", err)
 		return ExitError
 	}

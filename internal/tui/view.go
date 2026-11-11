@@ -123,7 +123,10 @@ func (m *Model) footer(w int) string {
 	case scrAccess:
 		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "? help", "q quit"}
 	case scrProcesses:
-		hints = []string{"s sort:" + processSorts[m.procSort], "/ search", "k kernel threads", "esc clear", "q quit"}
+		hints = []string{"s sort:" + processSorts[m.procSort], "/ search", "k kernel threads", "c containers", "q quit"}
+		if m.procContainers {
+			hints = []string{"c processes", "tab next", "r refresh", "? help", "q quit"}
+		}
 		if m.searching {
 			hints = []string{"type to search", "enter done", "esc clear"}
 		}
@@ -330,6 +333,9 @@ func (m *Model) overview(w, h int) string {
 	}
 	if g := m.gpuLines(inner); g != nil {
 		left = append(left, box{title: "GPU", lines: g, flex: true})
+	}
+	if p := m.powerLines(inner); p != nil {
+		left = append(left, box{title: "Power", lines: p})
 	}
 	right := []box{
 		{title: "Health", lines: m.healthSummary(inner), flex: true},
@@ -651,11 +657,118 @@ func (m *Model) storageScreen(w, h int) string {
 			healthLines = unavailable(d, inner)
 		}
 	}
-	return column([]box{
+	boxes := []box{
 		{title: "Filesystems", lines: fsLines, flex: true},
 		{title: "Disks", lines: devLines, flex: true},
 		{title: "Disk health (SMART)", lines: healthLines, flex: true},
-	}, w, h)
+	}
+	if z := m.zfsLines(inner); z != nil {
+		boxes = append(boxes, box{title: "ZFS pools", lines: z})
+	}
+	return column(boxes, w, h)
+}
+
+// zfsLines lists ZFS pools (D25); nil when ZFS is not in use.
+func (m *Model) zfsLines(w int) []string {
+	if m.storage == nil || m.storage.ZFS.Data == nil || len(m.storage.ZFS.Data.Pools) == 0 {
+		return nil
+	}
+	z := m.storage.ZFS.Data
+	var lines []string
+	for _, p := range z.Pools {
+		l := lvOK
+		switch p.State {
+		case "ONLINE":
+		case "DEGRADED":
+			l = lvWarn
+		case "OFFLINE", "REMOVED":
+			l = lvUnknown
+		default:
+			l = lvCrit
+		}
+		line := pad(p.Name, 14) + badge(l, p.State)
+		if p.SizeBytes != nil && p.AllocatedBytes != nil && *p.SizeBytes > 0 {
+			pct := float64(*p.AllocatedBytes) / float64(*p.SizeBytes) * 100
+			line += "  " + bar(pct, 16, percentLevel(pct, 80, 90)) + fmt.Sprintf(" %5.1f%% of %s", pct, bytes(*p.SizeBytes))
+		}
+		if p.ReadErrors != nil && p.WriteErrors != nil && p.ChecksumErrors != nil {
+			if n := *p.ReadErrors + *p.WriteErrors + *p.ChecksumErrors; n > 0 {
+				line += "  " + sWarn.Render(fmt.Sprintf("errors r%d w%d c%d", *p.ReadErrors, *p.WriteErrors, *p.ChecksumErrors))
+			}
+		}
+		lines = append(lines, line)
+	}
+	if a := z.ARC; a != nil {
+		arc := fmt.Sprintf("ARC %s of %s max", bytes(a.SizeBytes), bytes(a.MaxBytes))
+		if a.HitPercent != nil {
+			arc += fmt.Sprintf(" · %.1f%% hits", *a.HitPercent)
+		}
+		lines = append(lines, sMuted.Render(arc))
+	}
+	if z.DetailReason != "" {
+		lines = append(lines, sMuted.Render(truncate(z.DetailReason, w)))
+	}
+	return lines
+}
+
+// powerLines shows batteries, mains and UPS (D25); nil when there are none.
+func (m *Model) powerLines(w int) []string {
+	if m.metrics == nil {
+		return nil
+	}
+	var lines []string
+	if p := m.metrics.Power; p != nil && p.Data != nil {
+		for _, s := range *p.Data {
+			switch s.Type {
+			case "battery":
+				line := pad(s.Name, 8)
+				if s.CapacityPercent != nil {
+					line += bar(*s.CapacityPercent, 12, percentLevel(100-*s.CapacityPercent, 80, 90)) + fmt.Sprintf(" %3.0f%%", *s.CapacityPercent)
+				}
+				if s.Status != "" {
+					line += "  " + strings.ReplaceAll(s.Status, "_", " ")
+				}
+				if s.HoursRemaining != nil {
+					line += fmt.Sprintf("  %s left", (time.Duration(*s.HoursRemaining * float64(time.Hour))).Round(time.Minute))
+				}
+				if s.PowerWatts != nil {
+					line += fmt.Sprintf("  %.1f W", *s.PowerWatts)
+				}
+				lines = append(lines, truncate(line, w))
+			case "mains":
+				if s.Online != nil {
+					word, l := "on mains", lvOK
+					if !*s.Online {
+						word, l = "on battery", lvWarn
+					}
+					lines = append(lines, pad(s.Name, 8)+badge(l, word))
+				}
+			}
+		}
+	}
+	if u := m.metrics.UPS; u != nil && u.Data != nil {
+		for _, x := range *u.Data {
+			l, word := lvOK, "on line"
+			switch {
+			case x.LowBattery:
+				l, word = lvCrit, "LOW BATTERY"
+			case x.OnBattery:
+				l, word = lvWarn, "on battery"
+			}
+			line := pad("UPS "+x.Name, 14) + badge(l, word)
+			if x.ChargePercent != nil {
+				line += fmt.Sprintf("  %.0f%%", *x.ChargePercent)
+			}
+			if x.RuntimeSeconds != nil {
+				line += "  " + (time.Duration(*x.RuntimeSeconds) * time.Second).String() + " runtime"
+			}
+			if x.LoadPercent != nil {
+				line += fmt.Sprintf("  load %.0f%%", *x.LoadPercent)
+			}
+			lines = append(lines, truncate(line, w))
+		}
+	}
+	return lines
 }
 
 func (m *Model) networkScreen(w, h int) string {
@@ -852,6 +965,7 @@ func (m *Model) helpView(w, h int) string {
 		sBold.Render("Processes"),
 		kv("s", "change sort") + "        " + kv("/", "search"),
 		kv("k", "kernel threads") + "     " + kv("esc", "clear search"),
+		kv("c", "containers / processes"),
 		"",
 		sBold.Render("Performance · Events · Settings"),
 		kv("t", "chart range") + "        " + kv("v", "event severity") + "    " + kv("m", "older events"),
@@ -910,11 +1024,21 @@ func (m *Model) gpuLines(inner int) []string {
 		if g.FanPercent != nil {
 			extra = append(extra, "fan "+optPct(g.FanPercent))
 		}
+		if g.FrequencyMHz != nil {
+			f := fmt.Sprintf("%.0f MHz", *g.FrequencyMHz)
+			if g.MaxFrequencyMHz != nil {
+				f += fmt.Sprintf(" of %.0f", *g.MaxFrequencyMHz)
+			}
+			extra = append(extra, f)
+		}
 		if len(extra) > 0 {
 			out = append(out, kv("", strings.Join(extra, sMuted.Render(" · "))))
 		}
-		if g.MetricsSource == "" {
+		switch {
+		case g.MetricsSource == "":
 			out = append(out, sMuted.Render("no metrics source for this GPU"))
+		case g.UtilizationPercent == nil && (g.MetricsSource == "i915" || g.MetricsSource == "xe"):
+			out = append(out, sMuted.Render("busy % needs perf access; not available to the agent"))
 		}
 	}
 	return out
@@ -1019,6 +1143,9 @@ func (m *Model) hardwareScreen(w, h int) string {
 }
 
 func (m *Model) processesScreen(w, h int) string {
+	if m.procContainers {
+		return m.containersView(w, h)
+	}
 	inner := w - 4
 	title := "Processes · sorted by " + processSorts[m.procSort]
 	if m.procSearch != "" || m.searching {
@@ -1314,6 +1441,20 @@ func fmtValue(v float64, unit string) string {
 		return fmt.Sprintf("%.0f °C", v)
 	case "watts":
 		return fmt.Sprintf("%.0f W", v)
+	case "volts":
+		return fmt.Sprintf("%.2f V", v)
+	case "hertz":
+		return fmt.Sprintf("%.0f Hz", v)
+	case "rpm":
+		return fmt.Sprintf("%.0f rpm", v)
+	case "seconds":
+		return fmt.Sprintf("%.2f s", v)
+	case "per_second":
+		return fmt.Sprintf("%.2f/s", v)
+	case "seconds_per_second":
+		return fmt.Sprintf("%.2f s/s", v)
+	case "count":
+		return strconv.FormatFloat(v, 'f', -1, 64)
 	}
 	return fmt.Sprintf("%.2f", v)
 }
@@ -1397,6 +1538,9 @@ func (m *Model) performanceScreen(w, h int) string {
 		lines = append(lines, strings.Repeat(" ", 9)+sMuted.Render(axis))
 		title := fmt.Sprintf("%s · avg %s · min %s · max %s", p.title, fmtValue(avg, p.unit), fmtValue(lo, p.unit), fmtValue(hi, p.unit))
 		boxes = append(boxes, box{title: title, lines: lines})
+	}
+	if b, ok := m.customBox(cw - 4); ok {
+		boxes = append(boxes, b)
 	}
 	if len(boxes) == 0 {
 		return column([]box{{title: "Performance", lines: []string{sMuted.Render("No history recorded for this range yet. Samples are taken every 10 seconds.")}}}, w, h)
@@ -1487,4 +1631,103 @@ func (m *Model) settingsScreen(w, h int) string {
 		}
 	}
 	return column([]box{{title: "Terminal UI", lines: local}, {title: "Health thresholds", lines: lines, flex: true}}, w, h)
+}
+
+// customBox lists generic metrics from extension collectors (D22).
+func (m *Model) customBox(w int) (box, bool) {
+	if m.metrics == nil || m.metrics.Custom == nil || len(*m.metrics.Custom) == 0 {
+		return box{}, false
+	}
+	var lines []string
+	for _, set := range *m.metrics.Custom {
+		head := sAccent.Render(set.Collector)
+		if set.Data == nil || set.Status != apiv1.Available {
+			reason := set.Reason
+			if reason == "" {
+				reason = set.Status
+			}
+			lines = append(lines, head+"  "+badge(lvUnknown, set.Status)+" "+sMuted.Render(truncate(reason, max(10, w-30))))
+			continue
+		}
+		if set.DroppedSeries > 0 {
+			head += sMuted.Render(fmt.Sprintf("  %d dropped: %s", set.DroppedSeries, truncate(set.Problem, max(10, w-40))))
+		}
+		lines = append(lines, head)
+		for _, x := range *set.Data {
+			name := strings.TrimPrefix(x.Name, set.Collector+".")
+			if len(x.Labels) > 0 {
+				keys := make([]string, 0, len(x.Labels))
+				for k := range x.Labels {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				parts := make([]string, len(keys))
+				for i, k := range keys {
+					parts[i] = k + "=" + x.Labels[k]
+				}
+				name += " {" + strings.Join(parts, ", ") + "}"
+			}
+			val := fmtValue(x.Value, x.Unit)
+			if x.Kind == "counter" {
+				val = "—"
+				if x.RatePerSecond != nil {
+					val = fmtValue(*x.RatePerSecond, x.RateUnit)
+				}
+			}
+			nameW := max(10, w-14)
+			lines = append(lines, "  "+pad(truncate(name, nameW), nameW)+padLeft(val, 12))
+		}
+	}
+	return box{title: "Extension metrics", lines: lines}, true
+}
+
+// containersView lists containers found through cgroup v2 (D24).
+func (m *Model) containersView(w, h int) string {
+	inner := w - 4
+	title := "Containers"
+	var lines []string
+	switch {
+	case m.containersErr != "":
+		lines = []string{sCrit.Render("✖ " + m.containersErr)}
+		if strings.Contains(m.containersErr, "processes:read") {
+			lines = append(lines, sMuted.Render("Create a key with the processes:read scope, or use the local admin socket."))
+		}
+	case m.containers == nil:
+		lines = waiting()
+	case m.containers.Containers.Data == nil:
+		lines = unavailable(m.containers.Containers, inner)
+	case len(m.containers.Containers.Data.Items) == 0:
+		lines = []string{sMuted.Render("No Docker, Podman, containerd or CRI-O containers are running.")}
+	default:
+		d := m.containers.Containers.Data
+		title = fmt.Sprintf("Containers · %d running", d.Total)
+		opt := func(v *uint64, f func(uint64) string) string {
+			if v == nil {
+				return "—"
+			}
+			return f(*v)
+		}
+		lines = append(lines, sMuted.Render(pad("RUNTIME", 11)+pad("ID", 14)+padLeft("CPU%", 7)+padLeft("MEMORY", 11)+padLeft("LIMIT", 11)+
+			padLeft("READ/s", 11)+padLeft("WRITE/s", 11)+padLeft("PIDS", 6)+"  "+"OWNER"))
+		for _, c := range d.Items {
+			cpu, cl := "—", lvNeutral
+			if c.CPUPercent != nil {
+				cpu = fmt.Sprintf("%.1f", *c.CPUPercent)
+				cl = percentLevel(*c.CPUPercent, 50, 90)
+			}
+			owner := "root"
+			if c.UID != nil {
+				owner = fmt.Sprintf("uid %d (rootless)", *c.UID)
+			}
+			limit := "none"
+			if c.MemoryLimitBytes != nil {
+				limit = bytes(*c.MemoryLimitBytes)
+			}
+			lines = append(lines, pad(c.Runtime, 11)+pad(c.ID[:min(12, len(c.ID))], 14)+cl.style().Render(padLeft(cpu, 7))+
+				padLeft(opt(c.MemoryBytes, bytes), 11)+padLeft(limit, 11)+padLeft(rate(c.IOReadBytesPerSecond), 11)+padLeft(rate(c.IOWriteBytesPerSecond), 11)+
+				padLeft(opt(c.PIDs, func(n uint64) string { return strconv.FormatUint(n, 10) }), 6)+"  "+owner)
+		}
+		lines = append(lines, sMuted.Render(truncate("CPU % of one core · "+d.NamesReason, inner)))
+	}
+	return column([]box{{title: title, lines: lines, flex: true}}, w, h)
 }

@@ -137,6 +137,7 @@ func Routes(d Deps) []Route {
 		{Method: get, Path: "/events", Scope: met, Handler: handlers.Events(d.Events, machineID, d.Now)},
 		{Method: get, Path: "/events/stream", Scope: met, Handler: stream.ServeHTTP},
 		{Method: get, Path: "/processes", Scope: prc, Handler: handlers.Processes(d.Processes, machineID, d.Now)},
+		{Method: get, Path: "/containers", Scope: prc, Handler: res.Containers},
 		{Method: get, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.List},
 		{Method: post, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.Create},
 		{Method: del, Path: "/keys/{id}", Scope: adm, SocketOnly: true, Handler: keys.Revoke},

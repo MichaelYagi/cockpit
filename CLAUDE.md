@@ -113,6 +113,7 @@ internal/
   logging/                   # slog setup, secret redaction, UTC timestamps
   netaddr/                   # loopback classification for listen and Host addresses
   ulid/                      # request and event IDs
+  extension/                 # adapts collectorsdk collectors to the internal contract
   api/
     router.go                # route table: every route declares a scope or Public
     httpx/                   # request context values, JSON and error envelope helpers
@@ -126,6 +127,12 @@ internal/
 pkg/
   apiv1/                     # public wire types matching the spec
   client/                    # public Go SDK (Unix socket, TCP, TLS)
+  collectorsdk/              # public extension collector contract (D23)
+custom/                      # custom.Main: build cockpit with extension collectors
+examples/
+  collector/                 # example extension build (own module; make examples)
+  python/, typescript/       # dependency-free API clients, run against a live agent in tests
+CHANGELOG.md                 # release notes; semver policy for pkg/* (D26)
 deploy/                      # systemd units, sysusers.d entry, install/uninstall scripts (+ tests)
 docs/
 ```
@@ -136,7 +143,10 @@ docs/
 - `internal/platform/*` depends on `collector` and `core` only.
 - `internal/api` reads engine state through `engine.Reader` and
   `events.Subscriber`; it never calls collectors.
-- `internal/app` is the only package that wires concrete implementations.
+- `internal/app` is the only package that wires concrete implementations
+  (`custom` and `cmd/cockpit` only hand collectors to the CLI).
+- `pkg/collectorsdk` imports nothing; `internal/extension` imports only
+  `collector`, `core` and the SDK.
 - **`internal/tui` imports only `pkg/client`, `pkg/apiv1` and UI
   libraries.** `pkg/*` never imports `internal/*`. Both rules are enforced
   by a test.
@@ -158,6 +168,8 @@ type Collector interface {
   they can be tested against fixtures.
 - Collectors return raw counters; the engine derives rates.
 - No `init()` registration; `linux.Collectors(env)` lists them explicitly.
+- Extension collectors use `pkg/collectorsdk` and `custom.Main` (D23);
+  they report generic metrics (D22) and are compiled in, never loaded.
 - Respect context deadlines; keep any state bounded.
 
 Propose changes before changing a public contract.
@@ -211,7 +223,8 @@ Visual language:
   instead of a broken layout.
 
 Navigation: Overview, Hardware, Performance, Health, Storage, Network,
-Processes, Services, Events / Logs, API Access, Settings. Screens without
+Processes (with a Containers view, `c`), Services, Events / Logs, API
+Access, Settings. Screens without
 an implementation are hidden, not shown empty (all are implemented as of
 Phase 3).
 
@@ -244,7 +257,8 @@ During implementation:
 - No plugin sandbox or dynamic third-party code loading in the MVP.
 - Keep secrets and real host identifiers out of logs, fixtures, test
   snapshots and error messages.
-- Run `make check` (gofmt, vet, staticcheck, race tests, cross-compile)
+- Run `make check` (gofmt, vet, staticcheck, race tests, cross-compile,
+  example extension build)
   and `make vuln`.
 
 Before completing a task:
@@ -253,7 +267,8 @@ Before completing a task:
 - List tests run and their results.
 - Identify limitations and follow-up work.
 - Never claim a command or test passed unless it was actually run.
-- Update docs in the same change as the behavior they describe.
+- Update docs in the same change as the behavior they describe, and
+  `CHANGELOG.md` for user-visible changes.
 
 ## MVP acceptance criteria
 

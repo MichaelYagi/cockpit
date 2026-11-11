@@ -225,6 +225,9 @@ collection:
     exclude_types: []          # added to the built-in pseudo/in-memory list
     include_types: []          # e.g. [tmpfs]; network filesystems cannot be included
     exclude_mount_points: []   # path.Match globs; "/dir/**" matches below /dir
+  ups:                         # D25; Network UPS Tools, read-only
+    enabled: false
+    address: 127.0.0.1:3493
 health:
   interval: 5s
   confirm: 2                   # evaluations a change must hold (anti-flapping)
