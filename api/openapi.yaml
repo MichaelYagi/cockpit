@@ -843,7 +843,7 @@ components:
             additionalProperties: false
             required: [transport, address, tls]
             properties:
-              transport: { type: string, enum: [unix, tcp] }
+              transport: { type: string, enum: [unix, pipe, tcp] }
               address: { type: string }
               tls: { type: boolean }
               tls_expires_at: { type: string, format: date-time, description: When the TLS server certificate expires (D29). }

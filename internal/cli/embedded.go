@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -31,6 +32,9 @@ func startEmbedded(parent context.Context, res *config.Result, env Env) (*embedd
 	cfg.API.TCP.Enabled = false
 	cfg.API.Socket.Enabled = true
 	paths.SocketPath = filepath.Join(paths.RuntimeDir, "tui-"+strconv.Itoa(os.Getpid())+".sock")
+	if runtime.GOOS == "windows" { // a private named pipe instead (D31)
+		paths.SocketPath = config.PipePrefix + config.Name + "-tui-" + strconv.Itoa(os.Getpid())
+	}
 
 	if err := app.EnsurePrivateDir(paths.StateDir, 0o700); err != nil {
 		return nil, err

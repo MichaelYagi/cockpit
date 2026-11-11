@@ -217,8 +217,11 @@ func Run(ctx context.Context, o Options) (err error) {
 	}
 	var sockH, tcpH = noHandler, noHandler
 	if cfg.API.Socket.Enabled {
-		if err := EnsurePrivateDir(filepath.Dir(paths.SocketPath), runtimeMode); err != nil {
-			return fmt.Errorf("runtime directory: %w", err)
+		// A named pipe (Windows, D31) has no directory; its ACL controls access.
+		if !config.IsPipe(paths.SocketPath) {
+			if err := EnsurePrivateDir(filepath.Dir(paths.SocketPath), runtimeMode); err != nil {
+				return fmt.Errorf("runtime directory: %w", err)
+			}
 		}
 		if sockH, err = api.NewRouter(deps, api.Options{Listener: api.ListenerSocket}); err != nil {
 			return err
@@ -237,7 +240,11 @@ func Run(ctx context.Context, o Options) (err error) {
 	cleanup = append(cleanup, srv.Shutdown)
 	var open []apiv1.Listener
 	if ep.SocketPath != "" {
-		open = append(open, apiv1.Listener{Transport: "unix", Address: ep.SocketPath})
+		transport := "unix"
+		if config.IsPipe(ep.SocketPath) {
+			transport = "pipe"
+		}
+		open = append(open, apiv1.Listener{Transport: transport, Address: ep.SocketPath})
 	}
 	if ep.TCPAddress != "" {
 		l := apiv1.Listener{Transport: "tcp", Address: ep.TCPAddress, TLS: ep.TCPTLS}

@@ -558,7 +558,7 @@ type StreamLagged struct {
 
 // Listener is one open API listener.
 type Listener struct {
-	Transport string `json:"transport"` // unix | tcp
+	Transport string `json:"transport"` // unix | pipe (Windows) | tcp
 	Address   string `json:"address"`
 	TLS       bool   `json:"tls"`
 	// TLSExpiresAt is when the server certificate expires (D29).

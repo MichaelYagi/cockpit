@@ -90,16 +90,17 @@ func build(opts []Option) options {
 func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // NewUnix connects to an agent's Unix socket.
+//
+// On Windows socketPath may be a named pipe (\\.\pipe\cockpit-monitor).
+// The client then checks that the pipe's server runs as SYSTEM, an
+// administrator or the current user before sending anything (D31).
 func NewUnix(socketPath string, opts ...Option) (*Client, error) {
 	if socketPath == "" {
 		return nil, errors.New("socket path is required")
 	}
 	o := build(opts)
 	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socketPath)
-		},
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) { return dialAdmin(ctx, socketPath) },
 		MaxIdleConns:    4,
 		IdleConnTimeout: 30 * time.Second,
 	}

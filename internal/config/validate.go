@@ -68,7 +68,11 @@ func validate(c *Config, p *Paths, v *validator) {
 	if !c.API.Socket.Enabled && !c.API.TCP.Enabled {
 		v.add("api", "at least one of api.socket and api.tcp must be enabled")
 	}
-	if c.API.Socket.Enabled {
+	if c.API.Socket.Enabled && IsPipe(p.SocketPath) {
+		if !pipePattern.MatchString(p.SocketPath) {
+			v.add("api.socket.path", `%q must look like \\.\pipe\name`, p.SocketPath)
+		}
+	} else if c.API.Socket.Enabled {
 		absPath(v, "api.socket.path", c.API.Socket.Path)
 		if len(p.SocketPath) > maxSocketPath {
 			v.add("api.socket.path", "resolved socket path %q is longer than %d bytes; set api.socket.path or agent.runtime_dir to a shorter location", p.SocketPath, maxSocketPath)

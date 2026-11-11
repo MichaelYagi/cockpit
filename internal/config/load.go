@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -115,7 +114,7 @@ func Load(src Source) (*Result, error) {
 	}
 	paths.SocketPath = cfg.API.Socket.Path
 	if paths.SocketPath == "" {
-		paths.SocketPath = filepath.Join(paths.RuntimeDir, "agent.sock")
+		paths.SocketPath = defaultSocketPath(paths)
 	}
 
 	validate(&cfg, &paths, &v)

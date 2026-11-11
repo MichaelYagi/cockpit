@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"strings"
 	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/api/httpx"
@@ -93,7 +94,7 @@ func (s *Server) Start() (Endpoints, error) {
 		for _, l := range listeners {
 			_ = l.Close()
 		}
-		if s.sockPath != "" {
+		if s.sockPath != "" && !isPipe(s.sockPath) {
 			_ = os.Remove(s.sockPath)
 			s.sockPath = ""
 		}
@@ -212,10 +213,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	s.wg.Wait()
-	if s.sockPath != "" {
+	if s.sockPath != "" && !isPipe(s.sockPath) { // a named pipe disappears with its listener
 		if err := os.Remove(s.sockPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
+
+// isPipe reports a Windows named pipe path (D31).
+func isPipe(path string) bool { return strings.HasPrefix(path, `\\.\pipe\`) }
