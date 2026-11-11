@@ -15,6 +15,12 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
   it, so nothing changes on upgrade. New keys must request it
   (`cockpit keys create --scope network:read`).
 
+### Added
+
+- Processes report their `executable` path (from `/proc/<pid>/exe`), or an
+  `executable_reason` when it cannot be read. Command lines stay closed
+  for good (D28).
+
 ## v0.4.0 — 2026-11-11
 
 The first tagged release. It contains everything from Phases 1–4.

@@ -15,7 +15,19 @@ type ProcessSample struct {
 	RSSBytes     uint64
 	VirtualBytes uint64
 	KernelThread bool
+	// Executable is the resolved /proc/<pid>/exe (D28); empty when
+	// unknown, with ExecutableReason saying why. Command lines are never
+	// read.
+	Executable       string
+	ExecutableReason string // permission_denied | kernel_thread | unavailable
 }
+
+// Reasons for a missing executable path (D28).
+const (
+	ExeDenied       = "permission_denied"
+	ExeKernelThread = "kernel_thread"
+	ExeUnavailable  = "unavailable"
+)
 
 // ProcessList is one sample of all visible processes.
 type ProcessList struct {

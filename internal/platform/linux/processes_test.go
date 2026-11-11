@@ -4,10 +4,16 @@ package linux
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/MichaelYagi/cockpit/internal/collector"
 	"github.com/MichaelYagi/cockpit/internal/core"
 )
 
@@ -107,5 +113,51 @@ func TestListProcessesHidepid(t *testing.T) {
 	c.euid = func() int { return 0 }
 	if list, _ := c.ListProcesses(context.Background()); list.Partial {
 		t.Error("root sees all processes")
+	}
+}
+
+// D28: the executable path is resolved; command lines are never read.
+func TestProcessExecutable(t *testing.T) {
+	root := tree(t, map[string]string{
+		"proc/1/stat":    statLine(1, "init", 0, 0, 1, 1, 1, 1, 1),
+		"proc/1/exe":     "->/usr/lib/systemd/systemd",
+		"proc/1/cmdline": "secret\x00--password=hunter2\x00",
+		"proc/2/stat":    statLine(2, "kthreadd", 0, pfKThread, 0, 1, 11, 0, 0),
+		"proc/3/stat":    statLine(3, "gone", 0, 0, 1, 1, 1, 1, 1), // no exe link
+		"proc/stat":      procStatFixture + "btime 1762862400\n",
+	})
+	list, _ := newProcesses(env(root)).ListProcesses(context.Background())
+	by := map[int]core.ProcessSample{}
+	for _, p := range list.Processes {
+		by[p.PID] = p
+	}
+	if p := by[1]; p.Executable != "/usr/lib/systemd/systemd" || p.ExecutableReason != "" {
+		t.Errorf("init %+v", p)
+	}
+	if p := by[2]; p.Executable != "" || p.ExecutableReason != core.ExeKernelThread {
+		t.Errorf("kthread %+v", p)
+	}
+	if p := by[3]; p.Executable != "" || p.ExecutableReason != core.ExeUnavailable {
+		t.Errorf("no exe %+v", p)
+	}
+	for _, p := range list.Processes {
+		if strings.Contains(fmt.Sprintf("%+v", p), "hunter2") {
+			t.Fatal("command line leaked")
+		}
+	}
+}
+
+func TestProcessExecutableDenied(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every exe link")
+	}
+	// PID 1 on a real system belongs to root; reading its exe link is
+	// refused for an unprivileged user.
+	if _, err := os.Readlink("/proc/1/exe"); err == nil || !errors.Is(err, fs.ErrPermission) {
+		t.Skip("/proc/1/exe is readable here")
+	}
+	c := newProcesses(collector.Env{ProcRoot: "/proc", SysRoot: "/sys", EtcRoot: "/etc", Now: time.Now})
+	if exe, reason := c.executable("1", false); exe != "" || reason != core.ExeDenied {
+		t.Errorf("%q %q", exe, reason)
 	}
 }

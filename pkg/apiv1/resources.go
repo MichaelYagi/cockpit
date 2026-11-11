@@ -605,6 +605,10 @@ type Process struct {
 	VirtualBytes  uint64     `json:"virtual_bytes"`
 	StartedAt     *time.Time `json:"started_at"`
 	KernelThread  bool       `json:"kernel_thread"`
+	// Executable is the program's path (D28); null when unknown, with
+	// ExecutableReason saying why. Command lines are never exposed.
+	Executable       *string `json:"executable"`
+	ExecutableReason string  `json:"executable_reason,omitempty"`
 }
 
 // ProcessSorts are the valid values of ?sort= for /processes.

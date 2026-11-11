@@ -70,7 +70,7 @@ need `metrics:read`. It does not open a route by itself.
 | GET | `/health` | `metrics:read` | Overall status, checks (D11 plus failed services and network errors), active findings |
 | GET | `/events` | `metrics:read` | Events, newest first, paginated, `?severity=&since=&until=&type=`; persisted since Phase 3 |
 | GET | `/events/stream` | `metrics:read` | Live events as Server-Sent Events (D17, Phase 2) |
-| GET | `/processes` | `processes:read` | Processes, sorted/searchable, snapshot-bound cursors; no command lines (D14, Phase 2) |
+| GET | `/processes` | `processes:read` | Processes, sorted/searchable, snapshot-bound cursors; the executable path when readable (`executable`, else `executable_reason`); never command lines (D14, D28) |
 | GET | `/keys` | `admin` (socket) | Key metadata. Never the key or its hash |
 | POST | `/keys` | `admin` (socket) | Create. Response includes the full key once |
 | POST | `/keys/{id}/rotate` | `admin` (socket) | Issue a replacement key (same name/scopes), revoke the old one immediately. Full key shown once |

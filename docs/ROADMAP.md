@@ -163,7 +163,7 @@ with checksums and a documented Go SDK is published.
 | # | Milestone | Depends on |
 |---|---|---|
 | 5A ✓ | `network:read` scope (D27): addresses, routes and DNS gated; existing metrics keys migrated; TUI and report handle the missing data | — |
-| 5B | Command lines closed (D28): `executable` and `executable_reason` on processes | — |
+| 5B ✓ | Command lines closed (D28): `executable` and `executable_reason` on processes | — |
 | 5C | TLS tooling (D29): `cockpit tls init/renew/show`, client pinning and private CA trust in the SDK, TUI and CLI, expiry warning and `tls_expires_at` | — |
 | 5D | Fleet enrollment (D30): `cockpit fleet add/list/remove/check`, `fleet.yaml` with mode checks, identity pinning | 5A, 5C |
 | 5E | Fleet console (D30): concurrent polling, overview table, open a machine in the full TUI, identity-change refusal | 5D |

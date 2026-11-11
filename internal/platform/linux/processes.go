@@ -139,6 +139,7 @@ func (c *processesCollector) ListProcesses(ctx context.Context) (core.ProcessLis
 		if st.rssPages > 0 {
 			p.RSSBytes = uint64(st.rssPages) * c.pageSize
 		}
+		p.Executable, p.ExecutableReason = c.executable(n, p.KernelThread)
 		if fi, err := os.Stat(filepath.Join(c.env.ProcRoot, n)); err == nil {
 			if sys, ok := fi.Sys().(*syscall.Stat_t); ok {
 				p.UID = int(sys.Uid)
@@ -164,4 +165,21 @@ func (c *processesCollector) BootTime() (time.Time, bool) {
 	}
 	s, ok := parseBootTime(b)
 	return time.Unix(s, 0).UTC(), ok
+}
+
+// executable resolves /proc/<pid>/exe (D28). The kernel allows this only
+// for processes the agent could ptrace, so other users' processes report
+// permission_denied without privileges. /proc/<pid>/cmdline is never read.
+func (c *processesCollector) executable(pid string, kthread bool) (string, string) {
+	if kthread {
+		return "", core.ExeKernelThread
+	}
+	exe, err := os.Readlink(filepath.Join(c.env.ProcRoot, pid, "exe"))
+	switch {
+	case err == nil && exe != "":
+		return exe, ""
+	case errors.Is(err, fs.ErrPermission):
+		return "", core.ExeDenied
+	}
+	return "", core.ExeUnavailable
 }
