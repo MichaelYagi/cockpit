@@ -141,3 +141,19 @@ func TestEngineHasNoHTTP(t *testing.T) {
 func TestAuthIsIndependent(t *testing.T) {
 	rule(t, "internal/auth/...", hasPrefix("internal/core"))
 }
+
+// Health evaluates snapshots through an interface; it never reaches the
+// engine, collectors or the API.
+func TestHealthDependsOnDomainOnly(t *testing.T) {
+	rule(t, "internal/health/...", hasPrefix("internal/core"))
+}
+
+// Events are a leaf service.
+func TestEventsDependsOnDomainOnly(t *testing.T) {
+	rule(t, "internal/events/...", hasPrefix("internal/core", "internal/ulid"))
+}
+
+// Storage implements interfaces owned by domain packages.
+func TestStorageDependsOnDomainOnly(t *testing.T) {
+	rule(t, "internal/storage/...", hasPrefix("internal/core", "internal/auth"))
+}

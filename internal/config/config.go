@@ -23,6 +23,7 @@ type Config struct {
 	Agent      Agent      `yaml:"agent"`
 	API        API        `yaml:"api"`
 	Collection Collection `yaml:"collection"`
+	Health     Health     `yaml:"health"`
 	Logging    Logging    `yaml:"logging"`
 	TUI        TUI        `yaml:"tui"`
 }
@@ -36,9 +37,10 @@ type Agent struct {
 
 // API configures listeners.
 type API struct {
-	Socket Socket `yaml:"socket"`
-	TCP    TCP    `yaml:"tcp"`
-	TLS    TLS    `yaml:"tls"`
+	Socket    Socket    `yaml:"socket"`
+	TCP       TCP       `yaml:"tcp"`
+	TLS       TLS       `yaml:"tls"`
+	RateLimit RateLimit `yaml:"rate_limit"`
 }
 
 // Socket is the local administrative Unix socket (D3).
@@ -51,6 +53,15 @@ type Socket struct {
 type TCP struct {
 	Enabled bool   `yaml:"enabled"`
 	Address string `yaml:"address"`
+}
+
+// RateLimit bounds request rates on TCP listeners. The Unix socket is not
+// rate limited.
+type RateLimit struct {
+	PerKeyRPS   float64 `yaml:"per_key_rps"`
+	PerKeyBurst int     `yaml:"per_key_burst"`
+	GlobalRPS   float64 `yaml:"global_rps"`
+	GlobalBurst int     `yaml:"global_burst"`
 }
 
 // TLS is required for any non-loopback TCP address.
@@ -88,6 +99,44 @@ type Logging struct {
 	Format string `yaml:"format"` // text | json
 }
 
+// Health configures health checks (D11).
+type Health struct {
+	Interval time.Duration `yaml:"interval"`
+	// Confirm is how many consecutive evaluations a condition must hold
+	// before a finding is raised or cleared (prevents flapping).
+	Confirm        int                  `yaml:"confirm"`
+	CPUTemperature CPUTemperatureHealth `yaml:"cpu_temperature"`
+	Memory         MemoryHealth         `yaml:"memory"`
+	Storage        StorageHealth        `yaml:"storage"`
+	Disk           DiskHealth           `yaml:"disk"`
+}
+
+// CPUTemperatureHealth thresholds apply only when the sensor does not
+// expose its own high/critical limits.
+type CPUTemperatureHealth struct {
+	WarnCelsius     float64 `yaml:"warn_celsius"`
+	CriticalCelsius float64 `yaml:"critical_celsius"`
+}
+
+// MemoryHealth thresholds. Pressure is PSI "full" avg60, in percent.
+type MemoryHealth struct {
+	WarnAvailablePercent     float64 `yaml:"warn_available_percent"`
+	CriticalAvailablePercent float64 `yaml:"critical_available_percent"`
+	WarnPressurePercent      float64 `yaml:"warn_pressure_percent"`
+	CriticalPressurePercent  float64 `yaml:"critical_pressure_percent"`
+}
+
+// StorageHealth thresholds apply to space and inode usage.
+type StorageHealth struct {
+	WarnPercent     float64 `yaml:"warn_percent"`
+	CriticalPercent float64 `yaml:"critical_percent"`
+}
+
+// DiskHealth thresholds for SMART/NVMe data.
+type DiskHealth struct {
+	WarnPercentageUsed int `yaml:"warn_percentage_used"` // NVMe endurance used
+}
+
 // TUI configures the terminal client.
 type TUI struct {
 	Refresh time.Duration `yaml:"refresh"`
@@ -98,8 +147,18 @@ func Defaults() Config {
 	return Config{
 		Agent: Agent{ShutdownTimeout: 10 * time.Second},
 		API: API{
-			Socket: Socket{Enabled: true},
-			TCP:    TCP{Enabled: true, Address: DefaultTCPAddress},
+			Socket:    Socket{Enabled: true},
+			TCP:       TCP{Enabled: true, Address: DefaultTCPAddress},
+			RateLimit: RateLimit{PerKeyRPS: 20, PerKeyBurst: 40, GlobalRPS: 200, GlobalBurst: 400},
+		},
+		Health: Health{
+			Interval:       5 * time.Second,
+			Confirm:        2,
+			CPUTemperature: CPUTemperatureHealth{WarnCelsius: 85, CriticalCelsius: 95},
+			Memory: MemoryHealth{WarnAvailablePercent: 10, CriticalAvailablePercent: 5,
+				WarnPressurePercent: 5, CriticalPressurePercent: 20},
+			Storage: StorageHealth{WarnPercent: 85, CriticalPercent: 95},
+			Disk:    DiskHealth{WarnPercentageUsed: 90},
 		},
 		Collection: Collection{
 			Defaults: CollectorSettings{Interval: 2 * time.Second, Timeout: time.Second},
