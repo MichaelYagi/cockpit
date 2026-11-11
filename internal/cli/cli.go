@@ -70,6 +70,7 @@ Commands:
   keys           Create, list, rotate and revoke API keys (local admin)
   report         Write a diagnostic report (Markdown or JSON)
   tls            Create the agent's TLS certificate for remote access
+  fleet          Watch several machines from one console
   smart-helper   Read disk health as root for the agent (run by cockpit-smart.timer)
   config check   Validate configuration and print the effective settings
   version        Print version information
@@ -101,6 +102,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return runReport(ctx, rest, env)
 	case "tls":
 		return runTLS(rest, env)
+	case "fleet":
+		return runFleet(ctx, rest, env)
 	case "smart-helper":
 		return runSMARTHelper(ctx, rest, env)
 	case "config":

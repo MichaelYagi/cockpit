@@ -410,9 +410,12 @@ func TestSMARTHelperCommand(t *testing.T) {
 	}
 }
 
-// D29: tls init, an agent serving it, and clients that pin the fingerprint
-// or trust the CA.
-func TestTLSEndToEnd(t *testing.T) {
+type tlsAgentInfo struct{ root, sock, addr, fp, tlsDir string }
+
+// startTLSAgent runs "cockpit tls init" and an agent serving TLS on a
+// loopback port.
+func startTLSAgent(t *testing.T) tlsAgentInfo {
+	t.Helper()
 	root, _ := os.MkdirTemp("", "ckpt")
 	t.Cleanup(func() { os.RemoveAll(root) })
 	tlsDir := filepath.Join(root, "tls")
@@ -462,6 +465,14 @@ func TestTLSEndToEnd(t *testing.T) {
 	if addr == "" {
 		t.Fatalf("TLS listener not reported:\n%s", aerr)
 	}
+	return tlsAgentInfo{root: root, sock: sock, addr: addr, fp: fp, tlsDir: tlsDir}
+}
+
+// D29: tls init, an agent serving it, and clients that pin the fingerprint
+// or trust the CA.
+func TestTLSEndToEnd(t *testing.T) {
+	a := startTLSAgent(t)
+	root, sock, addr, fp, tlsDir := a.root, a.sock, a.addr, a.fp, a.tlsDir
 	_, key, _ := run(t, "", "keys", "create", "--socket", sock, "--name", "tls", "--scope", "system:read")
 	key = strings.TrimSpace(key)
 
@@ -486,4 +497,94 @@ func TestTLSEndToEnd(t *testing.T) {
 	if code, _ := report(nil); code != ExitError {
 		t.Error("untrusted certificate accepted")
 	}
+}
+
+// D30: enroll a machine over pinned TLS, check it, and refuse it once its
+// identity changes.
+func TestFleetEnrollment(t *testing.T) {
+	a := startTLSAgent(t)
+	_, key, _ := run(t, "", "keys", "create", "--socket", a.sock, "--name", "fleet", "--scope", "system:read", "--scope", "metrics:read")
+	keyPath := filepath.Join(a.root, "agent.key")
+	if err := os.WriteFile(keyPath, []byte(key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(a.root, "home")
+	fleetRun := func(stdin string, interactive bool, args ...string) (int, string) {
+		t.Helper()
+		env, out, errb := testEnv(home, nil)
+		env.Interactive = interactive
+		if stdin != "" {
+			env.Stdin = strings.NewReader(stdin)
+		}
+		code := Run(context.Background(), append([]string{"fleet"}, args...), env)
+		return code, out.String() + errb.String()
+	}
+	url := "https://" + a.addr
+
+	// Not a terminal and no fingerprint: refuse rather than trust blindly.
+	if code, out := fleetRun("", false, "add", "box", url, "--key-file", keyPath); code != ExitUsage || !strings.Contains(out, a.fp) {
+		t.Fatalf("non-interactive add: %d %s", code, out)
+	}
+	// Interactive "no".
+	if code, out := fleetRun("n\n", true, "add", "box", url, "--key-file", keyPath); code != ExitError || !strings.Contains(out, "Not added") {
+		t.Errorf("declined: %d %s", code, out)
+	}
+	// Interactive "yes" pins the shown fingerprint.
+	if code, out := fleetRun("y\n", true, "add", "box", url, "--key-file", keyPath); code != ExitOK || !strings.Contains(out, "Added box") {
+		t.Fatalf("add: %d %s", code, out)
+	}
+	path := filepath.Join(home, ".config", "cockpit-monitor", "fleet.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), a.fp) || strings.Contains(string(data), strings.TrimSpace(key)) {
+		t.Fatalf("fleet file:\n%s %v", data, err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Errorf("fleet file mode %v", fi.Mode())
+	}
+	if code, out := fleetRun("", false, "list"); code != ExitOK || !strings.Contains(out, "box") || !strings.Contains(out, "pinned "+a.fp[:16]) {
+		t.Errorf("list: %s", out)
+	}
+	if code, out := fleetRun("", false, "check"); code != ExitOK || !strings.Contains(out, "✔ box") {
+		t.Errorf("check: %d %s", code, out)
+	}
+	if code, out := fleetRun("", false, "add", "box", url, "--key-file", keyPath, "--yes"); code != ExitError || !strings.Contains(out, "--replace") {
+		t.Errorf("duplicate add: %d %s", code, out)
+	}
+
+	// A different machine ID is refused until --replace.
+	if err := os.WriteFile(path, []byte(replaceMachineID(string(data))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := fleetRun("", false, "check"); code != ExitError || !strings.Contains(out, "machine identity changed") {
+		t.Errorf("changed identity: %d %s", code, out)
+	}
+	if code, out := fleetRun("", false, "add", "box", url, "--key-file", keyPath, "--tls-fingerprint", a.fp, "--replace"); code != ExitOK {
+		t.Errorf("replace: %d %s", code, out)
+	}
+	if code, _ := fleetRun("", false, "check"); code != ExitOK {
+		t.Error("check after replace failed")
+	}
+
+	// A wrong pin never reaches the agent.
+	if code, out := fleetRun("", false, "add", "evil", url, "--key-file", keyPath, "--tls-fingerprint", strings.Repeat("0", 64)); code != ExitError || !strings.Contains(out, "does not match") {
+		t.Errorf("wrong pin: %d %s", code, out)
+	}
+	// A readable key file is refused.
+	_ = os.Chmod(keyPath, 0o644)
+	if code, out := fleetRun("", false, "add", "loose", url, "--key-file", keyPath, "--yes"); code != ExitError || !strings.Contains(out, "chmod 600") {
+		t.Errorf("readable key: %d %s", code, out)
+	}
+	if code, _ := fleetRun("", false, "remove", "box"); code != ExitOK {
+		t.Error("remove failed")
+	}
+}
+
+func replaceMachineID(yaml string) string {
+	lines := strings.Split(yaml, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "machine_id:") {
+			lines[i] = l[:strings.Index(l, "machine_id:")] + "machine_id: 00000000-0000-4000-8000-000000000000"
+		}
+	}
+	return strings.Join(lines, "\n")
 }
