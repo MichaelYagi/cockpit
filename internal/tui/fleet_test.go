@@ -86,6 +86,7 @@ func TestFleetConsole(t *testing.T) {
 		{Name: "slow", MachineID: id, API: slow},
 		{Name: "broken", Err: "web: open /k.key: no such file or directory"},
 		{Name: "nometrics", MachineID: id, API: &fakeMachine{id: id}},
+		{Name: "newcert", MachineID: id, API: &fakeMachine{err: errors.New(`Get "https://x/api/v1/status": tls: server certificate fingerprint ab does not match the pinned one`)}},
 	}, FleetOptions{Timeout: 50 * time.Millisecond, Now: func() time.Time { return t0 }})
 	f.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	start := time.Now()
@@ -94,9 +95,9 @@ func TestFleetConsole(t *testing.T) {
 		t.Error("a slow machine held up the poll")
 	}
 	out := ansi.Strip(f.render())
-	for _, want := range []string{"COCKPIT FLEET", "7 machines", "1 warning", "web", "OK", "42%", "63%", "91%", "3h", "0s ago",
+	for _, want := range []string{"COCKPIT FLEET", "8 machines", "2 refused", "1 warning", "web", "OK", "42%", "63%", "91%", "3h", "0s ago",
 		"WARNING", "/ is 91% full", "REFUSED", "fleet add moved --replace", "DOWN", "connection refused",
-		"no answer within the timeout", "ERROR", "no such file", "UNKNOWN", "needs metrics:read"} {
+		"no answer within the timeout", "ERROR", "no such file", "UNKNOWN", "needs metrics:read", "certificate changed: cockpit fleet add newcert"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
 		}

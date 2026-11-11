@@ -158,7 +158,18 @@ with checksums and a documented Go SDK is published.
 
 ## Phase 5 — Multi-machine and cross-platform
 
-**Status: in progress.** Decisions D27–D32 proposed.
+**Status: implemented, awaiting review.** Decisions D27–D32 are
+implemented as written, with the clarification noted in D31, and await
+acceptance. Verified:
+
+- on Linux, end to end: TLS init and pinning, and fleet enrollment and
+  identity refusal;
+- on real macOS and Windows CI runners: the conformance suite, collector
+  value checks, and the CLI and agent suites. On Windows that includes an
+  agent reached over its named pipe.
+
+macOS and Windows were never run interactively here, so the TUI on those
+systems is checked only by the same tests.
 
 | # | Milestone | Depends on |
 |---|---|---|
@@ -170,7 +181,7 @@ with checksums and a documented Go SDK is published.
 | 5F ✓ | Platform conformance suite run against every platform's collectors (descriptors, statuses, reasons, cancellation, declared capabilities only); CI on Linux, macOS and Windows | — |
 | 5G ✓ | macOS and Windows collectors (D32) | 5F |
 | 5H ✓ | Windows named-pipe admin transport (D31): listener, client and `--pipe` flag | 5G |
-| 5I | Docs, spec and security review; release `v0.5.0` | all |
+| 5I ✓ | Docs, spec and security review; release `v0.5.0` | all |
 
 **Exit criteria:** remote access with TLS is a two-command setup; one
 console watches many machines without a central server and refuses

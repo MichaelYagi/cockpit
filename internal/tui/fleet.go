@@ -141,6 +141,10 @@ func (f *FleetModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r := f.rows[msg.row]
 		r.inflight = false
 		switch {
+		case msg.err != nil && strings.Contains(msg.err.Error(), "does not match the pinned"):
+			// D30: a changed certificate is an identity change, not an outage.
+			r.identity, r.status, r.health, r.metrics = true, nil, nil, nil
+			r.err = "certificate changed: cockpit fleet add " + r.m.Name + " --replace"
 		case msg.err != nil:
 			r.err = fleetErr(msg.err)
 		case r.m.MachineID != "" && msg.status.MachineID != r.m.MachineID:
