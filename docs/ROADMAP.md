@@ -128,13 +128,12 @@ adjust thresholds, and exports a redacted diagnostic report.
 
 ## Phase 4 — Extensibility
 
-**Status: implemented, awaiting review.** Decisions D22–D26 accepted.
+**Status: done, approved and released as v0.4.0 (PR #5).** Decisions D22–D26 accepted.
 Every milestone below is done and tested. Verified live on WSL2: the
 example extension build, containers (cgroup v2, none running), UPS
 through a fake upsd, and the Python and TypeScript clients. No ZFS pool,
 battery, Intel GPU, real UPS or running containers were available here,
-so those parsers are fixture-tested only. The `v0.4.0` tag is pushed
-after review.
+so those parsers are fixture-tested only. 
 
 | # | Milestone | Depends on |
 |---|---|---|
