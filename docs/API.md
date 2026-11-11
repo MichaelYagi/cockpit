@@ -50,7 +50,7 @@ principal.
 |---|---|---|---|
 | GET | `/livez` | public | `{"status":"ok"}`; no other information |
 | GET | `/openapi.json` | public | The embedded spec |
-| GET | `/status` | `system:read` | Agent version, API version, uptime, collector list (stub in Phase 0) |
+| GET | `/status` | `system:read` | Agent version, API version, uptime, machine ID, collectors and capability states |
 
 ### Phase 1
 
@@ -137,11 +137,12 @@ default (D9). The containing object lists what was withheld:
 
 | HTTP | `code` examples |
 |---|---|
-| 400 | `invalid_request`, `invalid_parameter` |
+| 400 | `invalid_request`, `invalid_parameter`, `invalid_host` (loopback listener received a non-loopback `Host` header) |
 | 401 | `authentication_required`, `invalid_credentials` (missing, malformed, unknown, revoked, and expired keys are indistinguishable to the client) |
 | 403 | `insufficient_scope` |
 | 404 | `not_found` |
 | 409 | `conflict` |
+| 405 | `method_not_allowed` |
 | 413 | `request_too_large` |
 | 429 | `rate_limited` (with `Retry-After`) |
 | 500 | `internal_error` |

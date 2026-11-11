@@ -84,8 +84,12 @@ binary reasonably small and never require a database server.
 
 ```text
 cmd/cockpit/                 # main: delegates to internal/cli
-api/openapi.yaml             # authoritative API contract (embedded and served)
+api/
+  openapi.yaml               # authoritative API contract
+  spec.go                    # package openapi: embeds the spec, converts to JSON
 internal/
+  archtest/                  # tests enforcing the package dependency rules
+  buildinfo/                 # version, commit, API version
   cli/                       # subcommands; the only place that starts an embedded agent
   app/                       # agent wiring and ordered lifecycle
   config/                    # defaults, YAML/env/flags, validation, paths
@@ -100,7 +104,13 @@ internal/
   auth/                      # API keys and scopes (no HTTP)
   storage/sqlite/            # key store (later history), migrations
   history/                   # Phase 3
+  logging/                   # slog setup, secret redaction, UTC timestamps
+  netaddr/                   # loopback classification for listen and Host addresses
+  ulid/                      # request and event IDs
   api/
+    router.go                # route table: every route declares a scope or Public
+    httpx/                   # request context values, JSON and error envelope helpers
+    contracttest/            # test helper: validates traffic against the spec
     server/                  # listeners: Unix socket, TCP, TLS; bind guards
     middleware/              # request ID, recovery, logging, auth, scopes, rate limit, Host check
     handlers/                # thin handlers: decode → service → map → encode
@@ -222,8 +232,8 @@ During implementation:
 - No plugin sandbox or dynamic third-party code loading in the MVP.
 - Keep secrets and real host identifiers out of logs, fixtures, test
   snapshots and error messages.
-- Run `gofmt`, `go vet`, staticcheck and relevant tests.
-- Work from a Linux filesystem path, not `/mnt/c/...` under WSL.
+- Run `make check` (gofmt, vet, staticcheck, race tests, cross-compile)
+  and `make vuln`.
 
 Before completing a task:
 

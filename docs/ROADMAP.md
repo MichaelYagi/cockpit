@@ -10,6 +10,10 @@ Each phase requires review and approval before the next one starts.
 
 ## Phase 0 — Foundation
 
+**Status: implemented, awaiting review.** All milestones below are done and
+every exit criterion has been checked with tests and against the built
+binary.
+
 Goal: a running, well-structured agent skeleton with configuration,
 logging, lifecycle, both listeners, the API conventions, and CI. No real
 collectors yet.

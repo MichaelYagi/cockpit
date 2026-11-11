@@ -66,6 +66,20 @@ reported as passing only after it was actually run.
   tests.
 - No real host identifiers, keys or secrets in fixtures or golden files.
   Test keys are generated at runtime.
-- Do not develop or run tests from a Windows-mounted path under WSL
-  (`/mnt/c/...`): file modes and SQLite locking do not behave like Linux
-  there.
+- Tests create files, sockets and databases under the OS temp directory,
+  never in the repository. Socket tests use short `os.MkdirTemp` paths
+  because Unix socket paths are limited to 107 bytes.
+- Working from a WSL2 checkout on a Windows drive (`/mnt/c/...`) is
+  supported. Unix permission tests need that drive mounted with the
+  `metadata` option (set in `/etc/wsl.conf`).
+- `internal/archtest` inspects packages through `go list`; it stats source
+  files so Go's test cache invalidates when imports change.
+
+## 6. Commands
+
+| Command | Runs |
+|---|---|
+| `make check` | gofmt check, `go vet`, staticcheck, `go test -race`, cross-compile + vet for linux/amd64, linux/arm64, darwin/arm64, windows/amd64 |
+| `make test` | `go test ./...` |
+| `make test-integration` | Tests with the `integration` build tag |
+| `make vuln` | govulncheck |

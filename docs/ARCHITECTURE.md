@@ -178,28 +178,39 @@ defaults.
 - **No secrets** in the YAML. TLS key and certificate are file paths whose
   permissions are checked at startup.
 - Remote (non-loopback) TCP binding without TLS is a startup error.
+- The socket's parent directory must be private (`0700` user mode, `0750`
+  system mode) and owned by the agent's user. A custom `api.socket.path`
+  in a shared directory such as `/tmp` is refused.
 - No hot reload in the MVP.
 
-Initial shape (illustrative):
+Current schema (Phase 0) with defaults. Run `cockpit config check` to print
+the effective configuration. Sections marked *Phase 1* are planned and are
+rejected by the strict decoder until implemented.
 
 ```yaml
+agent:
+  state_dir: ""                # default: per mode (see DECISIONS D1)
+  runtime_dir: ""              # default: per mode; holds the socket
+  shutdown_timeout: 10s
 api:
-  socket: auto                 # auto | path | disabled
+  socket:
+    enabled: true
+    path: ""                   # default: <runtime_dir>/agent.sock
   tcp:
     enabled: true
     address: 127.0.0.1:7878
   tls:
     cert_file: ""
     key_file: ""
-  rate_limit: { per_key_rps: 20, burst: 40 }
+  # rate_limit: { per_key_rps: 20, burst: 40 }      # Phase 1
 collection:
   defaults: { interval: 2s, timeout: 1s }
   collectors:
     linux.smart: { interval: 1h, timeout: 30s }
-health:
-  storage:  { warn_percent: 85, critical_percent: 95 }
-  memory:   { warn_available_percent: 10, critical_available_percent: 5 }
-  cpu_temperature: { warn_celsius: 85, critical_celsius: 95 }  # used only when hardware limits are not exposed
+# health:                                           # Phase 1
+#   storage:  { warn_percent: 85, critical_percent: 95 }
+#   memory:   { warn_available_percent: 10, critical_available_percent: 5 }
+#   cpu_temperature: { warn_celsius: 85, critical_celsius: 95 }
 logging:
   level: info
   format: text                 # text | json

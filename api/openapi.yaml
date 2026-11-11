@@ -1,0 +1,225 @@
+openapi: 3.1.0
+info:
+  title: Cockpit API
+  version: "1.0.0-phase0"
+  summary: Read-only machine monitoring API served by the Cockpit agent.
+  description: |
+    This document is the authoritative contract for the Cockpit API (D6).
+
+    Transports:
+    - Unix socket: callers are the local administrator; no API key is used.
+    - TCP: every request except those marked public requires
+      `Authorization: Bearer ckp_...`, including from localhost.
+
+    Every response carries an `X-Request-ID` header. Timestamps are UTC
+    RFC 3339. Operations declare their required scope in `x-cockpit-scope`
+    (`public` means no authentication).
+  license:
+    name: TBD
+servers:
+  - url: http://127.0.0.1:7878
+    description: Default loopback listener
+security:
+  - apiKey: []
+tags:
+  - name: meta
+    description: Liveness, specification and agent status.
+paths:
+  /api/v1/livez:
+    get:
+      operationId: getLivez
+      tags: [meta]
+      summary: Liveness probe
+      description: Reports that the agent is serving requests. Reveals nothing else.
+      security: []
+      x-cockpit-scope: public
+      responses:
+        "200":
+          description: The agent is serving requests.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Livez" }
+              example: { status: ok }
+        "400": { $ref: "#/components/responses/InvalidHost" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/openapi.json:
+    get:
+      operationId: getOpenAPI
+      tags: [meta]
+      summary: This specification as JSON
+      security: []
+      x-cockpit-scope: public
+      responses:
+        "200":
+          description: The OpenAPI document.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/InvalidHost" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/status:
+    get:
+      operationId: getStatus
+      tags: [meta]
+      summary: Agent status and collector capabilities
+      x-cockpit-scope: system:read
+      responses:
+        "200":
+          description: Agent status.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+              example:
+                schema_version: "1"
+                machine_id: 3f0c6c1e-8f5b-4d4e-9a57-2b1d2a2f9b10
+                generated_at: "2026-11-11T15:30:00Z"
+                agent:
+                  version: v0.1.0
+                  api_version: v1
+                  started_at: "2026-11-11T15:00:00Z"
+                  uptime_seconds: 1800
+                collectors:
+                  - id: unsupported.platform
+                    version: 1.0.0
+                    capabilities:
+                      - name: cpu.usage
+                        status: unsupported
+                        reason: Cockpit has no collectors for windows yet.
+        "400": { $ref: "#/components/responses/InvalidHost" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: A Cockpit API key (`ckp_<id>_<secret>`). Never send keys in URLs.
+  headers:
+    RequestID:
+      description: Unique ID for this request; also present in error bodies and agent logs.
+      required: true
+      schema: { type: string, pattern: "^req_[0-9A-HJKMNP-TV-Z]{26}$" }
+  responses:
+    InvalidHost:
+      description: The Host header does not name a loopback address (loopback listeners only).
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Unauthorized:
+      description: The API key is missing or invalid. Missing, malformed, unknown, revoked and expired keys are indistinguishable.
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestID" }
+        WWW-Authenticate:
+          required: true
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Forbidden:
+      description: The API key lacks the required scope.
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    InternalError:
+      description: An unexpected error occurred. Details are logged by the agent, never returned.
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  schemas:
+    SchemaVersion:
+      type: string
+      const: "1"
+    MachineID:
+      description: Random identifier created by the agent; not derived from host identifiers.
+      type: string
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    Timestamp:
+      type: string
+      format: date-time
+    Availability:
+      type: string
+      enum: [available, unsupported, permission_denied, temporarily_unavailable, not_configured]
+    Livez:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, const: ok }
+    Status:
+      type: object
+      additionalProperties: false
+      required: [schema_version, machine_id, generated_at, agent, collectors]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        agent: { $ref: "#/components/schemas/Agent" }
+        collectors:
+          type: array
+          items: { $ref: "#/components/schemas/Collector" }
+    Agent:
+      type: object
+      additionalProperties: false
+      required: [version, api_version, started_at, uptime_seconds]
+      properties:
+        version: { type: string }
+        api_version: { type: string, const: v1 }
+        started_at: { $ref: "#/components/schemas/Timestamp" }
+        uptime_seconds: { type: number, minimum: 0 }
+    Collector:
+      type: object
+      additionalProperties: false
+      required: [id, version, capabilities]
+      properties:
+        id: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9_]*)+$" }
+        version: { type: string }
+        capabilities:
+          type: array
+          items: { $ref: "#/components/schemas/Capability" }
+    Capability:
+      type: object
+      additionalProperties: false
+      required: [name, status]
+      properties:
+        name: { type: string, examples: [cpu.usage] }
+        status: { $ref: "#/components/schemas/Availability" }
+        reason:
+          type: string
+          description: Safe, human-readable explanation; present when status is not available.
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_request
+                - invalid_host
+                - authentication_required
+                - invalid_credentials
+                - insufficient_scope
+                - not_found
+                - method_not_allowed
+                - request_too_large
+                - internal_error
+            message: { type: string }
+            request_id: { type: string }
