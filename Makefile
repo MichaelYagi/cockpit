@@ -63,7 +63,7 @@ dist:
 		name=cockpit_$(VERSION)_linux_$$arch; stage=dist/$$name; \
 		mkdir -p $$stage && \
 		GOOS=linux GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $$stage/cockpit ./cmd/cockpit && \
-		cp -R deploy docs README.md CHANGELOG.md $$stage/ && rm -f $$stage/deploy/*.go && \
+		cp -R deploy docs README.md CHANGELOG.md LICENSE $$stage/ && rm -f $$stage/deploy/*.go && \
 		tar -C dist --owner=0 --group=0 --sort=name -czf dist/$$name.tar.gz $$name && rm -rf $$stage || exit 1; \
 	done
 	cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS

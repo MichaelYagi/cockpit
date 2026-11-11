@@ -117,3 +117,7 @@ history, and extension collectors compiled in through a public SDK
 - [Setup and usage](docs/SETUP.md)
 - [Testing strategy](docs/TESTING.md)
 - [Roadmap](docs/ROADMAP.md)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
