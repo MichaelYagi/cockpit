@@ -220,7 +220,8 @@ Visual language:
   instead of a broken layout.
 
 Navigation: Overview, Hardware, Performance, Health, Storage, Network,
-Processes, Services, Events / Logs, API Access, Settings. Screens without
+Processes (with a Containers view, `c`), Services, Events / Logs, API
+Access, Settings. Screens without
 an implementation are hidden, not shown empty (all are implemented as of
 Phase 3).
 

@@ -447,9 +447,12 @@ to the Docker or Podman API socket: access to that socket is equivalent to
 root, and the agent must not hold it. Containers are identified by
 runtime and short ID; names and images are reported as unavailable with
 that reason. `GET /containers` requires `processes:read` (D14), because a
-container list reveals running software in the same way. The TUI gains a
-Containers screen, hidden when no containers are found. cgroup v1 hosts
+container list reveals running software in the same way. cgroup v1 hosts
 report `unsupported`.
+
+*Clarification (4E):* in the TUI, containers are a view of the Processes
+screen (`c` toggles it) rather than a separate tab. A twelfth tab does not
+fit an 80-column tab bar, and the view needs the same scope.
 
 **Why.** Per-container resource use is the most asked-for addition and
 cgroup v2 provides it without privileges. See Q8 for names and images.

@@ -81,7 +81,8 @@ API like any other client.
 4. Health: thermal state, storage health, memory pressure, findings.
 5. Storage: devices, filesystems, capacity, SMART/NVMe when available.
 6. Network: interfaces, addresses, throughput, errors.
-7. Processes: process list and usage, subject to permissions.
+7. Processes: process list and usage, subject to permissions; containers
+   from cgroup v2.
 8. Services: systemd service state.
 9. Events: health findings and system events over time.
 10. API Access: server status, keys, scopes, clients, request statistics.

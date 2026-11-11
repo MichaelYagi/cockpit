@@ -123,7 +123,10 @@ func (m *Model) footer(w int) string {
 	case scrAccess:
 		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "? help", "q quit"}
 	case scrProcesses:
-		hints = []string{"s sort:" + processSorts[m.procSort], "/ search", "k kernel threads", "esc clear", "q quit"}
+		hints = []string{"s sort:" + processSorts[m.procSort], "/ search", "k kernel threads", "c containers", "q quit"}
+		if m.procContainers {
+			hints = []string{"c processes", "tab next", "r refresh", "? help", "q quit"}
+		}
 		if m.searching {
 			hints = []string{"type to search", "enter done", "esc clear"}
 		}
@@ -852,6 +855,7 @@ func (m *Model) helpView(w, h int) string {
 		sBold.Render("Processes"),
 		kv("s", "change sort") + "        " + kv("/", "search"),
 		kv("k", "kernel threads") + "     " + kv("esc", "clear search"),
+		kv("c", "containers / processes"),
 		"",
 		sBold.Render("Performance · Events · Settings"),
 		kv("t", "chart range") + "        " + kv("v", "event severity") + "    " + kv("m", "older events"),
@@ -1019,6 +1023,9 @@ func (m *Model) hardwareScreen(w, h int) string {
 }
 
 func (m *Model) processesScreen(w, h int) string {
+	if m.procContainers {
+		return m.containersView(w, h)
+	}
 	inner := w - 4
 	title := "Processes · sorted by " + processSorts[m.procSort]
 	if m.procSearch != "" || m.searching {
@@ -1552,4 +1559,55 @@ func (m *Model) customBox(w int) (box, bool) {
 		}
 	}
 	return box{title: "Extension metrics", lines: lines}, true
+}
+
+// containersView lists containers found through cgroup v2 (D24).
+func (m *Model) containersView(w, h int) string {
+	inner := w - 4
+	title := "Containers"
+	var lines []string
+	switch {
+	case m.containersErr != "":
+		lines = []string{sCrit.Render("✖ " + m.containersErr)}
+		if strings.Contains(m.containersErr, "processes:read") {
+			lines = append(lines, sMuted.Render("Create a key with the processes:read scope, or use the local admin socket."))
+		}
+	case m.containers == nil:
+		lines = waiting()
+	case m.containers.Containers.Data == nil:
+		lines = unavailable(m.containers.Containers, inner)
+	case len(m.containers.Containers.Data.Items) == 0:
+		lines = []string{sMuted.Render("No Docker, Podman, containerd or CRI-O containers are running.")}
+	default:
+		d := m.containers.Containers.Data
+		title = fmt.Sprintf("Containers · %d running", d.Total)
+		opt := func(v *uint64, f func(uint64) string) string {
+			if v == nil {
+				return "—"
+			}
+			return f(*v)
+		}
+		lines = append(lines, sMuted.Render(pad("RUNTIME", 11)+pad("ID", 14)+padLeft("CPU%", 7)+padLeft("MEMORY", 11)+padLeft("LIMIT", 11)+
+			padLeft("READ/s", 11)+padLeft("WRITE/s", 11)+padLeft("PIDS", 6)+"  "+"OWNER"))
+		for _, c := range d.Items {
+			cpu, cl := "—", lvNeutral
+			if c.CPUPercent != nil {
+				cpu = fmt.Sprintf("%.1f", *c.CPUPercent)
+				cl = percentLevel(*c.CPUPercent, 50, 90)
+			}
+			owner := "root"
+			if c.UID != nil {
+				owner = fmt.Sprintf("uid %d (rootless)", *c.UID)
+			}
+			limit := "none"
+			if c.MemoryLimitBytes != nil {
+				limit = bytes(*c.MemoryLimitBytes)
+			}
+			lines = append(lines, pad(c.Runtime, 11)+pad(c.ID[:min(12, len(c.ID))], 14)+cl.style().Render(padLeft(cpu, 7))+
+				padLeft(opt(c.MemoryBytes, bytes), 11)+padLeft(limit, 11)+padLeft(rate(c.IOReadBytesPerSecond), 11)+padLeft(rate(c.IOWriteBytesPerSecond), 11)+
+				padLeft(opt(c.PIDs, func(n uint64) string { return strconv.FormatUint(n, 10) }), 6)+"  "+owner)
+		}
+		lines = append(lines, sMuted.Render(truncate("CPU % of one core · "+d.NamesReason, inner)))
+	}
+	return column([]box{{title: title, lines: lines, flex: true}}, w, h)
 }

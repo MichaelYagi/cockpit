@@ -110,3 +110,28 @@ func TestGenericMetricsWithoutRecordGoUnavailable(t *testing.T) {
 		return len(s.Custom) == 1 && s.Custom[0].Meta.Status == core.TemporarilyUnavailable
 	})
 }
+
+func TestContainerRates(t *testing.T) {
+	f := fast(collectortest.New("test.containers", core.CapContainers))
+	base := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	var n atomic.Uint64
+	f.CollectFunc = func(context.Context) collector.Result {
+		i := n.Add(1)
+		io := i * 1000
+		return collector.Result{
+			CollectedAt: base.Add(time.Duration(i) * 2 * time.Second),
+			Records: []core.Record{core.ContainerSamples{{Runtime: "docker", ID: strings.Repeat("a", 64), UID: -1,
+				CPUUsageUsec: i * 1_000_000, IOReadBytes: &io}}}, // one CPU-second per 2 s: 50%
+			Status: map[core.Capability]core.CapabilityStatus{core.CapContainers: {Availability: core.Available}},
+		}
+	}
+	e := newEngine(t, f)
+	e.Start(context.Background())
+	s := waitFor(t, e, func(s *core.Snapshot) bool {
+		return s.Containers.Data != nil && len(*s.Containers.Data) == 1 && (*s.Containers.Data)[0].CPUPercent != nil
+	})
+	c := (*s.Containers.Data)[0]
+	if *c.CPUPercent != 50 || *c.IOReadBytesPerSecond != 500 || c.IOWriteBytesPerSecond != nil || c.WindowSeconds != 2 {
+		t.Errorf("rates %+v cpu=%v io=%v", c, *c.CPUPercent, *c.IOReadBytesPerSecond)
+	}
+}

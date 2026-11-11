@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,5 +160,25 @@ func TestExtractCustomMetrics(t *testing.T) {
 		if u := Unit(series); u != unit {
 			t.Errorf("Unit(%s) = %q, want %q", series, u, unit)
 		}
+	}
+}
+
+func TestExtractBusiestContainers(t *testing.T) {
+	var cs []core.ContainerMetrics
+	for i := 0; i < 8; i++ {
+		id := strings.Repeat(string(rune('a'+i)), 64)
+		c := core.ContainerMetrics{ContainerSample: core.ContainerSample{Runtime: "docker", ID: id, MemoryBytes: ptr(uint64(i))}, CPUPercent: ptr(float64(i))}
+		cs = append(cs, c)
+	}
+	cs = append(cs, core.ContainerMetrics{ContainerSample: core.ContainerSample{Runtime: "podman", ID: strings.Repeat("z", 64)}}) // no rate yet
+	got := Extract(&core.Snapshot{Containers: core.Section[[]core.ContainerMetrics]{Meta: meta(), Data: &cs}}, t0)
+	if len(got) != 2*HistoryContainers {
+		t.Errorf("series %v", got)
+	}
+	if got["containers.docker.hhhhhhhhhhhh.cpu_percent"] != 7 || got["containers.docker.dddddddddddd.memory_bytes"] != 3 {
+		t.Errorf("busiest missing: %v", got)
+	}
+	if _, ok := got["containers.docker.aaaaaaaaaaaa.cpu_percent"]; ok {
+		t.Error("idle container recorded")
 	}
 }

@@ -36,7 +36,7 @@ Keys are never accepted in URLs or query strings.
 | *(public)* | `GET /livez`, `GET /openapi.json` |
 | `system:read` | `/status`, `/system`, `/hardware`, `/services`, `/report` (metric parts need `metrics:read` too) |
 | `metrics:read` | `/metrics`, `/metrics/history…`, `/storage`, `/network`, `/sensors`, `/health`, `/events`, `/events/stream` |
-| `processes:read` | `/processes` (D14) |
+| `processes:read` | `/processes` (D14), `/containers` (D24) |
 | `admin` | `/keys…`, `/settings`, privileged fields in `/status` and `/report` |
 
 No scope implies another (D8). Keys may hold `system:read`,
@@ -90,6 +90,7 @@ principal.
 | Method | Path | Scope | Description |
 |---|---|---|---|
 | GET | `/status` | `system:read` | Collectors now carry `external` (built with the collector SDK, D23) and `sdk_version` |
+| GET | `/containers` | `processes:read` | Docker, Podman (rootful and rootless), containerd and CRI-O containers from cgroup v2, busiest first, at most 500: CPU % of one core, memory and limit, I/O rates, PIDs, rootless owner. No names or images (D24) |
 | GET | `/metrics?sections=custom` | `metrics:read` | Generic metrics from extension collectors (D22): one set per collector with availability, `dropped_series` and `problem`; each metric has `name`, `kind`, `unit`, `labels`, `value`, and for counters `rate_per_second` and `rate_unit` |
 
 WebSocket is not planned: all streaming is server-to-client, which SSE

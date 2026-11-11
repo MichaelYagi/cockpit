@@ -154,6 +154,7 @@ A collector declares what it can **potentially** provide. `Probe` and each
 | `linux.usb` | 2 | `hardware.usb` | `/sys/bus/usb`, `usb.ids` when installed |
 | `linux.dmi` | 2 | `hardware.board`, `hardware.memory_modules` | `/sys/class/dmi/id`, SMBIOS type 17 (root-only) |
 | `linux.gpu` | 2 | `gpu.devices`, `gpu.metrics` | PCI/DRM; `nvidia-smi` CSV query; `amdgpu` sysfs (D16); at least every 5s |
+| `linux.containers` | 4 | `containers.list` | cgroup v2: `cpu.stat`, `memory.current`/`max`, `io.stat`, `pids.current` of Docker, Podman, containerd and CRI-O scopes; bounded walk, at most 500 containers, every 5s |
 | `linux.netconfig` | 2 | `network.routes`, `network.dns` | `/proc/net/route`, `/proc/net/ipv6_route`, `resolv.conf` |
 
 Filesystem collection skips pseudo, in-memory and image filesystems

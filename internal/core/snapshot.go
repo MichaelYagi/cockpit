@@ -53,6 +53,7 @@ type Snapshot struct {
 	GPUs           Section[GPUs]
 	Routes         Section[Routes]
 	DNS            Section[DNSConfig]
+	Containers     Section[[]ContainerMetrics]
 
 	// Custom holds generic metrics, one set per collector that reports
 	// them (D22), in collector order.

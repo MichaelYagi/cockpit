@@ -21,6 +21,7 @@ type API interface {
 	System(ctx context.Context) (*apiv1.SystemResponse, error)
 	Hardware(ctx context.Context) (*apiv1.HardwareResponse, error)
 	Metrics(ctx context.Context, sections ...string) (*apiv1.MetricsResponse, error)
+	Containers(ctx context.Context) (*apiv1.ContainersResponse, error)
 	Storage(ctx context.Context) (*apiv1.StorageResponse, error)
 	Health(ctx context.Context) (*apiv1.HealthResponse, error)
 	Events(ctx context.Context, q client.EventsQuery) (*apiv1.EventsResponse, error)
@@ -164,8 +165,12 @@ type Model struct {
 	procSort   int
 	procSearch string
 	procKernel bool
-	svcFailed  bool // show failed services only
-	searching  bool
+	// procContainers shows containers instead of processes (c).
+	procContainers bool
+	containers     *apiv1.ContainersResponse
+	containersErr  string
+	svcFailed      bool // show failed services only
+	searching      bool
 
 	cpuHist, memHist, rxHist, txHist []float64
 
@@ -264,6 +269,10 @@ func (m *Model) refresh(all bool) tea.Cmd {
 	case scrNetwork:
 		cmds = append(cmds, m.fetch("network", wrap(m.api.Network)))
 	case scrProcesses:
+		if m.procContainers {
+			cmds = append(cmds, m.fetch("containers", wrap(m.api.Containers)))
+			break
+		}
 		q := client.ProcessesQuery{Sort: processSorts[m.procSort], Search: m.procSearch, KernelThreads: m.procKernel, Limit: max(10, m.height)}
 		cmds = append(cmds, m.fetch("processes", wrap(func(ctx context.Context) (*apiv1.ProcessesResponse, error) {
 			return m.api.Processes(ctx, q)
@@ -423,6 +432,9 @@ func (m *Model) apply(r resultMsg) {
 		case "processes":
 			m.procsErr = errText(r.err)
 			return
+		case "containers":
+			m.containersErr = errText(r.err)
+			return
 		case "services":
 			m.svcErr = errText(r.err)
 			return
@@ -479,6 +491,8 @@ func (m *Model) apply(r resultMsg) {
 		}
 	case *apiv1.ProcessesResponse:
 		m.procs, m.procsErr = v, ""
+	case *apiv1.ContainersResponse:
+		m.containers, m.containersErr = v, ""
 	case *apiv1.ServicesResponse:
 		m.services, m.svcErr = v, ""
 	case *apiv1.NetworkResponse:
@@ -602,6 +616,16 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	case scrAccess:
 		return m.accessKey(s)
 	case scrProcesses:
+		if s == "c" {
+			m.procContainers = !m.procContainers
+			if m.procContainers {
+				return m.refetch("containers")
+			}
+			return m.refetch("processes")
+		}
+		if m.procContainers {
+			break
+		}
 		switch s {
 		case "s":
 			m.procSort = (m.procSort + 1) % len(processSorts)

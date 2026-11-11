@@ -31,6 +31,7 @@ const (
 	secGPUs
 	secRoutes
 	secDNS
+	secContainers
 	numSections
 )
 
@@ -55,6 +56,7 @@ var sectionCaps = [numSections][]core.Capability{
 	secGPUs:           {core.CapGPUDevices},
 	secRoutes:         {core.CapNetworkRoutes},
 	secDNS:            {core.CapNetworkDNS},
+	secContainers:     {core.CapContainers},
 }
 
 func sectionOf(r core.Record) (section, bool) {
@@ -95,6 +97,8 @@ func sectionOf(r core.Record) (section, bool) {
 		return secRoutes, true
 	case *core.DNSConfig:
 		return secDNS, true
+	case core.ContainerSamples:
+		return secContainers, true
 	}
 	return 0, false
 }
@@ -128,6 +132,8 @@ type aggregator struct {
 	prevCPUAt time.Time
 	prevNet   map[string]core.NetInterface
 	prevNetAt time.Time
+	prevCtr   map[string]core.ContainerSample
+	prevCtrAt time.Time
 
 	degraded map[string]bool  // "collector|capability" currently degraded
 	pending  map[*runner]bool // scheduled collectors that have not reported yet
@@ -301,6 +307,9 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 	case core.MemoryModules:
 		c := append(core.MemoryModules(nil), v...)
 		return &c
+	case core.ContainerSamples:
+		m := a.containers(v, at)
+		return &m
 	case core.GPUs:
 		c := append(core.GPUs(nil), v...)
 		return &c
@@ -424,6 +433,7 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.GPUs = sec[core.GPUs](a, secGPUs)
 	snap.Routes = sec[core.Routes](a, secRoutes)
 	snap.DNS = sec[core.DNSConfig](a, secDNS)
+	snap.Containers = sec[[]core.ContainerMetrics](a, secContainers)
 
 	for _, r := range a.e.runners {
 		if cs := a.custom[r]; cs != nil {
@@ -475,4 +485,36 @@ func (a *aggregator) transitions(r *runner, before, after map[core.Capability]co
 				Subject: "collector:" + r.desc.ID, Message: string(c) + " is available again"})
 		}
 	}
+}
+
+// containers derives CPU and I/O rates per container ID.
+func (a *aggregator) containers(cur core.ContainerSamples, at time.Time) []core.ContainerMetrics {
+	window := 0.0
+	if a.prevCtr != nil && at.After(a.prevCtrAt) {
+		window = at.Sub(a.prevCtrAt).Seconds()
+	}
+	rate := func(now, before *uint64) *float64 {
+		if now == nil || before == nil || *now < *before || window <= 0 {
+			return nil
+		}
+		v := float64(*now-*before) / window
+		return &v
+	}
+	out := make([]core.ContainerMetrics, len(cur))
+	next := make(map[string]core.ContainerSample, len(cur))
+	for i, c := range cur {
+		out[i] = core.ContainerMetrics{ContainerSample: c}
+		if p, ok := a.prevCtr[c.ID]; ok && window > 0 {
+			out[i].WindowSeconds = window
+			if c.CPUUsageUsec >= p.CPUUsageUsec {
+				v := float64(c.CPUUsageUsec-p.CPUUsageUsec) / 1e6 / window * 100
+				out[i].CPUPercent = &v
+			}
+			out[i].IOReadBytesPerSecond = rate(c.IOReadBytes, p.IOReadBytes)
+			out[i].IOWriteBytesPerSecond = rate(c.IOWriteBytes, p.IOWriteBytes)
+		}
+		next[c.ID] = c
+	}
+	a.prevCtr, a.prevCtrAt = next, at
+	return out
 }

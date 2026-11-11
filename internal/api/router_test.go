@@ -129,6 +129,10 @@ func testSnapshot() *core.Snapshot {
 			{Name: "backup.service", Description: "Nightly backup", LoadState: "loaded", ActiveState: "failed", SubState: "failed"},
 			{Name: "ssh.service", Description: "OpenSSH", LoadState: "loaded", ActiveState: "active", SubState: "running"},
 		}},
+		Containers: core.Section[[]core.ContainerMetrics]{Meta: meta(), Data: &[]core.ContainerMetrics{
+			{ContainerSample: core.ContainerSample{Runtime: "docker", ID: strings.Repeat("a", 64), UID: -1, CPUUsageUsec: 10, MemoryBytes: ptr(uint64(1 << 20))}},
+			{ContainerSample: core.ContainerSample{Runtime: "podman", ID: strings.Repeat("b", 64), Rootless: true, UID: 1000}, CPUPercent: ptr(12.5)},
+		}},
 		Custom: []core.CustomSet{
 			{Collector: "custom.demo", Meta: meta(), Dropped: 1, Problem: "metric \"x\" has an unknown unit", Metrics: []core.CustomMetric{
 				{Name: "custom.demo.open", Kind: core.Gauge, Unit: "count", Value: 42},
@@ -296,6 +300,8 @@ func TestContract(t *testing.T) {
 		{"metrics subset", tcp, "GET", "/api/v1/metrics?sections=cpu,memory", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"metrics gpu", tcp, "GET", "/api/v1/metrics?sections=gpu", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"metrics custom", tcp, "GET", "/api/v1/metrics?sections=custom", []reqOpt{bearer(metricsKey)}, 200, ""},
+		{"containers", sock, "GET", "/api/v1/containers", nil, 200, ""},
+		{"containers need processes scope", tcp, "GET", "/api/v1/containers", []reqOpt{bearer(metricsKey)}, 403, apiv1.CodeInsufficientScope},
 		{"metrics bad section", tcp, "GET", "/api/v1/metrics?sections=cpu,tpu", []reqOpt{bearer(metricsKey)}, 400, apiv1.CodeInvalidParameter},
 		{"metrics needs metrics scope", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(systemKey)}, 403, apiv1.CodeInsufficientScope},
 		{"storage", tcp, "GET", "/api/v1/storage", []reqOpt{bearer(metricsKey)}, 200, ""},
@@ -777,5 +783,21 @@ func TestCustomMetricsContent(t *testing.T) {
 	}
 	if sets[1].Data != nil || sets[1].Status != "permission_denied" || sets[1].Reason == "" {
 		t.Errorf("unavailable set %+v", sets[1])
+	}
+}
+
+func TestContainersContent(t *testing.T) {
+	e := newEnv(t, nil)
+	r := do(t, router(t, e.d, Options{Listener: ListenerSocket}), "GET", "/api/v1/containers")
+	var out apiv1.ContainersResponse
+	if err := json.Unmarshal(r.body, &out); err != nil || out.Containers.Data == nil {
+		t.Fatalf("%v %s", err, r.body)
+	}
+	l := out.Containers.Data
+	if l.Total != 2 || l.Items[0].Runtime != "podman" || *l.Items[0].CPUPercent != 12.5 || *l.Items[0].UID != 1000 || !l.Items[0].Rootless {
+		t.Errorf("busiest first, rootless owner: %+v", l.Items[0])
+	}
+	if l.Items[1].UID != nil || *l.Items[1].MemoryBytes != 1<<20 || l.Items[1].CPUPercent != nil || l.NamesReason == "" {
+		t.Errorf("second %+v", l.Items[1])
 	}
 }

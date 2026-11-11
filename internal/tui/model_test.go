@@ -48,6 +48,14 @@ type fakeAPI struct {
 
 	procQueries []client.ProcessesQuery
 	custom      *[]apiv1.CustomMetricsSet
+	containers  *apiv1.ContainersResponse
+}
+
+func (f *fakeAPI) Containers(context.Context) (*apiv1.ContainersResponse, error) {
+	if f.containers == nil {
+		return nil, &client.APIError{StatusCode: 403, Code: apiv1.CodeInsufficientScope, Message: "This key does not have the processes:read scope."}
+	}
+	return f.containers, nil
 }
 
 var errDown = errors.New("dial unix /run/x.sock: connect: no such file or directory")
@@ -1007,5 +1015,38 @@ func TestExtensionMetricsPanel(t *testing.T) {
 	}
 	if strings.Contains(m.View().Content, "\x1b[31m") || strings.Contains(m.View().Content, "\x1b]0;") {
 		t.Error("escape sequence from a label reached the terminal")
+	}
+}
+
+func TestContainersView(t *testing.T) {
+	limit := uint64(512 << 20)
+	api := &fakeAPI{containers: &apiv1.ContainersResponse{Containers: avail(apiv1.ContainerList{Total: 2, NamesReason: "Names come from the engine socket.", Items: []apiv1.Container{
+		{Runtime: "docker", ID: strings.Repeat("a", 64), CPUPercent: ptr(75.0), MemoryBytes: ptr(uint64(100 << 20)), MemoryLimitBytes: &limit, PIDs: ptr(uint64(7)),
+			IOReadBytesPerSecond: ptr(2048.0)},
+		{Runtime: "podman", ID: strings.Repeat("b", 64), Rootless: true, UID: ptr(1000)},
+	}})}}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrProcesses))
+	press(t, m, "c")
+	out := screenText(m)
+	for _, want := range []string{"Containers · 2 running", "docker", "aaaaaaaaaaaa", "75.0", "100.0 MiB", "512.0 MiB", "2.0 KiB/s", "uid 1000 (rootless)",
+		"Names come from", "c processes"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, strings.Repeat("a", 13)) {
+		t.Error("full container ID shown")
+	}
+	press(t, m, "c")
+	if !strings.Contains(screenText(m), "Processes · sorted by") {
+		t.Error("c did not return to processes")
+	}
+
+	denied := setup(t, &fakeAPI{}, 120, 40)
+	press(t, denied, key(scrProcesses))
+	press(t, denied, "c")
+	if out := screenText(denied); !strings.Contains(out, "processes:read") {
+		t.Errorf("scope error not shown:\n%s", out)
 	}
 }

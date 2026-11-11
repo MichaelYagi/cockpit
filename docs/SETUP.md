@@ -50,6 +50,7 @@ programs, run the agent separately:
 | `↑`/`↓` (API Access) | Select a key |
 | `n` / `o` / `x` (API Access) | Create / rotate / revoke a key |
 | `s` / `/` / `k` (Processes) | Change sort / search / show kernel threads |
+| `c` (Processes) | Switch between processes and containers |
 | `f` (Services) | Failed services only / all |
 | `t` (Performance) | Chart range: 1h, 6h, 24h, 7d |
 | `v` / `m` (Events) | Minimum severity: all, warning, critical / load older events |
@@ -262,6 +263,9 @@ Unavailable data is reported with a reason, never as an error:
 | Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
 | Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
 | Services | Not running systemd | Nothing; other features still work |
+| Containers | cgroup v1 host | Containers are found only through cgroup v2 |
+| Container names and images | Never shown | They come from the engine's API socket, which is root-equivalent and not used (D24) |
+| Container memory or I/O (rootless) | Controller not delegated to the user | Enable cgroup delegation for the user's systemd instance |
 | Processes (partial) | `/proc` mounted with `hidepid` | Run the agent with access to other users' processes, if appropriate |
 
 ## Choosing filesystems

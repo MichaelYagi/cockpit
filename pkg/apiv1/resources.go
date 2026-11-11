@@ -682,3 +682,32 @@ type ReportOmission struct {
 
 // ReportFormats are the values of the report format parameter.
 var ReportFormats = []string{"json", "markdown"}
+
+// ContainersResponse is GET /containers (D24).
+type ContainersResponse struct {
+	Meta
+	Containers Section[ContainerList] `json:"containers"`
+}
+
+// ContainerList is every container found, busiest first.
+type ContainerList struct {
+	Total int         `json:"total"`
+	Items []Container `json:"items"`
+	// NamesReason explains why names and images are not reported.
+	NamesReason string `json:"names_reason"`
+}
+
+// Container is one container's resource use. Pointer fields are null when
+// the cgroup controller is not enabled for it, or on the first sample.
+type Container struct {
+	Runtime               string   `json:"runtime"` // docker | podman | containerd | cri-o
+	ID                    string   `json:"id"`
+	Rootless              bool     `json:"rootless"`
+	UID                   *int     `json:"uid"` // owner of a rootless container
+	CPUPercent            *float64 `json:"cpu_percent"`
+	MemoryBytes           *uint64  `json:"memory_bytes"`
+	MemoryLimitBytes      *uint64  `json:"memory_limit_bytes"`
+	IOReadBytesPerSecond  *float64 `json:"io_read_bytes_per_second"`
+	IOWriteBytesPerSecond *float64 `json:"io_write_bytes_per_second"`
+	PIDs                  *uint64  `json:"pids"`
+}

@@ -511,6 +511,31 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/containers:
+    get:
+      operationId: listContainers
+      tags: [machine]
+      summary: Containers and their resource use
+      description: >-
+        Docker, Podman (rootful and rootless), containerd and CRI-O containers
+        found in the cgroup v2 hierarchy, busiest first, at most 500 (D24).
+        CPU percent is of one core. Names and images are not reported:
+        they come from the container engine's API socket, which Cockpit
+        does not use. Unsupported on cgroup v1 hosts.
+      x-cockpit-scope: processes:read
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContainersResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/keys:
     get:
       operationId: listKeys
@@ -1810,6 +1835,56 @@ components:
             properties:
               section: { type: string, enum: [metrics, storage, network, health, events, settings] }
               reason: { type: string }
+    ContainersResponse:
+      type: object
+      additionalProperties: false
+      description: GET /containers.
+      required: [schema_version, machine_id, generated_at, containers]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        containers:
+          type: object
+          additionalProperties: false
+          description: Data with its availability (see docs/API.md §5).
+          required: [status, collected_at, stale, source, data]
+          properties:
+            status: { $ref: "#/components/schemas/Availability" }
+            collected_at: { type: [string, "null"], format: date-time }
+            stale: { type: boolean }
+            source: { type: string }
+            reason: { type: string }
+            data:
+              anyOf:
+                - { $ref: "#/components/schemas/ContainerList" }
+                - type: "null"
+    ContainerList:
+      type: object
+      additionalProperties: false
+      required: [total, items, names_reason]
+      properties:
+        total: { type: integer, minimum: 0 }
+        items:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/Container" }
+        names_reason: { type: string }
+    Container:
+      type: object
+      additionalProperties: false
+      required: [runtime, id, rootless, uid, cpu_percent, memory_bytes, memory_limit_bytes, io_read_bytes_per_second, io_write_bytes_per_second, pids]
+      properties:
+        runtime: { type: string, enum: [docker, podman, containerd, cri-o] }
+        id: { type: string, pattern: "^[0-9a-f]{64}$" }
+        rootless: { type: boolean }
+        uid: { type: [integer, "null"], description: Owner of a rootless container. }
+        cpu_percent: { type: [number, "null"], description: "Percent of one core; null on the first sample." }
+        memory_bytes: { type: [integer, "null"] }
+        memory_limit_bytes: { type: [integer, "null"], description: Null when unlimited or unknown. }
+        io_read_bytes_per_second: { type: [number, "null"] }
+        io_write_bytes_per_second: { type: [number, "null"] }
+        pids: { type: [integer, "null"] }
     SettingsResponse:
       type: object
       additionalProperties: false

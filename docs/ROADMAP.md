@@ -136,7 +136,7 @@ adjust thresholds, and exports a redacted diagnostic report.
 | 4B ✓ | Generic metrics (D22): `core.GenericMetric`, counter rates, name/label/unit validation, per-collector series cap, `custom` section of `/metrics`, opt-in history, shown on the Performance screen | — |
 | 4C ✓ | Collector SDK (D23): `pkg/collectorsdk`, the internal adapter, `custom.Main`, SDK version checks, `external` and `sdk_version` in `/status`; PLUGINS.md rewritten as a guide for collector authors | 4B |
 | 4D ✓ | Example extension: a collector in its own module under `examples/collector/` (open file handles and entropy, from `/proc/sys`), built with `custom.Main` in CI and tested end to end | 4C |
-| 4E | Containers (D24): `linux.containers` from cgroup v2, `GET /containers` (`processes:read`), Containers screen, history series for the busiest containers | — |
+| 4E ✓ | Containers (D24): `linux.containers` from cgroup v2, `GET /containers` (`processes:read`), a Containers view in the Processes screen, history series for the busiest containers | — |
 | 4F | ZFS, batteries and UPS (D25): `linux.zfs`, `linux.power`, `linux.ups` (opt-in), health checks for pools and UPS, Storage and Overview additions | — |
 | 4G | More GPU metrics: Intel (`i915`/`xe`) frequency and power from sysfs; utilization reported unavailable where it needs perf privileges (extends D16) | — |
 | 4H | SDKs and releases (D26): `pkg/client` examples as Go example tests, stability policy, `CHANGELOG.md`, Python and TypeScript examples (no dependencies) run in CI against a live agent, release workflow with checksums, tag `v0.4.0` | 4C |

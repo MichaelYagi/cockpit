@@ -40,9 +40,11 @@ const (
 	FlushInterval  = 30 * time.Second
 	RollupInterval = time.Minute
 	MaxSeries      = 200
-	MaxPoints      = 2000
-	MaxRange       = 90 * 24 * time.Hour
-	maxBuffered    = 2000
+	// HistoryContainers is how many of the busiest containers are recorded.
+	HistoryContainers = 5
+	MaxPoints         = 2000
+	MaxRange          = 90 * 24 * time.Hour
+	maxBuffered       = 2000
 )
 
 // Sample is one raw value.
@@ -202,6 +204,24 @@ func Extract(s *core.Snapshot, now time.Time) map[string]float64 {
 			}
 			if gpu.PowerWatts != nil {
 				out[p+"power_watts"] = *gpu.PowerWatts
+			}
+		}
+	}
+	if c := s.Containers.Data; c != nil && ok(s.Containers.Meta) {
+		// The busiest containers only, so a host running hundreds stays
+		// within the series limit.
+		busy := make([]core.ContainerMetrics, 0, len(*c))
+		for _, x := range *c {
+			if x.CPUPercent != nil {
+				busy = append(busy, x)
+			}
+		}
+		sort.Slice(busy, func(i, j int) bool { return *busy[i].CPUPercent > *busy[j].CPUPercent })
+		for _, x := range busy[:min(len(busy), HistoryContainers)] {
+			p := "containers." + x.Runtime + "." + x.ID[:min(12, len(x.ID))] + "."
+			out[p+"cpu_percent"] = *x.CPUPercent
+			if x.MemoryBytes != nil {
+				out[p+"memory_bytes"] = float64(*x.MemoryBytes)
 			}
 		}
 	}

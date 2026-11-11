@@ -248,3 +248,9 @@ func (c *Client) ReportMarkdown(ctx context.Context, anonymize bool) ([]byte, er
 func reportPath(format string, anonymize bool) string {
 	return "/report?format=" + format + "&anonymize=" + strconv.FormatBool(anonymize)
 }
+
+// Containers lists containers found through cgroup v2 (D24), busiest
+// first. Requires processes:read.
+func (c *Client) Containers(ctx context.Context) (*apiv1.ContainersResponse, error) {
+	return get[apiv1.ContainersResponse](ctx, c, "/containers")
+}
