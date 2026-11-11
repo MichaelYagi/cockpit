@@ -510,7 +510,7 @@ and binaries they can verify.
 
 ## D27 — A `network:read` scope for network layout
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Interface addresses, routes and DNS configuration need a new
 issuable scope, `network:read`. Interface names, state, counters, rates
@@ -533,7 +533,7 @@ whole network.
 
 ## D28 — Process command lines are never exposed
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Command lines are never read or returned, under any scope
 or configuration. This closes Q7. Process items gain an `executable` field,
@@ -547,7 +547,7 @@ path identifies the program without its arguments.
 
 ## D29 — TLS tooling and certificate pinning
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.**
 
@@ -572,7 +572,7 @@ without a public CA, and pinning works without one.
 
 ## D30 — Fleet model: a pull-only console with pinned identities
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** The fleet console is a client. It needs no agent changes, no
 new listeners and no central server.
@@ -606,7 +606,7 @@ designed later if pull stops scaling (hundreds of machines).
 
 ## D31 — Windows admin transport: a named pipe with an explicit ACL
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** On Windows the admin listener is the named pipe
 `\\.\pipe\cockpit-monitor` (user mode: `cockpit-monitor-<user SID>`). Its
@@ -629,7 +629,7 @@ roadmap asked for it.
 
 ## D32 — macOS and Windows collectors without cgo
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** New `internal/platform/darwin` and `internal/platform/windows`
 packages use only `golang.org/x/sys` and the standard library, so builds

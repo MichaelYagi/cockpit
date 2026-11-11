@@ -158,9 +158,8 @@ with checksums and a documented Go SDK is published.
 
 ## Phase 5 — Multi-machine and cross-platform
 
-**Status: implemented, awaiting review.** Decisions D27–D32 are
-implemented as written, with the clarification noted in D31, and await
-acceptance. Verified:
+**Status: done, approved and merged (PR #7).** Decisions D27–D32 accepted
+(D31 with the clarification noted there). Verified:
 
 - on Linux, end to end: TLS init and pinning, and fleet enrollment and
   identity refusal;
