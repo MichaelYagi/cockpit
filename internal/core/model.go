@@ -36,6 +36,8 @@ type Record interface {
 type CollectorStatus struct {
 	ID           string
 	Version      string
+	External     bool // built with the public collector SDK (D23)
+	SDKVersion   int
 	Capabilities map[Capability]CapabilityStatus
 }
 

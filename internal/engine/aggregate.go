@@ -435,7 +435,8 @@ func (a *aggregator) publish() *core.Snapshot {
 		for k, v := range a.caps[r.desc.ID] {
 			caps[k] = v
 		}
-		snap.Collectors = append(snap.Collectors, core.CollectorStatus{ID: r.desc.ID, Version: r.desc.Version, Capabilities: caps})
+		snap.Collectors = append(snap.Collectors, core.CollectorStatus{ID: r.desc.ID, Version: r.desc.Version, Capabilities: caps,
+			External: r.desc.External, SDKVersion: r.desc.SDKVersion})
 	}
 	return snap
 }

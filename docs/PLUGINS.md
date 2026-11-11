@@ -2,10 +2,11 @@
 
 ## 1. Terminology
 
-A **collector** gathers a defined set of telemetry for one platform. A
-**plugin** is a broader future extension that may register collectors,
-health checks, or integrations. The MVP has only statically compiled,
-trusted collectors. Dynamic third-party loading is out of scope.
+A **collector** gathers a defined set of telemetry for one platform.
+**Built-in** collectors live in `internal/platform`. **Extension**
+collectors are third-party code written against the public SDK
+(`pkg/collectorsdk`) and compiled into a custom build (§8, D23). All
+collectors are compiled in and trusted. Nothing is loaded at runtime.
 
 ## 2. Design goals
 
@@ -211,10 +212,113 @@ Every collector has:
 
 Fixture data must not contain real host identifiers.
 
-## 8. Future extension model
+## 8. Writing an extension collector (D23)
 
-Candidates: NVIDIA/AMD GPU, Docker/Podman, Kubernetes node metrics,
-ZFS/mdraid, UPS, fan controllers, VMs, enterprise sensors.
+Extension collectors live in your own Go module and are compiled into a
+custom build. Nothing is loaded at runtime. They use only the public
+packages `pkg/collectorsdk` and `custom`. `internal/` stays private, and a
+collector written against SDK version 1 keeps building as long as the
+agent supports that version.
 
-Before implementing dynamic plugins, write a separate security design. A Go
-interface is not a safe boundary for untrusted code.
+**1. Write the collector.**
+
+```go
+package main
+
+import (
+    "context"
+    "os"
+    "strconv"
+    "strings"
+    "time"
+
+    "github.com/MichaelYagi/cockpit/custom"
+    "github.com/MichaelYagi/cockpit/pkg/collectorsdk"
+)
+
+type files struct{}
+
+func (files) Descriptor() collectorsdk.Descriptor {
+    return collectorsdk.Descriptor{
+        ID: "custom.files", Version: "1.0.0", SDKVersion: collectorsdk.Version,
+        Capabilities: []string{"custom.files.handles"},
+        Interval:     10 * time.Second,
+        Source:       "procfs",
+        History:      []string{"custom.files.open"},
+    }
+}
+
+func (files) Probe(context.Context) map[string]collectorsdk.Status {
+    if _, err := os.Stat("/proc/sys/fs/file-nr"); err != nil {
+        return map[string]collectorsdk.Status{"custom.files.handles": {
+            Availability: collectorsdk.Unsupported, Reason: "This kernel does not report file handles."}}
+    }
+    return map[string]collectorsdk.Status{"custom.files.handles": {Availability: collectorsdk.Available}}
+}
+
+func (files) Collect(ctx context.Context) collectorsdk.Result {
+    b, err := os.ReadFile("/proc/sys/fs/file-nr")
+    f := strings.Fields(string(b))
+    if err != nil || len(f) < 1 {
+        return collectorsdk.Result{Status: map[string]collectorsdk.Status{"custom.files.handles": {
+            Availability: collectorsdk.TemporarilyUnavailable, Reason: "Could not read file handle counts."}}}
+    }
+    open, _ := strconv.ParseFloat(f[0], 64)
+    return collectorsdk.Result{
+        Metrics: []collectorsdk.Metric{{Name: "custom.files.open", Kind: collectorsdk.Gauge, Unit: "count", Value: open}},
+        Status:  map[string]collectorsdk.Status{"custom.files.handles": {Availability: collectorsdk.Available}},
+    }
+}
+
+func (files) Close(context.Context) error { return nil }
+
+func main() { os.Exit(custom.Main(files{})) }
+```
+
+**2. Build and run it.** `CGO_ENABLED=0 go build -o cockpit .` produces
+the normal `cockpit` binary (`agent`, `tui`, `keys`, `report`, …) with
+your collector added. It also runs in the TUI's embedded agent.
+
+**3. Check it.**
+
+```sh
+./cockpit tui --once              # lists "custom.files 1.0.0 (extension, SDK v1)"
+curl --unix-socket "$XDG_RUNTIME_DIR/cockpit-monitor/agent.sock" \
+  'http://localhost/api/v1/metrics?sections=custom'
+```
+
+The Performance screen shows the values. `/status` reports the
+collector with `"external": true` and its `sdk_version`.
+
+**Rules.**
+
+- The ID is `custom.<name>`. Capability and metric names start with the ID
+  plus a dot. Metric rules and limits are in §3.1; metrics that break them
+  are dropped and reported, never fatal.
+- Interval: default 10 s, minimum 1 s. Timeout: default 5 s, at most the
+  interval. A call that overruns or panics marks the collector
+  `temporarily_unavailable`; the agent carries on.
+- Return raw counters as `Counter` metrics; the agent computes rates.
+- Report what is missing with a status and a safe reason. Don't fail
+  silently, and don't put secrets or host identifiers in reasons, metric
+  names or labels.
+- Don't start goroutines that outlive `Collect`, and keep any state
+  bounded. `Close` runs at shutdown.
+- `custom.Main` refuses to start if a collector targets another SDK major
+  version or breaks the naming rules, with a message saying which.
+
+**Trust.** Extension code runs inside the agent process with the agent's
+privileges and can read whatever the agent can, including the key
+database. Build in only code you would trust as a dependency. There is no
+sandbox, and a Go interface is not a security boundary.
+
+A complete, tested example lives in `examples/collector/` (4D).
+
+## 9. Future extension model
+
+Candidates not yet covered: Kubernetes node metrics, mdraid, fan
+controllers, VMs, enterprise sensors.
+
+Runtime plugin loading is not planned. Before considering it, write a
+separate security design: a Go interface is not a safe boundary for
+untrusted code.

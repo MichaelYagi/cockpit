@@ -54,6 +54,10 @@ type Descriptor struct {
 	GenericMetrics bool
 	// HistoryMetrics names generic metrics to record in history (D18).
 	HistoryMetrics []string
+	// External marks an extension collector built with the public SDK
+	// (D23); SDKVersion is the SDK major version it targets.
+	External   bool
+	SDKVersion int
 }
 
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$`)

@@ -100,6 +100,7 @@ paths:
                 collectors:
                   - id: linux.sensors
                     version: 1.0.0
+                    external: false
                     capabilities:
                       - name: sensors.thermal
                         status: unsupported
@@ -785,13 +786,15 @@ components:
     Collector:
       type: object
       additionalProperties: false
-      required: [id, version, capabilities]
+      required: [id, version, capabilities, external]
       properties:
         id: { type: string, pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9_]*)+$" }
         version: { type: string }
         capabilities:
           type: array
           items: { $ref: "#/components/schemas/Capability" }
+        external: { type: boolean, description: True for an extension collector built with the public collector SDK (D23). }
+        sdk_version: { type: integer, minimum: 1, description: Collector SDK major version an extension collector targets. }
     Capability:
       type: object
       additionalProperties: false

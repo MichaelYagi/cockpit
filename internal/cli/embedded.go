@@ -26,7 +26,7 @@ type embedded struct {
 	logs   *os.File
 }
 
-func startEmbedded(parent context.Context, res *config.Result, _ Env) (*embedded, error) {
+func startEmbedded(parent context.Context, res *config.Result, env Env) (*embedded, error) {
 	cfg, paths := res.Config, res.Paths
 	cfg.API.TCP.Enabled = false
 	cfg.API.Socket.Enabled = true
@@ -52,7 +52,7 @@ func startEmbedded(parent context.Context, res *config.Result, _ Env) (*embedded
 	e := &embedded{cancel: cancel, done: make(chan error, 1), logs: logs}
 	go func() {
 		e.done <- app.Run(ctx, app.Options{Config: cfg, Paths: paths, Logger: log.With("embedded", true),
-			OnReady: func(ep server.Endpoints) { ready <- ep }})
+			Collectors: env.collectors(), OnReady: func(ep server.Endpoints) { ready <- ep }})
 	}()
 	select {
 	case ep := <-ready:
