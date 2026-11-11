@@ -102,13 +102,23 @@ SMART) are reported, not fatal.
 
 ## Phase 3 — History and operational polish
 
-- SQLite metric history with retention and downsampling; `/metrics/history`.
-- Historical sparklines and charts in the TUI.
-- Event persistence, filtering and pagination.
-- Configurable thresholds and refresh intervals in the TUI.
-- Diagnostic report export (redacted).
-- `cockpit-agent.service`, `cockpit-monitor` user/group, packaging,
-  installation and upgrade docs.
+**Status: in progress.**
+
+| # | Milestone | Depends on |
+|---|---|---|
+| 3A | Metric history: recorder sampling the snapshot every 10s into SQLite, batched writes, rollups to 1-minute and 1-hour tiers, retention per tier (D18) | 1C |
+| 3B | `GET /metrics/history` and `/metrics/history/series`: series, time range, automatic resolution, point limits | 3A |
+| 3C | Event persistence: events written to SQLite asynchronously, loaded on start, filtered and paginated from storage, bounded retention | 1E |
+| 3D | TUI: Performance screen with charts over 1h/6h/24h/7d; sparklines seeded from history; event filtering and paging | 3B, 3C |
+| 3E | Settings: health thresholds editable through a socket-only admin API (`GET`/`PUT /settings`), persisted, applied without restart, confirmed in the TUI (D19) | 1E |
+| 3F | Diagnostic report: `cockpit report` and `GET /report` produce a redacted JSON or Markdown snapshot; `--anonymize` hides host names and addresses (D21) | 2* |
+| 3G | Packaging: `cockpit-agent.service` with systemd hardening, `cockpit-monitor` user/group (sysusers.d), install/uninstall script, upgrade docs; SMART helper timer running `smartctl` as root and writing results the unprivileged agent reads (Q1, D20) | all |
+| 3H | Configurable filesystem skip lists (Q5); docs, spec and security review | all |
+
+**Exit criteria:** the agent runs unattended as a hardened system service
+without root, keeps bounded history and events across restarts, serves
+history through the API, shows charts in the TUI, lets the local admin
+adjust thresholds, and exports a redacted diagnostic report.
 
 ## Phase 4 — Extensibility
 
