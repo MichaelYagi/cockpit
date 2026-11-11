@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/getkin/kin-openapi v0.153.0
 	github.com/go-chi/chi/v5 v5.5.0
+	github.com/godbus/dbus/v5 v5.2.4
 	go.uber.org/goleak v1.3.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/sys v0.50.0

@@ -22,6 +22,15 @@ const (
 	secBlockDevices
 	secSensors
 	secDiskHealth
+	secServices
+	secCPUInfo
+	secPCI
+	secUSB
+	secBoard
+	secMemoryModules
+	secGPUs
+	secRoutes
+	secDNS
 	numSections
 )
 
@@ -37,6 +46,15 @@ var sectionCaps = [numSections][]core.Capability{
 	secBlockDevices:   {core.CapStorageDevices},
 	secSensors:        {core.CapSensorsThermal, core.CapSensorsFan},
 	secDiskHealth:     {core.CapStorageSMART},
+	secServices:       {core.CapServicesSystemd},
+	secCPUInfo:        {core.CapHardwareCPU},
+	secPCI:            {core.CapHardwarePCI},
+	secUSB:            {core.CapHardwareUSB},
+	secBoard:          {core.CapHardwareBoard},
+	secMemoryModules:  {core.CapHardwareMemory},
+	secGPUs:           {core.CapGPUDevices},
+	secRoutes:         {core.CapNetworkRoutes},
+	secDNS:            {core.CapNetworkDNS},
 }
 
 func sectionOf(r core.Record) (section, bool) {
@@ -59,6 +77,24 @@ func sectionOf(r core.Record) (section, bool) {
 		return secSensors, true
 	case core.DiskHealthList:
 		return secDiskHealth, true
+	case core.Services:
+		return secServices, true
+	case *core.CPUInfo:
+		return secCPUInfo, true
+	case core.PCIDevices:
+		return secPCI, true
+	case core.USBDevices:
+		return secUSB, true
+	case *core.BoardInfo:
+		return secBoard, true
+	case core.MemoryModules:
+		return secMemoryModules, true
+	case core.GPUs:
+		return secGPUs, true
+	case core.Routes:
+		return secRoutes, true
+	case *core.DNSConfig:
+		return secDNS, true
 	}
 	return 0, false
 }
@@ -92,6 +128,9 @@ type aggregator struct {
 	prevCPUAt time.Time
 	prevNet   map[string]core.NetInterface
 	prevNetAt time.Time
+
+	degraded map[string]bool  // "collector|capability" currently degraded
+	pending  map[*runner]bool // scheduled collectors that have not reported yet
 }
 
 func newAggregator(e *Engine, probes []map[core.Capability]core.CapabilityStatus) *aggregator {
@@ -147,18 +186,27 @@ func (a *aggregator) run(ctx context.Context) {
 		case o := <-a.e.results:
 			a.apply(o)
 			a.e.current.Store(a.publish())
+			if a.pending != nil {
+				delete(a.pending, o.runner)
+				if len(a.pending) == 0 {
+					a.pending = nil
+					a.e.markReady()
+				}
+			}
 		}
 	}
 }
 
 func (a *aggregator) apply(o outcome) {
 	r := o.runner
+	before := a.caps[r.desc.ID]
 	if o.failed != "" {
 		a.caps[r.desc.ID] = allStatus(r.desc, core.TemporarilyUnavailable, o.failed)
 	} else {
 		a.caps[r.desc.ID] = normalize(r.desc, o.result.Status)
 	}
 	caps := a.caps[r.desc.ID]
+	a.transitions(r, before, caps)
 	at := o.result.CollectedAt.UTC()
 	if at.IsZero() {
 		at = a.e.opts.Now().UTC()
@@ -223,6 +271,33 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 		return &c
 	case core.DiskHealthList:
 		c := append(core.DiskHealthList(nil), v...)
+		return &c
+	case core.Services:
+		c := append(core.Services(nil), v...)
+		return &c
+	case *core.CPUInfo:
+		c := *v
+		return &c
+	case core.PCIDevices:
+		c := append(core.PCIDevices(nil), v...)
+		return &c
+	case core.USBDevices:
+		c := append(core.USBDevices(nil), v...)
+		return &c
+	case *core.BoardInfo:
+		c := *v
+		return &c
+	case core.MemoryModules:
+		c := append(core.MemoryModules(nil), v...)
+		return &c
+	case core.GPUs:
+		c := append(core.GPUs(nil), v...)
+		return &c
+	case core.Routes:
+		c := append(core.Routes(nil), v...)
+		return &c
+	case *core.DNSConfig:
+		c := *v
 		return &c
 	}
 	return nil
@@ -329,6 +404,15 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.BlockDevices = sec[core.BlockDevices](a, secBlockDevices)
 	snap.Sensors = sec[core.Sensors](a, secSensors)
 	snap.DiskHealth = sec[core.DiskHealthList](a, secDiskHealth)
+	snap.Services = sec[core.Services](a, secServices)
+	snap.CPUInfo = sec[core.CPUInfo](a, secCPUInfo)
+	snap.PCI = sec[core.PCIDevices](a, secPCI)
+	snap.USB = sec[core.USBDevices](a, secUSB)
+	snap.Board = sec[core.BoardInfo](a, secBoard)
+	snap.MemoryModules = sec[core.MemoryModules](a, secMemoryModules)
+	snap.GPUs = sec[core.GPUs](a, secGPUs)
+	snap.Routes = sec[core.Routes](a, secRoutes)
+	snap.DNS = sec[core.DNSConfig](a, secDNS)
 
 	for _, r := range a.e.runners {
 		caps := make(map[core.Capability]core.CapabilityStatus, len(a.caps[r.desc.ID]))
@@ -348,4 +432,30 @@ func sec[T any](a *aggregator, s section) core.Section[T] {
 		out.Data = d
 	}
 	return out
+}
+
+// transitions publishes an event when a capability that was available
+// stops being available, or comes back. Capabilities that were never
+// available (missing hardware) produce no events.
+func (a *aggregator) transitions(r *runner, before, after map[core.Capability]core.CapabilityStatus) {
+	if a.e.opts.Publish == nil {
+		return
+	}
+	for _, c := range r.desc.Capabilities {
+		key := r.desc.ID + "|" + string(c)
+		was, now := before[c].Availability, after[c].Availability
+		switch {
+		case was == core.Available && now != core.Available:
+			if a.degraded == nil {
+				a.degraded = map[string]bool{}
+			}
+			a.degraded[key] = true
+			a.e.opts.Publish(core.Event{Time: a.e.opts.Now().UTC(), Type: core.EventCollectorDegraded, Severity: core.SeverityWarning,
+				Subject: "collector:" + r.desc.ID, Message: string(c) + " is " + string(now) + ": " + after[c].Reason})
+		case now == core.Available && a.degraded[key]:
+			delete(a.degraded, key)
+			a.e.opts.Publish(core.Event{Time: a.e.opts.Now().UTC(), Type: core.EventCollectorRecovered, Severity: core.SeverityInfo,
+				Subject: "collector:" + r.desc.ID, Message: string(c) + " is available again"})
+		}
+	}
 }

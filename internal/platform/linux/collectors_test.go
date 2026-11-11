@@ -13,7 +13,7 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/core"
 )
 
-const procStat = `cpu  100 5 50 800 20 3 2 0 0 0
+const procStatFixture = `cpu  100 5 50 800 20 3 2 0 0 0
 cpu0 50 2 25 400 10 1 1 0 0 0
 cpu1 50 3 25 400 10 2 1 0 0 0
 intr 12345
@@ -53,7 +53,7 @@ func TestSystemFallbacks(t *testing.T) {
 
 func TestCPU(t *testing.T) {
 	root := tree(t, map[string]string{
-		"proc/stat":    procStat,
+		"proc/stat":    procStatFixture,
 		"proc/loadavg": "0.50 0.75 1.25 2/300 12345\n",
 		"proc/cpuinfo": "processor\t: 0\nmodel name\t: Test CPU @ 3.00GHz\n\nprocessor\t: 1\nmodel name\t: Test CPU @ 3.00GHz\n",
 	})
@@ -70,7 +70,7 @@ func TestCPU(t *testing.T) {
 }
 
 func TestCPUWithoutLoadAvg(t *testing.T) {
-	root := tree(t, map[string]string{"proc/stat": procStat})
+	root := tree(t, map[string]string{"proc/stat": procStatFixture})
 	r := newCPU(env(root)).Collect(context.Background())
 	wantStatus(t, r, core.CapCPUUsage, core.Available)
 	wantStatus(t, r, core.CapCPULoad, core.Unsupported)
@@ -80,7 +80,7 @@ func TestCPUWithoutLoadAvg(t *testing.T) {
 }
 
 func TestCPUPermissionDenied(t *testing.T) {
-	root := tree(t, map[string]string{"proc/stat": procStat})
+	root := tree(t, map[string]string{"proc/stat": procStatFixture})
 	unreadable(t, filepath.Join(root, "proc/stat"))
 	r := newCPU(env(root)).Collect(context.Background())
 	wantStatus(t, r, core.CapCPUUsage, core.PermissionDenied)

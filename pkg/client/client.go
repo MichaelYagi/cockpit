@@ -37,6 +37,7 @@ const (
 type Client struct {
 	base      *url.URL
 	hc        *http.Client
+	stream    *http.Client // same transport, no overall timeout (event streams)
 	apiKey    string
 	userAgent string
 }
@@ -87,6 +88,7 @@ func NewUnix(socketPath string, opts ...Option) (*Client, error) {
 		// The host is a placeholder; the transport always dials the socket.
 		base:      &url.URL{Scheme: "http", Host: "cockpit-agent"},
 		hc:        &http.Client{Transport: tr, Timeout: o.timeout, CheckRedirect: noRedirects},
+		stream:    &http.Client{Transport: tr, CheckRedirect: noRedirects},
 		userAgent: o.userAgent,
 	}, nil
 }
@@ -127,6 +129,7 @@ func NewTCP(baseURL, apiKey string, opts ...Option) (*Client, error) {
 	return &Client{
 		base:      u,
 		hc:        &http.Client{Transport: tr, Timeout: o.timeout, CheckRedirect: noRedirects},
+		stream:    &http.Client{Transport: tr, CheckRedirect: noRedirects},
 		apiKey:    apiKey,
 		userAgent: o.userAgent,
 	}, nil

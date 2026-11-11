@@ -44,6 +44,15 @@ type Snapshot struct {
 	BlockDevices   Section[BlockDevices]
 	Sensors        Section[Sensors]
 	DiskHealth     Section[DiskHealthList]
+	Services       Section[Services]
+	CPUInfo        Section[CPUInfo]
+	PCI            Section[PCIDevices]
+	USB            Section[USBDevices]
+	Board          Section[BoardInfo]
+	MemoryModules  Section[MemoryModules]
+	GPUs           Section[GPUs]
+	Routes         Section[Routes]
+	DNS            Section[DNSConfig]
 
 	Collectors []CollectorStatus
 }

@@ -137,6 +137,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		Logger:   log.With("component", "engine"),
 		Now:      o.Now,
 		Settings: CollectorSettings(cfg.Collection),
+		Publish:  publish,
 	})
 	if err != nil {
 		return fmt.Errorf("collectors: %w", err)
@@ -150,6 +151,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		Now:        o.Now,
 		Logger:     log.With("component", "health"),
 		Publish:    publish,
+		Wait:       eng.Ready(),
 	})
 	bg.Add(1)
 	go func() { defer bg.Done(); evaluator.Run(bgCtx, cfg.Health.Interval) }()
@@ -164,6 +166,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	deps := api.Deps{
 		Logger: log.With("component", "api"), Verifier: verifier, Status: status, SpecJSON: specJSON, Now: o.Now,
 		Snapshots: eng, Health: evaluator, Events: eventLog, Keys: keys,
+		Subscriber: eventLog, KeyChecker: keys, Processes: eng,
 		Stats: middleware.NewStats(o.Now),
 		Listeners: func() []apiv1.Listener {
 			if l := listeners.Load(); l != nil {
@@ -273,6 +276,9 @@ func CollectorSettings(c config.Collection) func(collector.Descriptor) engine.Se
 		s := engine.Settings{Enabled: true, Interval: d.DefaultInterval, Timeout: d.DefaultTimeout}
 		if d.Class == collector.Sampler {
 			s.Interval, s.Timeout = c.Defaults.Interval, c.Defaults.Timeout
+			if s.Interval < d.MinInterval {
+				s.Interval, s.Timeout = d.MinInterval, max(s.Timeout, d.DefaultTimeout)
+			}
 		}
 		if o, ok := c.Collectors[d.ID]; ok {
 			if o.Enabled != nil {
@@ -300,5 +306,6 @@ func Thresholds(h config.Health) health.Thresholds {
 		MemWarnPressurePct: h.Memory.WarnPressurePercent, MemCriticalPressurePct: h.Memory.CriticalPressurePercent,
 		StorageWarnPct: h.Storage.WarnPercent, StorageCriticalPct: h.Storage.CriticalPercent,
 		DiskWarnPercentageUsed: h.Disk.WarnPercentageUsed,
+		NetWarnErrorsPerMin:    h.Network.WarnErrorsPerMinute, NetCriticalErrorsPerMin: h.Network.CriticalErrorsPerMinute,
 	}
 }

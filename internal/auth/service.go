@@ -67,7 +67,7 @@ func invalid(format string, args ...any) error {
 
 // IssuableScopes are the scopes a key may hold in Phase 1. admin is
 // reserved for the local socket principal (D3, D8).
-func IssuableScopes() []Scope { return []Scope{ScopeSystemRead, ScopeMetricsRead} }
+func IssuableScopes() []Scope { return []Scope{ScopeSystemRead, ScopeMetricsRead, ScopeProcessesRead} }
 
 // MaxActiveKeys bounds the number of usable keys.
 const MaxActiveKeys = 1000
@@ -265,6 +265,19 @@ func (s *Service) Revoke(ctx context.Context, id string) (KeyMeta, error) {
 		s.event(core.EventKeyRevoked, k.KeyMeta, "API key revoked")
 	}
 	return k.KeyMeta, nil
+}
+
+// IsActive reports whether the key with this ID can still authenticate.
+// Long-lived connections use it to drop revoked or expired keys.
+func (s *Service) IsActive(ctx context.Context, id string) (bool, error) {
+	k, err := s.store.GetKey(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return k.Active(s.opts.Now().UTC()), nil
 }
 
 // dummyHash keeps verification time similar when the ID is unknown.

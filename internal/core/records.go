@@ -91,7 +91,33 @@ type NetInterface struct {
 	RxPackets, TxPackets uint64
 	RxErrors, TxErrors   uint64
 	RxDropped, TxDropped uint64
+	Addresses            []string // CIDR, e.g. "192.168.1.10/24"
 }
+
+// Route is one kernel routing table entry.
+type Route struct {
+	Family      string // "ipv4" or "ipv6"
+	Destination string // CIDR; "0.0.0.0/0" or "::/0" for the default route
+	Gateway     string // empty for directly connected routes
+	Interface   string
+	Metric      int
+	Default     bool
+}
+
+// Routes is the routing record.
+type Routes []Route
+
+// DNSConfig is the resolver configuration.
+type DNSConfig struct {
+	Nameservers []string
+	Search      []string
+	// Resolver is "resolv.conf" or "systemd-resolved" (when the local stub
+	// is in use, Nameservers are its upstream servers).
+	Resolver string
+}
+
+func (Routes) isRecord()     {}
+func (*DNSConfig) isRecord() {}
 
 // NetInterfaces is the network record.
 type NetInterfaces []NetInterface
@@ -152,6 +178,20 @@ type DiskHealth struct {
 
 // DiskHealthList is the disk health record.
 type DiskHealthList []DiskHealth
+
+// Service is one systemd service unit.
+type Service struct {
+	Name        string // e.g. "ssh.service"
+	Description string
+	LoadState   string // loaded, not-found, masked, ...
+	ActiveState string // active, inactive, failed, activating, deactivating, reloading
+	SubState    string // running, exited, dead, ...
+}
+
+// Services is the service record.
+type Services []Service
+
+func (Services) isRecord() {}
 
 func (*SystemInfo) isRecord()     {}
 func (*CPUCounters) isRecord()    {}

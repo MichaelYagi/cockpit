@@ -44,6 +44,9 @@ type Descriptor struct {
 	// Source is a short, non-sensitive description of where data comes
 	// from, shown to clients (e.g. "procfs", "sysfs/hwmon", "smartctl").
 	Source string
+	// MinInterval stops configuration from scheduling an expensive sampler
+	// (e.g. one that runs an external tool) more often than this.
+	MinInterval time.Duration
 }
 
 var idPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$`)
@@ -84,12 +87,15 @@ type ToolFinder interface {
 }
 
 // Env is injected into collectors so they can be tested against fixture
-// trees and a fake clock. Production roots are "/proc", "/sys", "/etc", "/dev".
+// trees and a fake clock. Production roots are "/proc", "/sys", "/etc",
+// "/dev" and "/run".
 type Env struct {
 	ProcRoot string
 	SysRoot  string
 	EtcRoot  string
 	DevRoot  string
+	RunRoot  string // "/run"
+	UsrRoot  string // "/usr" (hardware ID databases)
 	Now      func() time.Time
 	Logger   *slog.Logger
 	Tools    ToolFinder
@@ -102,6 +108,8 @@ func DefaultEnv(logger *slog.Logger, tools ToolFinder) Env {
 		SysRoot:  "/sys",
 		EtcRoot:  "/etc",
 		DevRoot:  "/dev",
+		RunRoot:  "/run",
+		UsrRoot:  "/usr",
 		Now:      time.Now,
 		Logger:   logger,
 		Tools:    tools,
@@ -129,4 +137,11 @@ type Collector interface {
 	// failures are expressed per capability in Result.Status.
 	Collect(ctx context.Context) Result
 	Close(ctx context.Context) error
+}
+
+// ProcessLister is implemented by collectors that can list processes on
+// demand. Process lists are sampled only when a client asks (with a short
+// cache in the engine), never on a schedule.
+type ProcessLister interface {
+	ListProcesses(ctx context.Context) (core.ProcessList, core.CapabilityStatus)
 }

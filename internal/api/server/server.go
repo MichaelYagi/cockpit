@@ -59,12 +59,19 @@ type Server struct {
 	sockPath string
 	errs     chan error
 	wg       sync.WaitGroup
+
+	// baseCtx is the parent of every request context. Shutdown cancels it
+	// first so long-lived requests (event streams) end promptly instead of
+	// holding up a graceful shutdown.
+	baseCtx    context.Context
+	cancelBase context.CancelFunc
 }
 
 // New creates a server. socketHandler and tcpHandler serve the respective
 // listeners.
 func New(cfg Config, socketHandler, tcpHandler http.Handler, logger *slog.Logger) *Server {
-	return &Server{cfg: cfg, socket: socketHandler, tcp: tcpHandler, logger: logger, errs: make(chan error, 2)}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Server{cfg: cfg, socket: socketHandler, tcp: tcpHandler, logger: logger, errs: make(chan error, 2), baseCtx: ctx, cancelBase: cancel}
 }
 
 // Start opens every listener and begins serving. If any listener fails,
@@ -160,7 +167,8 @@ func (s *Server) newHTTPServer(h http.Handler) *http.Server {
 		MaxHeaderBytes:    16 << 10,
 		// No server-wide WriteTimeout: it would cut off future SSE streams.
 		// Write deadlines are set per route by middleware.
-		ErrorLog: slog.NewLogLogger(s.logger.Handler(), slog.LevelWarn),
+		ErrorLog:    slog.NewLogLogger(s.logger.Handler(), slog.LevelWarn),
+		BaseContext: func(net.Listener) context.Context { return s.baseCtx },
 	}
 }
 
@@ -181,6 +189,7 @@ func (s *Server) Errors() <-chan error { return s.errs }
 // Shutdown stops accepting connections, waits for in-flight requests until
 // ctx expires, then closes remaining connections and removes the socket.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.cancelBase()
 	var errs []error
 	for _, srv := range s.servers {
 		if err := srv.Shutdown(ctx); err != nil {

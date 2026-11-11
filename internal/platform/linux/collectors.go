@@ -4,6 +4,7 @@ package linux
 
 import (
 	"context"
+	"net"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -186,10 +187,13 @@ func (c *memoryCollector) Collect(context.Context) collector.Result {
 type networkCollector struct {
 	base
 	env collector.Env
+	// addrs returns interface addresses (CIDR) by name. Uses the kernel's
+	// address list (netlink via the standard library); injectable for tests.
+	addrs func() map[string][]string
 }
 
 func newNetwork(env collector.Env) *networkCollector {
-	c := &networkCollector{env: env}
+	c := &networkCollector{env: env, addrs: interfaceAddrs}
 	c.base = base{collect: c.Collect}
 	return c
 }
@@ -213,8 +217,11 @@ func (c *networkCollector) Collect(context.Context) collector.Result {
 		var order []string
 		if counters, order, err = parseNetDev(b); err == nil {
 			nets := make(core.NetInterfaces, 0, len(order))
+			addrs := c.addrs()
 			for _, name := range order {
-				nets = append(nets, c.iface(name, counters[name]))
+				n := c.iface(name, counters[name])
+				n.Addresses = addrs[name]
+				nets = append(nets, n)
 			}
 			res.Records = []core.Record{nets}
 		}
@@ -268,5 +275,33 @@ func Collectors(env collector.Env) []collector.Collector {
 		newBlockDevices(env),
 		newSensors(env),
 		newSMART(env),
+		newProcesses(env),
+		newServices(env),
+		newCPUInfo(env),
+		newPCI(env),
+		newUSB(env),
+		newDMI(env),
+		newGPU(env),
+		newNetConfig(env),
 	}
+}
+
+func interfaceAddrs() map[string][]string {
+	out := map[string][]string{}
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, ifc := range ifs {
+		as, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range as {
+			if ipn, ok := a.(*net.IPNet); ok {
+				out[ifc.Name] = append(out[ifc.Name], ipn.String())
+			}
+		}
+	}
+	return out
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -25,9 +26,14 @@ type Spec struct {
 	router routers.Router
 }
 
+// Event streams are validated as plain text: the schema only says the
+// body is a string; the SSE framing is tested separately.
+var registerOnce sync.Once
+
 // Load parses and validates the embedded specification.
 func Load(t testing.TB) *Spec {
 	t.Helper()
+	registerOnce.Do(func() { openapi3filter.RegisterBodyDecoder("text/event-stream", openapi3filter.PlainBodyDecoder) })
 	loader := openapi3.NewLoader()
 	doc, err := loader.LoadFromData(openapi.YAML)
 	if err != nil {

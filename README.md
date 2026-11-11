@@ -14,11 +14,13 @@ fleet dashboards through the API.
 
 ## Status
 
-**Phase 1 (MVP) is implemented and awaiting review.** On Linux, the agent
-collects CPU, memory (with PSI), filesystems, network, disks, sensors and
-SMART health; runs four health checks; serves the authenticated API; and
-manages API keys. The terminal UI shows Overview, Health, Storage, Network
-and API Access. See [SETUP](docs/SETUP.md) to get started and
+**Phases 1 and 2 are implemented** (Phase 2 awaiting review). On Linux,
+the agent collects CPU, memory (with PSI), filesystems, network (with
+addresses, routes and DNS), disks, sensors, SMART health, processes,
+systemd services, detailed hardware (CPU, PCI, USB, board, memory modules)
+and GPUs (NVIDIA and AMD metrics); runs six health checks; streams live
+events; serves the authenticated API; and manages API keys. The terminal
+UI has nine screens. See [SETUP](docs/SETUP.md) to get started and
 [ROADMAP](docs/ROADMAP.md) for what comes next.
 
 ## Quick start

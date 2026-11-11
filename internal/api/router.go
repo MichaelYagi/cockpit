@@ -64,6 +64,12 @@ type Deps struct {
 	Stats *middleware.Stats
 	// Listeners reports open listeners for the admin part of /status.
 	Listeners func() []apiv1.Listener
+	Processes handlers.ProcessSource
+	// Event streaming (D17).
+	Subscriber      handlers.Subscriber
+	KeyChecker      handlers.KeyChecker
+	Streams         *handlers.StreamLimits
+	StreamHeartbeat time.Duration // default 15s
 }
 
 // Options configure one router.
@@ -86,6 +92,13 @@ func Routes(d Deps) []Route {
 	}
 	res := &handlers.Resources{Snapshots: d.Snapshots, MachineID: machineID, Policy: d.Redaction, Now: d.Now}
 	keys := &handlers.Keys{Service: d.Keys, Now: d.Now, Logger: d.Logger}
+	if d.Streams == nil {
+		d.Streams = handlers.NewStreamLimits()
+	}
+	if d.StreamHeartbeat <= 0 {
+		d.StreamHeartbeat = 15 * time.Second
+	}
+	stream := &handlers.EventStream{Events: d.Subscriber, Keys: d.KeyChecker, Limits: d.Streams, Heartbeat: d.StreamHeartbeat, Logger: d.Logger}
 	admin := func() *apiv1.APIServerStatus {
 		st := &apiv1.APIServerStatus{Listeners: []apiv1.Listener{}}
 		if d.Listeners != nil {
@@ -94,22 +107,26 @@ func Routes(d Deps) []Route {
 		if d.Stats != nil {
 			st.Requests, st.ActiveClients = d.Stats.Snapshot()
 		}
+		st.OpenStreams = d.Streams.Open()
 		return st
 	}
 	get, post, del := http.MethodGet, http.MethodPost, http.MethodDelete
-	sys, met, adm := auth.ScopeSystemRead, auth.ScopeMetricsRead, auth.ScopeAdmin
+	sys, met, prc, adm := auth.ScopeSystemRead, auth.ScopeMetricsRead, auth.ScopeProcessesRead, auth.ScopeAdmin
 	return []Route{
 		{Method: get, Path: "/livez", Public: true, Handler: handlers.Livez},
 		{Method: get, Path: "/openapi.json", Public: true, Handler: handlers.OpenAPI(d.SpecJSON)},
 		{Method: get, Path: "/status", Scope: sys, Handler: handlers.Status(d.Status, admin, d.Now)},
 		{Method: get, Path: "/system", Scope: sys, Handler: res.System},
 		{Method: get, Path: "/hardware", Scope: sys, Handler: res.Hardware},
+		{Method: get, Path: "/services", Scope: sys, Handler: res.Services},
 		{Method: get, Path: "/metrics", Scope: met, Handler: res.Metrics},
 		{Method: get, Path: "/storage", Scope: met, Handler: res.Storage},
 		{Method: get, Path: "/network", Scope: met, Handler: res.Network},
 		{Method: get, Path: "/sensors", Scope: met, Handler: res.Sensors},
 		{Method: get, Path: "/health", Scope: met, Handler: handlers.Health(d.Health, machineID, d.Now)},
 		{Method: get, Path: "/events", Scope: met, Handler: handlers.Events(d.Events, machineID, d.Now)},
+		{Method: get, Path: "/events/stream", Scope: met, Handler: stream.ServeHTTP},
+		{Method: get, Path: "/processes", Scope: prc, Handler: handlers.Processes(d.Processes, machineID, d.Now)},
 		{Method: get, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.List},
 		{Method: post, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.Create},
 		{Method: del, Path: "/keys/{id}", Scope: adm, SocketOnly: true, Handler: keys.Revoke},

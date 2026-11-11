@@ -64,12 +64,13 @@ type Finding struct {
 type EventType string
 
 const (
-	EventFindingRaised     EventType = "finding.raised"
-	EventFindingResolved   EventType = "finding.resolved"
-	EventCollectorDegraded EventType = "collector.degraded"
-	EventKeyCreated        EventType = "key.created"
-	EventKeyRotated        EventType = "key.rotated"
-	EventKeyRevoked        EventType = "key.revoked"
+	EventFindingRaised      EventType = "finding.raised"
+	EventFindingResolved    EventType = "finding.resolved"
+	EventCollectorDegraded  EventType = "collector.degraded"
+	EventCollectorRecovered EventType = "collector.recovered"
+	EventKeyCreated         EventType = "key.created"
+	EventKeyRotated         EventType = "key.rotated"
+	EventKeyRevoked         EventType = "key.revoked"
 )
 
 // Event is a timestamped occurrence worth recording.

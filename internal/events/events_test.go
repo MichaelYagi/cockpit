@@ -94,3 +94,55 @@ func TestRingDiscardsOldest(t *testing.T) {
 		}
 	}
 }
+
+func TestSubscriptionDeliversInOrder(t *testing.T) {
+	l := NewLog(10, nil)
+	before := l.Publish(core.Event{Message: "before"})
+	_ = before
+	sub := l.Subscribe(Filter{MinSeverity: core.SeverityWarning})
+	defer sub.Close()
+	l.Publish(core.Event{Severity: core.SeverityWarning, Message: "a"})
+	l.Publish(core.Event{Severity: core.SeverityInfo, Message: "filtered"})
+	l.Publish(core.Event{Severity: core.SeverityCritical, Message: "b"})
+	select {
+	case <-sub.Ready():
+	default:
+		t.Fatal("not signalled")
+	}
+	evs, dropped := sub.Drain()
+	if dropped != 0 || len(evs) != 2 || evs[0].Message != "a" || evs[1].Message != "b" {
+		t.Errorf("got %v dropped=%d", evs, dropped)
+	}
+	if evs, _ := sub.Drain(); len(evs) != 0 {
+		t.Error("drain not emptied")
+	}
+}
+
+func TestSlowSubscriberDropsOldestWithoutBlocking(t *testing.T) {
+	l := NewLog(10, nil)
+	sub := l.Subscribe(Filter{})
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < SubscriberQueue+50; i++ {
+			l.Publish(core.Event{Message: fmt.Sprint(i)})
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("publisher blocked by a slow subscriber")
+	}
+	evs, dropped := sub.Drain()
+	if dropped != 50 || len(evs) != SubscriberQueue || evs[0].Message != "50" {
+		t.Errorf("dropped=%d len=%d first=%s", dropped, len(evs), evs[0].Message)
+	}
+	sub.Close()
+	if l.Subscribers() != 0 {
+		t.Error("subscription not removed")
+	}
+	l.Publish(core.Event{Message: "after close"})
+	if evs, _ := sub.Drain(); len(evs) != 0 {
+		t.Error("closed subscription still receives")
+	}
+}

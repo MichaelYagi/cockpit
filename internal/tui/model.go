@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -25,6 +26,10 @@ type API interface {
 	CreateKey(ctx context.Context, req apiv1.CreateAPIKeyRequest) (*apiv1.CreatedAPIKey, error)
 	RotateKey(ctx context.Context, id string) (*apiv1.CreatedAPIKey, error)
 	RevokeKey(ctx context.Context, id string) (*apiv1.APIKey, error)
+	Processes(ctx context.Context, q client.ProcessesQuery) (*apiv1.ProcessesResponse, error)
+	Services(ctx context.Context, state string) (*apiv1.ServicesResponse, error)
+	Network(ctx context.Context) (*apiv1.NetworkResponse, error)
+	StreamEvents(ctx context.Context, severity string, fn func(client.StreamMessage) error) error
 }
 
 var _ API = (*client.Client)(nil)
@@ -39,14 +44,30 @@ type screen int
 
 const (
 	scrOverview screen = iota
+	scrHardware
 	scrHealth
 	scrStorage
 	scrNetwork
+	scrProcesses
+	scrServices
+	scrEvents
 	scrAccess
 	numScreens
 )
 
-var screenNames = [numScreens]string{"Overview", "Health", "Storage", "Network", "API Access"}
+var screenNames = [numScreens]string{"Overview", "Hardware", "Health", "Storage", "Network", "Processes", "Services", "Events", "API Access"}
+
+// shortNames fit all tabs into 80 columns.
+var shortNames = [numScreens]string{"Ovw", "HW", "Health", "Disk", "Net", "Procs", "Svcs", "Events", "API"}
+
+// compactTabs is used below this width.
+const compactTabs = 120
+
+// processSorts cycle with "s" on the Processes screen.
+var processSorts = []string{"cpu", "memory", "pid", "name"}
+
+// maxEvents bounds the in-memory event list.
+const maxEvents = 500
 
 type modal int
 
@@ -59,7 +80,7 @@ const (
 )
 
 // issuableScopes are the scopes a key can be created with (D8).
-var issuableScopes = []string{"system:read", "metrics:read"}
+var issuableScopes = []string{"system:read", "metrics:read", "processes:read"}
 
 const historyLen = 120
 
@@ -89,6 +110,26 @@ type Model struct {
 	events   *apiv1.EventsResponse
 	keys     []apiv1.APIKey
 	keysErr  string
+	procs    *apiv1.ProcessesResponse
+	procsErr string
+	services *apiv1.ServicesResponse
+	svcErr   string
+	network  *apiv1.NetworkResponse
+
+	// Live events: history from /events plus the SSE stream, newest first.
+	eventList  []apiv1.Event
+	eventIDs   map[string]bool
+	streamLive bool
+	streamErr  string
+	streamCh   chan tea.Msg
+	streamStop context.CancelFunc
+
+	// Processes and Services screen state.
+	procSort   int
+	procSearch string
+	procKernel bool
+	svcFailed  bool // show failed services only
+	searching  bool
 
 	cpuHist, memHist, rxHist, txHist []float64
 
@@ -102,7 +143,7 @@ type Model struct {
 	modal         modal
 	input         string
 	scopeCursor   int
-	scopeOn       [2]bool
+	scopeOn       [3]bool
 	pendingAction string // "revoke" | "rotate"
 	pendingID     string
 	revealed      *apiv1.CreatedAPIKey
@@ -118,7 +159,7 @@ func New(api API, opts Options) *Model {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [2]bool{false, true}}
+	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [3]bool{false, true, false}, eventIDs: map[string]bool{}}
 }
 
 type tickMsg time.Time
@@ -168,12 +209,24 @@ func (m *Model) refresh(all bool) tea.Cmd {
 	if all || m.system == nil || m.ticks%30 == 0 {
 		cmds = append(cmds, m.fetch("system", wrap(m.api.System)), m.fetch("hardware", wrap(m.api.Hardware)))
 	}
+	if m.events == nil {
+		cmds = append(cmds, m.fetch("events", wrap(func(ctx context.Context) (*apiv1.EventsResponse, error) {
+			return m.api.Events(ctx, client.EventsQuery{Limit: 100})
+		})))
+	}
 	switch m.screen {
 	case scrStorage:
 		cmds = append(cmds, m.fetch("storage", wrap(m.api.Storage)))
-	case scrHealth:
-		cmds = append(cmds, m.fetch("events", wrap(func(ctx context.Context) (*apiv1.EventsResponse, error) {
-			return m.api.Events(ctx, client.EventsQuery{Limit: 50})
+	case scrNetwork:
+		cmds = append(cmds, m.fetch("network", wrap(m.api.Network)))
+	case scrProcesses:
+		q := client.ProcessesQuery{Sort: processSorts[m.procSort], Search: m.procSearch, KernelThreads: m.procKernel, Limit: max(10, m.height)}
+		cmds = append(cmds, m.fetch("processes", wrap(func(ctx context.Context) (*apiv1.ProcessesResponse, error) {
+			return m.api.Processes(ctx, q)
+		})))
+	case scrServices:
+		cmds = append(cmds, m.fetch("services", wrap(func(ctx context.Context) (*apiv1.ServicesResponse, error) {
+			return m.api.Services(ctx, "")
 		})))
 	case scrAccess:
 		if m.isAdmin() {
@@ -188,7 +241,65 @@ func (m *Model) refresh(all bool) tea.Cmd {
 func (m *Model) isAdmin() bool { return m.status != nil && m.status.API != nil }
 
 // Init starts polling.
-func (m *Model) Init() tea.Cmd { return tea.Batch(m.refresh(true), m.tick()) }
+func (m *Model) Init() tea.Cmd { return tea.Batch(m.refresh(true), m.tick(), m.startStream()) }
+
+// Stream messages.
+type (
+	streamEventMsg  struct{ e apiv1.Event }
+	streamLaggedMsg struct{ dropped int }
+	streamEndMsg    struct{ err error }
+	streamRetryMsg  struct{}
+	streamOpenMsg   struct{}
+)
+
+// startStream subscribes to live events in the background. Messages are
+// passed through a channel and read one at a time by waitStream.
+func (m *Model) startStream() tea.Cmd {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.streamStop = cancel
+	ch := make(chan tea.Msg, 64)
+	m.streamCh = ch
+	go func() {
+		ch <- streamOpenMsg{}
+		err := m.api.StreamEvents(ctx, "", func(sm client.StreamMessage) error {
+			var msg tea.Msg = streamLaggedMsg{dropped: sm.Lagged}
+			if sm.Event != nil {
+				msg = streamEventMsg{e: *sm.Event}
+			}
+			select {
+			case ch <- msg:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return nil
+		})
+		select {
+		case ch <- streamEndMsg{err: err}:
+		case <-ctx.Done():
+		}
+	}()
+	return m.waitStream()
+}
+
+func (m *Model) waitStream() tea.Cmd {
+	ch := m.streamCh
+	return func() tea.Msg { return <-ch }
+}
+
+// addEvent inserts an event (newest first), ignoring duplicates.
+func (m *Model) addEvent(e apiv1.Event) {
+	if m.eventIDs[e.ID] {
+		return
+	}
+	m.eventIDs[e.ID] = true
+	m.eventList = append([]apiv1.Event{e}, m.eventList...)
+	if len(m.eventList) > maxEvents {
+		for _, old := range m.eventList[maxEvents:] {
+			delete(m.eventIDs, old.ID)
+		}
+		m.eventList = m.eventList[:maxEvents]
+	}
+}
 
 // Update handles messages.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -204,6 +315,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case actionMsg:
 		return m, m.applyAction(msg)
+	case streamOpenMsg:
+		m.streamLive, m.streamErr = true, ""
+		return m, m.waitStream()
+	case streamEventMsg:
+		sanitize(&msg.e)
+		m.addEvent(msg.e)
+		return m, m.waitStream()
+	case streamLaggedMsg:
+		m.flashMsg(lvWarn, fmt.Sprintf("%d events were dropped because the display fell behind.", msg.dropped))
+		return m, m.waitStream()
+	case streamEndMsg:
+		m.streamLive = false
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
+			m.streamErr = errText(msg.err)
+		}
+		return m, tea.Tick(5*time.Second, func(time.Time) tea.Msg { return streamRetryMsg{} })
+	case streamRetryMsg:
+		return m, m.startStream()
 	case tea.MouseClickMsg:
 		return m, m.click(msg.Mouse())
 	case tea.KeyPressMsg:
@@ -215,8 +344,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) apply(r resultMsg) {
 	delete(m.inflight, r.name)
 	if r.err != nil {
-		if r.name == "keys" {
+		switch r.name {
+		case "keys":
 			m.keysErr = errText(r.err)
+			return
+		case "processes":
+			m.procsErr = errText(r.err)
+			return
+		case "services":
+			m.svcErr = errText(r.err)
 			return
 		}
 		m.lastErr = errText(r.err)
@@ -224,6 +360,7 @@ func (m *Model) apply(r resultMsg) {
 	}
 	m.lastErr = ""
 	m.lastOK = m.opts.Now()
+	sanitize(r.v)
 	switch v := r.v.(type) {
 	case *apiv1.Status:
 		m.status = v
@@ -240,6 +377,15 @@ func (m *Model) apply(r resultMsg) {
 		m.health = v
 	case *apiv1.EventsResponse:
 		m.events = v
+		for i := len(v.Items) - 1; i >= 0; i-- {
+			m.addEvent(v.Items[i])
+		}
+	case *apiv1.ProcessesResponse:
+		m.procs, m.procsErr = v, ""
+	case *apiv1.ServicesResponse:
+		m.services, m.svcErr = v, ""
+	case *apiv1.NetworkResponse:
+		m.network = v
 	case []apiv1.APIKey:
 		m.keys, m.keysErr = v, ""
 		if m.selected >= len(v) {
@@ -311,13 +457,18 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
 	if s == "ctrl+c" {
 		m.revealed = nil
+		m.stop()
 		return tea.Quit
 	}
 	if m.modal != modalNone {
 		return m.modalKey(k)
 	}
+	if m.searching {
+		return m.searchKey(k)
+	}
 	switch s {
 	case "q":
+		m.stop()
 		return tea.Quit
 	case "?":
 		m.showHelp = !m.showHelp
@@ -327,13 +478,66 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.setScreen((m.screen + 1) % numScreens)
 	case "shift+tab", "left", "h":
 		return m.setScreen((m.screen + numScreens - 1) % numScreens)
-	case "1", "2", "3", "4", "5":
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		return m.setScreen(screen(s[0] - '1'))
 	}
-	if m.screen == scrAccess {
+	switch m.screen {
+	case scrAccess:
 		return m.accessKey(s)
+	case scrProcesses:
+		switch s {
+		case "s":
+			m.procSort = (m.procSort + 1) % len(processSorts)
+			return m.refetch("processes")
+		case "/":
+			m.searching = true
+		case "k":
+			m.procKernel = !m.procKernel
+			return m.refetch("processes")
+		case "esc":
+			if m.procSearch != "" {
+				m.procSearch = ""
+				return m.refetch("processes")
+			}
+		}
+	case scrServices:
+		if s == "f" {
+			m.svcFailed = !m.svcFailed
+		}
 	}
 	return nil
+}
+
+// searchKey edits the process search text.
+func (m *Model) searchKey(k tea.KeyPressMsg) tea.Cmd {
+	switch k.String() {
+	case "enter", "esc":
+		m.searching = false
+		if k.String() == "esc" {
+			m.procSearch = ""
+		}
+		return m.refetch("processes")
+	case "backspace":
+		m.procSearch = dropLast(m.procSearch)
+	default:
+		if k.Text != "" && len(m.procSearch) < 64 {
+			m.procSearch += k.Text
+		}
+	}
+	return nil
+}
+
+// refetch drops the cached response for name and fetches it again.
+func (m *Model) refetch(name string) tea.Cmd {
+	delete(m.inflight, name)
+	return m.refresh(false)
+}
+
+// stop ends the event stream.
+func (m *Model) stop() {
+	if m.streamStop != nil {
+		m.streamStop()
+	}
 }
 
 func (m *Model) accessKey(s string) tea.Cmd {
@@ -401,9 +605,9 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 	case modalCreateScopes:
 		switch s {
 		case "up", "k":
-			m.scopeCursor = 0
+			m.scopeCursor = max(0, m.scopeCursor-1)
 		case "down", "j":
-			m.scopeCursor = 1
+			m.scopeCursor = min(len(issuableScopes)-1, m.scopeCursor+1)
 		case "space":
 			m.scopeOn[m.scopeCursor] = !m.scopeOn[m.scopeCursor]
 		case "enter":
@@ -474,6 +678,8 @@ func (m *Model) applyAction(a actionMsg) tea.Cmd {
 		m.flashMsg(lvCrit, "Failed: "+errText(a.err))
 		return nil
 	}
+	sanitize(a.created)
+	sanitize(a.revoked)
 	switch a.action {
 	case "create", "rotate":
 		m.revealed, m.modal = a.created, modalReveal
@@ -484,24 +690,30 @@ func (m *Model) applyAction(a actionMsg) tea.Cmd {
 }
 
 // tabSpans returns the x range of each tab in the tab bar (row 1).
-func tabSpans() [numScreens][2]int {
+func tabSpans(width int) [numScreens][2]int {
 	var out [numScreens][2]int
 	x := 0
-	for i, name := range screenNames {
-		w := len(tabLabel(screen(i), name)) + 2 // padding
+	for i := range screenNames {
+		w := len(tabLabel(screen(i), width)) + 2 // padding
 		out[i] = [2]int{x, x + w}
 		x += w + 1
 	}
 	return out
 }
 
-func tabLabel(s screen, name string) string { return string(rune('1'+s)) + " " + name }
+func tabLabel(s screen, width int) string {
+	name := screenNames[s]
+	if width < compactTabs {
+		name = shortNames[s]
+	}
+	return string(rune('1'+s)) + " " + name
+}
 
 func (m *Model) click(ms tea.Mouse) tea.Cmd {
 	if ms.Y != 1 || ms.Button != tea.MouseLeft {
 		return nil
 	}
-	for i, span := range tabSpans() {
+	for i, span := range tabSpans(m.width) {
 		if ms.X >= span[0] && ms.X < span[1] {
 			return m.setScreen(screen(i))
 		}

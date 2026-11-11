@@ -270,3 +270,31 @@ func TestSystemModePermissions(t *testing.T) {
 		}
 	}
 }
+
+// An open event stream must not hold up shutdown.
+func TestShutdownClosesEventStreams(t *testing.T) {
+	root := shortDir(t)
+	r := start(t, testOptions(t, root))
+	c := socketClient(r.ep.SocketPath)
+	streamDone := make(chan struct{})
+	go func() {
+		defer close(streamDone)
+		resp, err := c.Get("http://cockpit/api/v1/events/stream")
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	time.Sleep(200 * time.Millisecond) // let the stream open
+	begin := time.Now()
+	r.stop(t)
+	if d := time.Since(begin); d > 3*time.Second {
+		t.Errorf("shutdown took %v with an open stream", d)
+	}
+	select {
+	case <-streamDone:
+	case <-time.After(5 * time.Second):
+		t.Error("stream not closed by shutdown")
+	}
+	c.CloseIdleConnections()
+}

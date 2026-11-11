@@ -46,6 +46,8 @@ const (
 	CheckMemory          = "memory"
 	CheckStorageCapacity = "storage_capacity"
 	CheckDiskHealth      = "disk_health"
+	CheckServices        = "services"
+	CheckNetworkErrors   = "network_errors"
 )
 
 // CheckResult is one check's outcome.
@@ -73,6 +75,7 @@ type Thresholds struct {
 	MemWarnPressurePct, MemCriticalPressurePct   float64
 	StorageWarnPct, StorageCriticalPct           float64
 	DiskWarnPercentageUsed                       int
+	NetWarnErrorsPerMin, NetCriticalErrorsPerMin float64
 }
 
 // SnapshotSource provides the latest engine snapshot.
@@ -87,6 +90,9 @@ type Options struct {
 	Now        func() time.Time
 	Logger     *slog.Logger
 	Publish    func(core.Event) // finding raised/resolved events; optional
+	// Wait, if set, delays the first evaluation until it is closed (the
+	// engine's first collection round) or 3 seconds pass.
+	Wait <-chan struct{}
 }
 
 // Evaluator runs checks and holds the latest report.
@@ -96,6 +102,10 @@ type Evaluator struct {
 
 	mu    sync.Mutex
 	state map[string]*tracked // key: checkID + "|" + subject
+
+	// Previous interface error counters, for rates between evaluations.
+	netPrev   map[string]uint64
+	netPrevAt time.Time
 
 	report atomic.Pointer[Report]
 }
@@ -138,6 +148,14 @@ func (e *Evaluator) Current() *Report { return e.report.Load() }
 
 // Run evaluates every interval until ctx is cancelled.
 func (e *Evaluator) Run(ctx context.Context, interval time.Duration) {
+	if e.opts.Wait != nil {
+		select {
+		case <-e.opts.Wait:
+		case <-time.After(3 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+	}
 	e.Evaluate()
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -167,6 +185,8 @@ var checks = []checkDef{
 	{CheckMemory, "Memory", (*Evaluator).memory},
 	{CheckStorageCapacity, "Storage capacity", (*Evaluator).storage},
 	{CheckDiskHealth, "Disk health", (*Evaluator).disk},
+	{CheckServices, "Services", (*Evaluator).services},
+	{CheckNetworkErrors, "Network errors", (*Evaluator).networkErrors},
 }
 
 // Evaluate runs every check once, updates findings and publishes events.
@@ -535,4 +555,65 @@ func joinProblems(p []string) string {
 		out += "; " + s
 	}
 	return out
+}
+
+func (e *Evaluator) services(s *core.Snapshot, now time.Time) ([]observation, core.Availability, string) {
+	avail, reason, ok := usable(s.Services.Meta, s.Services.Data != nil, now)
+	if !ok {
+		return nil, avail, reason
+	}
+	var out []observation
+	for _, svc := range *s.Services.Data {
+		var sev core.Severity
+		if svc.ActiveState == "failed" {
+			sev = core.SeverityWarning
+		}
+		out = append(out, observation{subject: "service:" + svc.Name, finding: core.Finding{
+			Severity: sev,
+			Summary:  svc.Name + " has failed",
+			Evidence: map[string]string{"active_state": svc.ActiveState, "sub_state": svc.SubState, "description": svc.Description},
+			Recommendation: "Inspect the unit with: systemctl status " + svc.Name + " and journalctl -u " + svc.Name +
+				". Restart it after fixing the cause, or disable it if it is not needed.",
+		}})
+	}
+	return out, core.Available, ""
+}
+
+// networkErrors reports interfaces whose error counters are rising. The
+// rate is measured between evaluations, so errors accumulated before the
+// agent started never count.
+func (e *Evaluator) networkErrors(s *core.Snapshot, now time.Time) ([]observation, core.Availability, string) {
+	avail, reason, ok := usable(s.Network.Meta, s.Network.Data != nil, now)
+	if !ok {
+		return nil, avail, reason
+	}
+	cur := map[string]uint64{}
+	for _, n := range *s.Network.Data {
+		if !n.Loopback {
+			cur[n.Name] = n.RxErrors + n.TxErrors
+		}
+	}
+	prev, prevAt := e.netPrev, e.netPrevAt
+	e.netPrev, e.netPrevAt = cur, now
+	minutes := now.Sub(prevAt).Minutes()
+	th := e.opts.Thresholds
+	var out []observation
+	for _, n := range *s.Network.Data {
+		if n.Loopback {
+			continue
+		}
+		rate := 0.0
+		if before, seen := prev[n.Name]; seen && minutes > 0 && cur[n.Name] >= before {
+			rate = float64(cur[n.Name]-before) / minutes
+		}
+		sev := severityFor(rate, th.NetWarnErrorsPerMin, th.NetCriticalErrorsPerMin, true)
+		out = append(out, observation{subject: "interface:" + n.Name, finding: core.Finding{
+			Severity: sev,
+			Summary:  fmt.Sprintf("%s is reporting %s errors per minute", n.Name, f1(rate)),
+			Evidence: map[string]string{"errors_per_minute": f1(rate), "rx_errors": fmt.Sprint(n.RxErrors), "tx_errors": fmt.Sprint(n.TxErrors),
+				"warn_per_minute": f1(th.NetWarnErrorsPerMin), "critical_per_minute": f1(th.NetCriticalErrorsPerMin)},
+			Recommendation: "Check the cable, port and link negotiation (duplex/speed); for wireless, check signal quality and interference.",
+		}})
+	}
+	return out, core.Available, ""
 }

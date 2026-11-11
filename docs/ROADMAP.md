@@ -78,13 +78,27 @@ revoked; missing sensors and permissions are reported, not fatal.
 
 ## Phase 2 — Hardware and diagnostics
 
-- Detailed CPU, DIMM (where permitted), PCI and USB inventory.
-- GPU inventory and vendor metrics.
-- More health rules (services, network errors, storage warnings).
-- `/events/stream` (SSE).
-- `/processes` with snapshot-bound pagination; `processes:read` scope.
-- systemd services via D-Bus.
-- Network diagnostics.
+**Status: implemented, awaiting review.** Every milestone below is done,
+verified with tests and against a real WSL2 host (systemd, NVIDIA GPU via
+`nvidia-smi`; no USB, DMI or sensors, all reported with reasons). D14–D17
+accepted.
+
+| # | Milestone | Depends on |
+|---|---|---|
+| 2A | Event streaming: bounded per-subscriber queues with a lag marker; `GET /events/stream` (SSE) with heartbeats, stream limits, and re-verification of the key so revoked or expired keys are disconnected (D17) | 1E |
+| 2B | Processes: on-demand sampler with a short cache and per-process CPU %; `GET /processes` with sorting, search and snapshot-bound cursors; new `processes:read` scope; command lines redacted (D9, D14) | 1A |
+| 2C | systemd services over D-Bus (`godbus/dbus`, D15); `GET /services`; unavailable when systemd or the bus is missing | 1A |
+| 2D | Hardware inventory: CPU topology, caches and flags; PCI and USB devices; board/firmware where readable (DMI, often root-only); GPUs from PCI/DRM with vendor metrics (NVIDIA via `nvidia-smi` CSV, AMD via sysfs; D16) | 1B |
+| 2E | Health rules: failed services, rising network errors; collector degraded/recovered events | 2C, 1E |
+| 2F | Passive network diagnostics: addresses, default routes, DNS servers (no probing) | 1B |
+| 2G | TUI: Hardware, Processes, Services and Events screens; GPU on Overview; live events via SSE | 2A–2F |
+| 2H | Docs, spec review, security review | all |
+
+**Exit criteria:** on a supported host without root, the TUI and API show
+processes, services, detailed hardware (with unavailable parts explained),
+GPU metrics where a supported GPU exists, live events, and the new health
+findings; unprivileged limits (other users' process I/O, DMI tables,
+SMART) are reported, not fatal.
 
 ## Phase 3 — History and operational polish
 
@@ -117,6 +131,8 @@ revoked; missing sensors and permissions are reported, not fatal.
 | Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. Phase 3: a root-owned systemd timer runs `smartctl --json` and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
 | Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 2 | Still prints help. Launching the TUI is now reasonable since it can embed an agent. |
 | Q5 | Should the filesystem skip lists become configurable? | 3 | Yes, with the history work. |
+| Q6 | Should a dedicated scope cover network addresses, routes and DNS? | 3 | No for now: documented as visible with `metrics:read`. Revisit with fleet mode. |
+| Q7 | Should command lines ever be exposed (behind a new scope)? | 3+ | Not until there is a clear need; they often contain secrets. |
 | Q3 | Default TCP port | 0.6 | `7878` (avoids 9090, used by Red Hat Cockpit) |
 
 ## Non-goals for the MVP

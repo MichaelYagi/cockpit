@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,10 @@ type fakeAPI struct {
 	created []apiv1.CreateAPIKeyRequest
 	revoked []string
 	rotated []string
+	procsOK bool
+	stream  []apiv1.Event
+
+	procQueries []client.ProcessesQuery
 }
 
 var errDown = errors.New("dial unix /run/x.sock: connect: no such file or directory")
@@ -68,8 +73,16 @@ func (f *fakeAPI) Hardware(context.Context) (*apiv1.HardwareResponse, error) {
 		return nil, errDown
 	}
 	return &apiv1.HardwareResponse{
-		CPU:    avail(apiv1.CPUInventory{ModelName: "Test CPU @ 3.0GHz", LogicalCores: 8}),
-		Memory: avail(apiv1.MemoryInventory{TotalBytes: 16 << 30}),
+		CPU: avail(apiv1.CPUInventory{ModelName: "Test CPU @ 3.0GHz", LogicalCores: 8, Vendor: "AuthenticAMD", Family: "23", Model: "113",
+			Sockets: 1, Cores: 4, Virtualization: "AMD-V", Hypervisor: true, Flags: []string{"avx2", "aes"}, MaxFrequencyMHz: ptr(4400.0),
+			Caches: []apiv1.CPUCache{{Level: 3, Type: "Unified", SizeBytes: 16 << 20, SharedBy: 8}}}),
+		Memory:        avail(apiv1.MemoryInventory{TotalBytes: 16 << 30}),
+		MemoryModules: missing[[]apiv1.MemoryModule]("permission_denied", "Reading memory module details requires root."),
+		Board:         missing[apiv1.Board]("unsupported", "This system does not expose DMI firmware tables."),
+		PCIDevices: avail([]apiv1.PCIDevice{{Address: "0000:26:00.0", ClassName: "VGA compatible controller", VendorName: "NVIDIA Corporation",
+			DeviceName: "GA106 [GeForce RTX 3060]", Driver: "nvidia"}}),
+		USBDevices: missing[[]apiv1.USBDevice]("unsupported", "No USB devices are connected or visible."),
+		GPUs:       avail([]apiv1.GPU{{Name: "NVIDIA GeForce RTX 3060", Driver: "nvidia", DriverVersion: "610.88", MemoryTotalBytes: ptr(uint64(12 << 30))}}),
 	}, nil
 }
 
@@ -102,6 +115,9 @@ func (f *fakeAPI) Metrics(context.Context, ...string) (*apiv1.MetricsResponse, e
 		Filesystems:    ptr(avail(fss)),
 		Network:        ptr(avail(nets)),
 		Sensors:        ptr(missing[[]apiv1.Sensor]("unsupported", "No hardware temperature sensors are exposed. This is normal in virtual machines, containers and WSL.")),
+		GPU: ptr(avail([]apiv1.GPU{{Vendor: "NVIDIA", Name: "NVIDIA GeForce RTX 3060", Driver: "nvidia", DriverVersion: "610.88",
+			MemoryTotalBytes: ptr(uint64(12 << 30)), MemoryUsedBytes: ptr(uint64(3 << 30)), UtilizationPercent: ptr(64.0),
+			TemperatureCelsius: ptr(61.0), PowerWatts: ptr(120.0), PowerLimitWatts: ptr(170.0), MetricsSource: "nvidia-smi"}})),
 	}, nil
 }
 
@@ -128,6 +144,9 @@ func (f *fakeAPI) Health(context.Context) (*apiv1.HealthResponse, error) {
 }
 
 func (f *fakeAPI) Events(context.Context, client.EventsQuery) (*apiv1.EventsResponse, error) {
+	if f.down {
+		return nil, errDown
+	}
 	return &apiv1.EventsResponse{Items: []apiv1.Event{{ID: "evt_1", Time: t0.Add(-time.Hour), Type: "finding.raised", Severity: "warning", Subject: "filesystem:/", Message: "/ is 91.2% full"}}}, nil
 }
 
@@ -157,6 +176,48 @@ func (f *fakeAPI) RevokeKey(_ context.Context, id string) (*apiv1.APIKey, error)
 	return &apiv1.APIKey{ID: id, Name: "victim"}, nil
 }
 
+func (f *fakeAPI) Processes(_ context.Context, q client.ProcessesQuery) (*apiv1.ProcessesResponse, error) {
+	if !f.admin && !f.procsOK {
+		return nil, &client.APIError{StatusCode: 403, Code: "insufficient_scope", Message: "This key does not have the processes:read scope."}
+	}
+	f.procQueries = append(f.procQueries, q)
+	at := t0
+	items := []apiv1.Process{
+		{PID: 1234, Name: "postgres", User: "postgres", State: "S", Threads: 8, CPUPercent: ptr(42.5), MemoryPercent: 3.2, RSSBytes: 512 << 20},
+		{PID: 99, Name: "zombie", User: "alice", State: "Z", Threads: 1},
+	}
+	if q.KernelThreads {
+		items = append(items, apiv1.Process{PID: 2, Name: "kthreadd", User: "root", State: "S", KernelThread: true})
+	}
+	return &apiv1.ProcessesResponse{Status: "available", CollectedAt: &at, WindowSeconds: 2, Total: 140, Items: items, Redacted: []string{"cmdline"}}, nil
+}
+
+func (f *fakeAPI) Services(context.Context, string) (*apiv1.ServicesResponse, error) {
+	return &apiv1.ServicesResponse{Services: avail(apiv1.ServiceList{Total: 3, Active: 1, Failed: 1, Inactive: 1, Items: []apiv1.Service{
+		{Name: "ssh.service", Description: "OpenSSH server", ActiveState: "active", SubState: "running"},
+		{Name: "apt-daily.service", Description: "Daily apt", ActiveState: "inactive", SubState: "dead"},
+		{Name: "backup.service", Description: "Nightly backup", ActiveState: "failed", SubState: "failed"},
+	}})}, nil
+}
+
+func (f *fakeAPI) Network(context.Context) (*apiv1.NetworkResponse, error) {
+	return &apiv1.NetworkResponse{
+		Interfaces: avail([]apiv1.NetworkInterface{{Name: "eth0", Addresses: []string{"192.168.1.10/24"}}}),
+		Routes:     avail([]apiv1.Route{{Family: "ipv4", Destination: "0.0.0.0/0", Gateway: "192.168.1.1", Interface: "eth0", Metric: 100, Default: true}}),
+		DNS:        avail(apiv1.DNS{Nameservers: []string{"1.1.1.1"}, Search: []string{}, Resolver: "systemd-resolved"}),
+	}, nil
+}
+
+func (f *fakeAPI) StreamEvents(ctx context.Context, _ string, fn func(client.StreamMessage) error) error {
+	for _, e := range f.stream {
+		if err := fn(client.StreamMessage{Event: &e}); err != nil {
+			return err
+		}
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 // drive runs a command and feeds resulting messages back into the model,
 // like the Bubble Tea runtime does (ticks excluded).
 func drive(t *testing.T, m *Model, cmd tea.Cmd) {
@@ -180,7 +241,7 @@ func drive(t *testing.T, m *Model, cmd tea.Cmd) {
 	}
 }
 
-func setup(t *testing.T, api *fakeAPI, w, h int) *Model {
+func setup(t *testing.T, api API, w, h int) *Model {
 	t.Helper()
 	m := New(api, Options{Target: "/run/test.sock", Now: func() time.Time { return t0 }})
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
@@ -275,7 +336,7 @@ func TestOverviewContent(t *testing.T) {
 	out := screenText(m)
 	for _, want := range []string{
 		"COCKPIT", "testbox", "Ubuntu 24.04 LTS", "up 1d 1h 1m", "▲ WARNING", // header with health (symbol + word)
-		"1 Overview", "5 API Access",
+		"1 Overview", "9 API Access", "GPU", "RTX 3060", "vram",
 		"Test CPU @ 3.0GHz · 8 threads", "37.5%", "1.50  1.25  0.75",
 		"62.5%", "6.0 GiB of 16.0 GiB", "stall  unsupported",
 		"91.2%", "1.4 MiB/s", "eth0",
@@ -296,21 +357,21 @@ func TestOverviewContent(t *testing.T) {
 
 func TestScreensShowUnavailableReasons(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 120, 40)
-	press(t, m, "2")
+	press(t, m, "3")
 	out := screenText(m)
 	for _, want := range []string{"Health checks", "unsupported: No hardware temperature sensors", "/ is 91.2% full", "Remove or archive", "Recent events"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("health missing %q:\n%s", want, out)
 		}
 	}
-	press(t, m, "3")
+	press(t, m, "4")
 	out = screenText(m)
 	for _, want := range []string{"Test SSD", "nvme", "not configured", "smartctl (smartmontools 7.0 or newer) is not installed."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("storage missing %q:\n%s", want, out)
 		}
 	}
-	press(t, m, "4")
+	press(t, m, "5")
 	out = screenText(m)
 	for _, want := range []string{"RX/s", "eth0", "1000 Mb/s", "1.4 MiB/s", "244.1 KiB/s", "5.0 GiB"} {
 		if !strings.Contains(out, want) {
@@ -322,19 +383,19 @@ func TestScreensShowUnavailableReasons(t *testing.T) {
 func TestNavigation(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 120, 40)
 	press(t, m, "tab")
-	if m.screen != scrHealth {
+	if m.screen != scrHardware {
 		t.Errorf("tab -> %v", m.screen)
 	}
-	press(t, m, "5")
+	press(t, m, "9")
 	if m.screen != scrAccess {
-		t.Errorf("5 -> %v", m.screen)
+		t.Errorf("9 -> %v", m.screen)
 	}
 	press(t, m, "tab")
 	if m.screen != scrOverview {
 		t.Errorf("wrap -> %v", m.screen)
 	}
 	// Clicking a tab switches to it.
-	span := tabSpans()[scrNetwork]
+	span := tabSpans(m.width)[scrNetwork]
 	_, cmd := m.Update(tea.MouseClickMsg{X: span[0] + 1, Y: 1, Button: tea.MouseLeft})
 	drive(t, m, cmd)
 	if m.screen != scrNetwork {
@@ -357,7 +418,7 @@ func TestNavigation(t *testing.T) {
 func TestCreateKeyRevealsOnce(t *testing.T) {
 	api := &fakeAPI{admin: true}
 	m := setup(t, api, 120, 40)
-	press(t, m, "5", "n")
+	press(t, m, "9", "n")
 	typeText(t, m, "grafana")
 	press(t, m, "enter")
 	if !strings.Contains(screenText(m), "metrics:read") {
@@ -384,7 +445,7 @@ func TestCreateKeyRevealsOnce(t *testing.T) {
 func TestCreateKeyNeedsAScope(t *testing.T) {
 	api := &fakeAPI{admin: true}
 	m := setup(t, api, 120, 40)
-	press(t, m, "5", "n")
+	press(t, m, "9", "n")
 	typeText(t, m, "x")
 	press(t, m, "enter", "down", "space", "enter") // turn metrics:read off: nothing selected
 	if len(api.created) != 0 || !strings.Contains(screenText(m), "at least one scope") {
@@ -399,7 +460,7 @@ func TestCreateKeyNeedsAScope(t *testing.T) {
 func TestRevokeRequiresTypedID(t *testing.T) {
 	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{{ID: "k3p9x2m7q4ta", Name: "victim", Active: true}}}
 	m := setup(t, api, 120, 40)
-	press(t, m, "5", "x")
+	press(t, m, "9", "x")
 	typeText(t, m, "wrong")
 	press(t, m, "enter")
 	if len(api.revoked) != 0 || !strings.Contains(screenText(m), "did not match") {
@@ -430,7 +491,7 @@ func TestRevokeRequiresTypedID(t *testing.T) {
 func TestKeyManagementRequiresSocket(t *testing.T) {
 	api := &fakeAPI{admin: false}
 	m := setup(t, api, 120, 40)
-	press(t, m, "5")
+	press(t, m, "9")
 	out := screenText(m)
 	if !strings.Contains(out, "requires the local admin socket") {
 		t.Errorf("access screen over TCP:\n%s", out)
@@ -492,7 +553,7 @@ func TestOverviewAtMinimumSize(t *testing.T) {
 func TestKeyTableFitsNarrowTerminal(t *testing.T) {
 	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{{ID: "k3p9x2m7q4ta", Name: "grafana", Scopes: []string{"metrics:read", "system:read"}, Active: true}}}
 	m := setup(t, api, MinWidth, MinHeight)
-	press(t, m, "5")
+	press(t, m, "9")
 	out := screenText(m)
 	for _, want := range []string{"EXPIRES", "metrics,system", "never", "clients 1 active"} {
 		if !strings.Contains(out, want) {
@@ -509,5 +570,192 @@ func TestColumnDropsWholeBoxes(t *testing.T) {
 	}
 	if len(strings.Split(out, "\n")) > 8 {
 		t.Errorf("column exceeded height:\n%s", out)
+	}
+}
+
+func TestHardwareScreen(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 120, 45)
+	press(t, m, "2")
+	out := screenText(m)
+	for _, want := range []string{"Processor", "AuthenticAMD", "1 socket(s) · 4 cores · 8 threads · up to 4.40 GHz", "L3 u 16.0 MiB", "AMD-V",
+		"running in a virtual machine", "Graphics", "NVIDIA GeForce RTX 3060", "permission denied — Reading memory module details requires root",
+		"System and firmware", "unsupported", "GA106 [GeForce RTX 3060]", "USB: unsupported"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("hardware missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestProcessesScreen(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 120, 40)
+	press(t, m, "6")
+	out := screenText(m)
+	for _, want := range []string{"Processes · sorted by cpu", "postgres", "42.5", "512.0 MiB", "top 2 of 140 processes", "command lines are not shown"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("processes missing %q:\n%s", want, out)
+		}
+	}
+	press(t, m, "s")
+	if q := api.procQueries[len(api.procQueries)-1]; q.Sort != "memory" {
+		t.Errorf("sort not cycled: %+v", q)
+	}
+	press(t, m, "/")
+	typeText(t, m, "pg")
+	press(t, m, "enter")
+	if q := api.procQueries[len(api.procQueries)-1]; q.Search != "pg" {
+		t.Errorf("search not sent: %+v", q)
+	}
+	press(t, m, "k")
+	if q := api.procQueries[len(api.procQueries)-1]; !q.KernelThreads || !strings.Contains(screenText(m), "[kthreadd]") {
+		t.Errorf("kernel threads: %+v", q)
+	}
+	// Typing while searching must not switch screens or quit.
+	press(t, m, "/")
+	typeText(t, m, "q9")
+	if m.screen != scrProcesses || m.procSearch != "pgq9" {
+		t.Errorf("search input leaked into navigation: screen=%v search=%q", m.screen, m.procSearch)
+	}
+	press(t, m, "esc")
+	if m.procSearch != "" || m.searching {
+		t.Error("esc did not clear the search")
+	}
+}
+
+func TestProcessesNeedScope(t *testing.T) {
+	m := setup(t, &fakeAPI{admin: false}, 120, 40)
+	press(t, m, "6")
+	out := screenText(m)
+	if !strings.Contains(out, "processes:read") {
+		t.Errorf("missing scope explanation:\n%s", out)
+	}
+}
+
+func TestServicesScreen(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 120, 40)
+	press(t, m, "7")
+	out := screenText(m)
+	if !strings.Contains(out, "3 total · 1 active · 1 inactive · 1 failed") || strings.Index(out, "backup.service") > strings.Index(out, "ssh.service") {
+		t.Errorf("services (failed first):\n%s", out)
+	}
+	press(t, m, "f")
+	out = screenText(m)
+	if strings.Contains(out, "ssh.service") || !strings.Contains(out, "backup.service") {
+		t.Errorf("failed filter:\n%s", out)
+	}
+}
+
+func TestNetworkScreenConfig(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 120, 40)
+	press(t, m, "5")
+	out := screenText(m)
+	for _, want := range []string{"192.168.1.10/24", "default     via 192.168.1.1 dev eth0 metric 100 (ipv4)", "1.1.1.1", "via systemd-resolved"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("network config missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestLiveEvents(t *testing.T) {
+	api := &fakeAPI{stream: []apiv1.Event{{ID: "evt_live", Time: t0, Severity: "critical", Message: "sda: SMART FAILED"}}}
+	m := setup(t, api, 120, 40)
+	cmd := m.startStream()
+	defer m.stop()
+	for i := 0; i < 2; i++ { // open, then the event
+		_, cmd = m.Update(cmd())
+	}
+	press(t, m, "8")
+	out := screenText(m)
+	if !strings.Contains(out, "● live") || !strings.Contains(out, "sda: SMART FAILED") || !strings.Contains(out, "/ is 91.2% full") {
+		t.Errorf("events screen:\n%s", out)
+	}
+	// Duplicates from history and the stream are shown once.
+	m.Update(streamEventMsg{e: apiv1.Event{ID: "evt_live", Message: "sda: SMART FAILED"}})
+	if strings.Count(screenText(m), "sda: SMART FAILED") != 1 {
+		t.Error("duplicate event shown")
+	}
+	m.Update(streamEndMsg{err: errors.New("connection reset")})
+	if out := screenText(m); !strings.Contains(out, "reconnecting") {
+		t.Errorf("stream end not shown:\n%s", out)
+	}
+}
+
+func TestEventListIsBounded(t *testing.T) {
+	m := New(&fakeAPI{}, Options{})
+	for i := 0; i < maxEvents+50; i++ {
+		m.addEvent(apiv1.Event{ID: fmt.Sprint(i)})
+	}
+	if len(m.eventList) != maxEvents || len(m.eventIDs) != maxEvents || m.eventList[0].ID != fmt.Sprint(maxEvents+49) {
+		t.Errorf("len %d ids %d first %s", len(m.eventList), len(m.eventIDs), m.eventList[0].ID)
+	}
+}
+
+func TestCompactTabsFitAndClick(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 80, 24)
+	tabs := ansi.Strip(m.tabs(80))
+	if lipgloss.Width(tabs) > 80 || !strings.Contains(tabs, "9 API") || !strings.Contains(tabs, "6 Procs") {
+		t.Errorf("compact tabs %q (%d wide)", tabs, lipgloss.Width(tabs))
+	}
+	span := tabSpans(80)[scrAccess]
+	_, cmd := m.Update(tea.MouseClickMsg{X: span[0] + 1, Y: 1, Button: tea.MouseLeft})
+	drive(t, m, cmd)
+	if m.screen != scrAccess {
+		t.Errorf("click on compact tab -> %v", m.screen)
+	}
+}
+
+// Process names, device strings and service descriptions come from other
+// users or hardware; escape sequences in them must never reach the
+// terminal.
+func TestHostileStringsAreSanitized(t *testing.T) {
+	evil := "\x1b]0;pwned\x07\x1b[2Jevil\x9bname\xff"
+	api := &hostileAPI{fakeAPI: &fakeAPI{admin: true}, evil: evil}
+	m := setup(t, api, 120, 40)
+	for _, key := range []string{"2", "6"} {
+		press(t, m, key)
+		out := m.render()
+		for _, bad := range []string{"\x1b]0;pwned", "\x1b[2J", "\x07", "\x9b", "\xff"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("screen %s contains raw control sequence %q", key, bad)
+			}
+		}
+		if !strings.Contains(ansi.Strip(out), "evil") {
+			t.Errorf("screen %s lost the visible text", key)
+		}
+	}
+	e := apiv1.Event{ID: "x", Message: evil}
+	m.Update(streamEventMsg{e: e})
+	if strings.Contains(m.eventList[0].Message, "\x1b") {
+		t.Error("stream event not sanitized")
+	}
+}
+
+type hostileAPI struct {
+	*fakeAPI
+	evil string
+}
+
+func (h *hostileAPI) Processes(ctx context.Context, q client.ProcessesQuery) (*apiv1.ProcessesResponse, error) {
+	r, err := h.fakeAPI.Processes(ctx, q)
+	if err == nil {
+		r.Items[0].Name = h.evil
+	}
+	return r, err
+}
+
+func (h *hostileAPI) Hardware(ctx context.Context) (*apiv1.HardwareResponse, error) {
+	r, err := h.fakeAPI.Hardware(ctx)
+	if err == nil {
+		r.USBDevices = avail([]apiv1.USBDevice{{Path: "1-1", Product: h.evil}})
+	}
+	return r, err
+}
+
+func TestCleanText(t *testing.T) {
+	if cleanText("normal text · ünïcode ✓") != "normal text · ünïcode ✓" {
+		t.Error("clean text altered")
+	}
+	if got := cleanText("a\x1bb\tc\x00"); got != "a�b�c�" {
+		t.Errorf("%q", got)
 	}
 }

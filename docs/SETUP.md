@@ -42,12 +42,14 @@ programs, run the agent separately:
 
 | Key | Action |
 |---|---|
-| `1`–`5`, `tab`, `←`/`→`, click a tab | Switch screen |
+| `1`–`9`, `tab`, `←`/`→`, click a tab | Switch screen (Overview, Hardware, Health, Storage, Network, Processes, Services, Events, API Access) |
 | `r` | Refresh now |
 | `?` | Help |
 | `q`, `Ctrl-C` | Quit |
 | `↑`/`↓` (API Access) | Select a key |
 | `n` / `o` / `x` (API Access) | Create / rotate / revoke a key |
+| `s` / `/` / `k` (Processes) | Change sort / search / show kernel threads |
+| `f` (Services) | Failed services only / all |
 
 Rotation and revocation ask you to type the key ID. A new key is shown once.
 It is erased from the screen when you press Enter and cannot be shown again.
@@ -79,9 +81,10 @@ chmod 600 grafana.key
 ./bin/cockpit keys revoke <id>      # asks you to type the ID; --yes to skip
 ```
 
-Scopes: `system:read` (identity, hardware, status) and `metrics:read`
-(metrics, storage, network, sensors, health, events). Keys can never hold
-admin rights.
+Scopes: `system:read` (identity, hardware, services, status),
+`metrics:read` (metrics, storage, network, sensors, health, events and the
+live event stream) and `processes:read` (the process list). Keys can never
+hold admin rights.
 
 ## Calling the API
 
@@ -91,6 +94,9 @@ curl http://127.0.0.1:7878/api/v1/livez
 
 # With a key (never put keys in URLs):
 curl -H "Authorization: Bearer $(cat grafana.key)" http://127.0.0.1:7878/api/v1/metrics?sections=cpu,memory
+
+# Live events (Server-Sent Events):
+curl -N -H "Authorization: Bearer $(cat grafana.key)" http://127.0.0.1:7878/api/v1/events/stream
 
 # As the local admin over the socket (no key):
 curl --unix-socket "$XDG_RUNTIME_DIR/cockpit-monitor/agent.sock" http://localhost/api/v1/status
@@ -149,6 +155,11 @@ Unavailable data is reported with a reason, never as an error:
 | Disk health | `smartctl` not installed | Install smartmontools 7.0+ |
 | Disk health | Permission denied | Reading SMART data needs elevated privileges; a least-privilege option is planned for Phase 3 |
 | Memory pressure | Kernel without PSI (before 4.20, or `psi=0`) | Memory utilization is still checked |
+| GPU metrics | `nvidia-smi` not installed (NVIDIA) or no metrics source (e.g. Intel) | Install the NVIDIA driver utilities; the GPU is still listed |
+| Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
+| Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
+| Services | Not running systemd | Nothing; other features still work |
+| Processes (partial) | `/proc` mounted with `hidepid` | Run the agent with access to other users' processes, if appropriate |
 
 ## Configuration reference
 

@@ -48,6 +48,17 @@ const (
 	CapNetworkThroughput  Capability = "network.throughput"
 	CapSensorsThermal     Capability = "sensors.thermal"
 	CapSensorsFan         Capability = "sensors.fan"
+	CapProcessesList      Capability = "processes.list"
+	CapServicesSystemd    Capability = "services.systemd"
+	CapHardwareCPU        Capability = "hardware.cpu"
+	CapHardwarePCI        Capability = "hardware.pci"
+	CapHardwareUSB        Capability = "hardware.usb"
+	CapHardwareBoard      Capability = "hardware.board"
+	CapHardwareMemory     Capability = "hardware.memory_modules"
+	CapGPUDevices         Capability = "gpu.devices"
+	CapGPUMetrics         Capability = "gpu.metrics"
+	CapNetworkRoutes      Capability = "network.routes"
+	CapNetworkDNS         Capability = "network.dns"
 )
 
 // KnownCapabilities returns every defined capability in a stable order.
@@ -59,6 +70,10 @@ func KnownCapabilities() []Capability {
 		CapStorageDevices, CapStorageFilesystems, CapStorageSMART,
 		CapNetworkInterfaces, CapNetworkThroughput,
 		CapSensorsThermal, CapSensorsFan,
+		CapProcessesList, CapServicesSystemd,
+		CapHardwareCPU, CapHardwarePCI, CapHardwareUSB, CapHardwareBoard, CapHardwareMemory,
+		CapGPUDevices, CapGPUMetrics,
+		CapNetworkRoutes, CapNetworkDNS,
 	}
 }
 

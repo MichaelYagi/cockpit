@@ -113,14 +113,31 @@ func testSnapshot() *core.Snapshot {
 		}},
 		Sensors:    core.Section[core.Sensors]{Meta: core.SectionMeta{Status: core.Unsupported, Source: "sysfs/hwmon", Reason: "No hardware temperature sensors are exposed."}},
 		DiskHealth: core.Section[core.DiskHealthList]{Meta: core.SectionMeta{Status: core.NotConfigured, Source: "smartctl", Reason: "smartctl is not installed."}},
+		CPUInfo: core.Section[core.CPUInfo]{Meta: meta(), Data: &core.CPUInfo{Vendor: "AuthenticAMD", ModelName: "Test CPU", Family: "23",
+			Model: "113", Stepping: "0", Sockets: 1, Cores: 6, Threads: 12, Virtualization: "AMD-V", Flags: []string{"avx2"},
+			Caches: []core.CPUCache{{Level: 3, Type: "Unified", SizeBytes: 32 << 20, SharedBy: 12}}}},
+		Board: core.Section[core.BoardInfo]{Meta: meta(), Data: &core.BoardInfo{SystemVendor: "Vendor", ProductName: "Box", ChassisType: "Desktop", Serial: testSerial}},
+		MemoryModules: core.Section[core.MemoryModules]{Meta: core.SectionMeta{Status: core.PermissionDenied, Source: "sysfs/dmi",
+			Reason: "Reading memory module details requires root."}},
+		PCI: core.Section[core.PCIDevices]{Meta: meta(), Data: &core.PCIDevices{{Address: "0000:01:00.0", ClassCode: "0x030000",
+			ClassName: "VGA compatible controller", VendorID: "0x10de", DeviceID: "0x2504", Driver: "nvidia"}}},
+		USB: core.Section[core.USBDevices]{Meta: meta(), Data: &core.USBDevices{{Path: "1-2", VendorID: "046d", ProductID: "c52b",
+			Product: "Receiver", Serial: testSerial}}},
+		GPUs: core.Section[core.GPUs]{Meta: meta(), Data: &core.GPUs{{Vendor: "NVIDIA", Name: "RTX 3060", PCIAddress: "0000:01:00.0",
+			MemoryTotalBytes: ptr(uint64(12 << 30)), UtilizationPercent: ptr(7.0), MetricsSource: "nvidia-smi", UUID: testWWN}}},
+		Services: core.Section[core.Services]{Meta: meta(), Data: &core.Services{
+			{Name: "backup.service", Description: "Nightly backup", LoadState: "loaded", ActiveState: "failed", SubState: "failed"},
+			{Name: "ssh.service", Description: "OpenSSH", LoadState: "loaded", ActiveState: "active", SubState: "running"},
+		}},
 		Collectors: fakeStatus{}.Collectors(),
 	}
 }
 
 type env struct {
-	d     Deps
-	keys  *auth.Service
-	stats *middleware.Stats
+	d      Deps
+	keys   *auth.Service
+	stats  *middleware.Stats
+	events *events.Log
 }
 
 func newEnv(t *testing.T, logOut io.Writer) env {
@@ -142,15 +159,17 @@ func newEnv(t *testing.T, logOut io.Writer) env {
 	snap := fixedSnapshot{testSnapshot()}
 	h := health.New(snap, health.Options{Confirm: 1, Now: fixedNow, Publish: func(e core.Event) { evLog.Publish(e) },
 		Thresholds: health.Thresholds{StorageWarnPct: 50, StorageCriticalPct: 95, MemWarnAvailablePct: 10, MemCriticalAvailablePct: 5,
-			CPUWarnCelsius: 85, CPUCriticalCelsius: 95, MemWarnPressurePct: 5, MemCriticalPressurePct: 20, DiskWarnPercentageUsed: 90}})
-	h.Evaluate() // "/" is 52.6% full: one warning finding and one event
+			CPUWarnCelsius: 85, CPUCriticalCelsius: 95, MemWarnPressurePct: 5, MemCriticalPressurePct: 20, DiskWarnPercentageUsed: 90,
+			NetWarnErrorsPerMin: 10, NetCriticalErrorsPerMin: 100}})
+	h.Evaluate() // "/" is 52.6% full and backup.service failed: two warnings, two events
 	for i := 0; i < 5; i++ {
 		evLog.Publish(core.Event{Type: core.EventCollectorDegraded, Severity: core.SeverityInfo, Subject: "collector:test", Message: "test event"})
 	}
 	stats := middleware.NewStats(fixedNow)
 	return env{
-		keys:  keys,
-		stats: stats,
+		keys:   keys,
+		stats:  stats,
+		events: evLog,
 		d: Deps{
 			Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 			Verifier: fakeVerifier{
@@ -159,6 +178,7 @@ func newEnv(t *testing.T, logOut io.Writer) env {
 			},
 			Status: fakeStatus{}, SpecJSON: spec, Now: fixedNow,
 			Snapshots: snap, Health: h, Events: evLog, Keys: keys, Stats: stats,
+			Subscriber: evLog, KeyChecker: keys, StreamHeartbeat: 50 * time.Millisecond,
 			Listeners: func() []apiv1.Listener {
 				return []apiv1.Listener{{Transport: "unix", Address: "/run/test.sock"}, {Transport: "tcp", Address: "127.0.0.1:7878"}}
 			},
@@ -267,9 +287,14 @@ func TestContract(t *testing.T) {
 		{"hardware needs system scope", tcp, "GET", "/api/v1/hardware", []reqOpt{bearer(metricsKey)}, 403, apiv1.CodeInsufficientScope},
 		{"metrics", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"metrics subset", tcp, "GET", "/api/v1/metrics?sections=cpu,memory", []reqOpt{bearer(metricsKey)}, 200, ""},
-		{"metrics bad section", tcp, "GET", "/api/v1/metrics?sections=cpu,gpu", []reqOpt{bearer(metricsKey)}, 400, apiv1.CodeInvalidParameter},
+		{"metrics gpu", tcp, "GET", "/api/v1/metrics?sections=gpu", []reqOpt{bearer(metricsKey)}, 200, ""},
+		{"metrics bad section", tcp, "GET", "/api/v1/metrics?sections=cpu,tpu", []reqOpt{bearer(metricsKey)}, 400, apiv1.CodeInvalidParameter},
 		{"metrics needs metrics scope", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(systemKey)}, 403, apiv1.CodeInsufficientScope},
 		{"storage", tcp, "GET", "/api/v1/storage", []reqOpt{bearer(metricsKey)}, 200, ""},
+		{"services", tcp, "GET", "/api/v1/services", []reqOpt{bearer(systemKey)}, 200, ""},
+		{"services failed", tcp, "GET", "/api/v1/services?state=failed", []reqOpt{bearer(systemKey)}, 200, ""},
+		{"services bad state", tcp, "GET", "/api/v1/services?state=sleepy", []reqOpt{bearer(systemKey)}, 400, apiv1.CodeInvalidParameter},
+		{"services needs system scope", tcp, "GET", "/api/v1/services", []reqOpt{bearer(metricsKey)}, 403, apiv1.CodeInsufficientScope},
 		{"network", tcp, "GET", "/api/v1/network", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"sensors", tcp, "GET", "/api/v1/sensors", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"health", tcp, "GET", "/api/v1/health", []reqOpt{bearer(metricsKey)}, 200, ""},
@@ -409,7 +434,7 @@ func TestEventsPagination(t *testing.T) {
 		}
 		cursor = *page.NextCursor
 	}
-	if len(all) != 6 { // 1 health finding + 5 test events
+	if len(all) != 7 { // 2 health findings + 5 test events
 		t.Errorf("paged %d events", len(all))
 	}
 }
@@ -690,5 +715,36 @@ func TestAccessLogHasNoSecrets(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("access log missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestServicesFilterAndCounts(t *testing.T) {
+	sock := router(t, newEnv(t, nil).d, Options{Listener: ListenerSocket})
+	var r apiv1.ServicesResponse
+	_ = json.Unmarshal(do(t, sock, "GET", "/api/v1/services?state=failed").body, &r)
+	d := r.Services.Data
+	if d.Total != 2 || d.Failed != 1 || d.Active != 1 || len(d.Items) != 1 || d.Items[0].Name != "backup.service" {
+		t.Errorf("%+v", d)
+	}
+}
+
+func TestHardwareDetails(t *testing.T) {
+	sock := router(t, newEnv(t, nil).d, Options{Listener: ListenerSocket})
+	var hw apiv1.HardwareResponse
+	_ = json.Unmarshal(do(t, sock, "GET", "/api/v1/hardware").body, &hw)
+	if c := hw.CPU.Data; c.Cores != 6 || c.LogicalCores != 12 || c.Virtualization != "AMD-V" || len(c.Caches) != 1 {
+		t.Errorf("cpu %+v", c)
+	}
+	if hw.MemoryModules.Status != "permission_denied" || hw.MemoryModules.Reason == "" || hw.MemoryModules.Data != nil {
+		t.Errorf("memory modules %+v", hw.MemoryModules)
+	}
+	if b := hw.Board.Data; b.ProductName != "Box" || strings.Join(b.Redacted, ",") != "serial" {
+		t.Errorf("board %+v", b)
+	}
+	if g := (*hw.GPUs.Data)[0]; g.Name != "RTX 3060" || strings.Join(g.Redacted, ",") != "uuid" || g.UUID != "" {
+		t.Errorf("gpu %+v", g)
+	}
+	if u := (*hw.USBDevices.Data)[0]; strings.Join(u.Redacted, ",") != "serial" {
+		t.Errorf("usb %+v", u)
 	}
 }

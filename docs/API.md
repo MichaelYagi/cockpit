@@ -34,12 +34,13 @@ Keys are never accepted in URLs or query strings.
 | Scope | Routes |
 |---|---|
 | *(public)* | `GET /livez`, `GET /openapi.json` |
-| `system:read` | `/status`, `/system`, `/hardware` |
-| `metrics:read` | `/metrics`, `/storage`, `/network`, `/sensors`, `/health`, `/events` |
+| `system:read` | `/status`, `/system`, `/hardware`, `/services` |
+| `metrics:read` | `/metrics`, `/storage`, `/network`, `/sensors`, `/health`, `/events`, `/events/stream` |
+| `processes:read` | `/processes` (D14) |
 | `admin` | `/keys…`, privileged fields in `/status` |
 
-No scope implies another (D8). Keys created in Phase 1 may hold
-`system:read` and/or `metrics:read`; `admin` is reserved for the socket
+No scope implies another (D8). Keys may hold `system:read`,
+`metrics:read` and `processes:read`; `admin` is reserved for the socket
 principal.
 
 ## 4. Endpoints
@@ -58,13 +59,16 @@ principal.
 |---|---|---|---|
 | GET | `/status` | `system:read` (+`admin` fields) | Collectors and capability states. With `admin`: listeners, request counters, active clients |
 | GET | `/system` | `system:read` | OS, kernel, hostname, architecture, boot time, uptime |
-| GET | `/hardware` | `system:read` | CPU model/topology, memory total, block devices, network interfaces; each with `source` |
-| GET | `/metrics` | `metrics:read` | Current snapshot. `?sections=cpu,memory,...` selects sections |
+| GET | `/hardware` | `system:read` | CPU details and caches, memory and modules, board/firmware, block devices, network interfaces, PCI and USB devices, GPUs; each section with `source` and availability |
+| GET | `/services` | `system:read` | systemd services with counts; `?state=active\|failed\|inactive` (Phase 2) |
+| GET | `/metrics` | `metrics:read` | Current snapshot. `?sections=cpu,memory,...,gpu` selects sections |
 | GET | `/storage` | `metrics:read` | Block devices, filesystems (capacity, inodes), SMART summary |
-| GET | `/network` | `metrics:read` | Interfaces, addresses, counters, rates |
+| GET | `/network` | `metrics:read` | Interfaces (addresses, counters, rates), routes, DNS (passive; nothing is probed) |
 | GET | `/sensors` | `metrics:read` | Temperatures, fans, voltages |
-| GET | `/health` | `metrics:read` | Overall status, the four checks (D11), active findings |
+| GET | `/health` | `metrics:read` | Overall status, checks (D11 plus failed services and network errors), active findings |
 | GET | `/events` | `metrics:read` | Recent events (in-memory), paginated, `?severity=&since=` |
+| GET | `/events/stream` | `metrics:read` | Live events as Server-Sent Events (D17, Phase 2) |
+| GET | `/processes` | `processes:read` | Processes, sorted/searchable, snapshot-bound cursors; no command lines (D14, Phase 2) |
 | GET | `/keys` | `admin` (socket) | Key metadata. Never the key or its hash |
 | POST | `/keys` | `admin` (socket) | Create. Response includes the full key once |
 | POST | `/keys/{id}/rotate` | `admin` (socket) | Issue a replacement key (same name/scopes), revoke the old one immediately. Full key shown once |
@@ -72,9 +76,8 @@ principal.
 
 ### Later phases
 
-`/events/stream` (SSE, Phase 2), `/processes` (Phase 2), `/services`
-(Phase 2), `/metrics/history` (Phase 3). WebSocket is not planned: all
-streaming is server-to-client, which SSE covers.
+`/metrics/history` (Phase 3). WebSocket is not planned: all streaming is
+server-to-client, which SSE covers.
 
 ## 5. Resource shape
 
@@ -187,11 +190,14 @@ Creation and rotation responses add `"key": "ckp_<id>_<secret>"` exactly
 once. `last_used_at` is updated in memory and flushed periodically, so it
 may lag by up to ~30 seconds.
 
-## 10. Streaming (Phase 2)
+## 10. Streaming
 
-SSE connections authenticate at connection time, are limited per key and
-globally, send heartbeats, close cleanly on shutdown, use bounded
-per-client queues, and are closed when the key is revoked or expires.
+`GET /events/stream` (D17) authenticates at connection time, allows 4
+streams per key and 64 in total, sends a heartbeat comment every 15
+seconds, re-checks the key at every heartbeat (sending `event: closed`
+when it was revoked or expired), uses a bounded queue per client (a slow
+client gets `event: lagged` with the number dropped), and closes cleanly
+on shutdown.
 Browser clients (future web UI) cannot set headers on `EventSource`; they
 will need a separately designed short-lived ticket. Keys in query strings
 remain forbidden.

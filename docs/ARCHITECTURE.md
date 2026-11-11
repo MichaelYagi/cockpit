@@ -115,8 +115,13 @@ type Subscriber interface {
   updates.
 - Handlers read the current snapshot. They never trigger collection. Rates,
   uptime and staleness are computed from timestamps at read time.
-- The TUI polls (default every second); it never overlaps requests for the
-  same resource. SSE arrives in Phase 2.
+- The TUI polls (default every second) and never overlaps requests for the
+  same resource. Events arrive live over SSE.
+- Process lists are on demand: the API asks the engine, which samples
+  `/proc` only when needed and caches for 2 seconds (see PLUGINS.md).
+- The engine closes `Ready()` once every scheduled collector has reported
+  once; health waits for it (at most 3 seconds) so its first evaluation
+  sees real data.
   Expensive on-demand data (e.g. processes, Phase 2) goes through an engine
   method with a short cache.
 - Event subscribers each get a bounded queue. If a subscriber falls behind,

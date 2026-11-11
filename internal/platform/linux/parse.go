@@ -261,6 +261,7 @@ type mount struct {
 	fsType     string
 	source     string
 	readOnly   bool
+	superOpts  string
 }
 
 // parseMountinfo parses /proc/self/mountinfo (see proc(5)).
@@ -287,13 +288,17 @@ func parseMountinfo(b []byte) ([]mount, error) {
 				ro = true
 			}
 		}
-		out = append(out, mount{
+		m := mount{
 			majorMinor: f[2],
 			mountPoint: unescapeOctal(f[4]),
 			fsType:     f[sep+1],
 			source:     unescapeOctal(f[sep+2]),
 			readOnly:   ro,
-		})
+		}
+		if sep+3 < len(f) {
+			m.superOpts = f[sep+3]
+		}
+		out = append(out, m)
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("%w: mountinfo", errParse)
@@ -318,4 +323,79 @@ func unescapeOctal(s string) string {
 		b.WriteByte(s[i])
 	}
 	return b.String()
+}
+
+// pfKThread is PF_KTHREAD from <linux/sched.h>.
+const pfKThread = 0x00200000
+
+// procStat holds the /proc/[pid]/stat fields Cockpit uses.
+type procStat struct {
+	pid, ppid, threads int
+	comm, state        string
+	flags              uint64
+	utime, stime       uint64
+	start, vsize       uint64
+	rssPages           int64
+}
+
+// parseProcStat parses /proc/[pid]/stat. The command name is in
+// parentheses and may itself contain spaces and parentheses, so fields are
+// located from the last ')'.
+func parseProcStat(b []byte) (procStat, error) {
+	var p procStat
+	s := string(b)
+	open, close := strings.IndexByte(s, '('), strings.LastIndexByte(s, ')')
+	if open < 1 || close < open {
+		return p, fmt.Errorf("%w: stat", errParse)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(s[:open]))
+	if err != nil {
+		return p, fmt.Errorf("%w: stat pid", errParse)
+	}
+	p.pid, p.comm = pid, s[open+1:close]
+	f := strings.Fields(s[close+1:])
+	// f[0] is field 3 (state); field n is f[n-3].
+	if len(f) < 22 {
+		return p, fmt.Errorf("%w: stat fields", errParse)
+	}
+	num := func(i int) uint64 { n, _ := strconv.ParseUint(f[i], 10, 64); return n }
+	p.state = f[0]
+	p.ppid = int(num(1))
+	p.flags = num(6)
+	p.utime, p.stime = num(11), num(12)
+	p.threads = int(num(17))
+	p.start, p.vsize = num(19), num(20)
+	p.rssPages, _ = strconv.ParseInt(f[21], 10, 64)
+	return p, nil
+}
+
+// parseBootTime returns the btime line of /proc/stat (seconds since epoch).
+func parseBootTime(b []byte) (int64, bool) {
+	sc := bufio.NewScanner(bytes.NewReader(b))
+	sc.Buffer(make([]byte, 64<<10), maxFileSize)
+	for sc.Scan() {
+		if v, ok := strings.CutPrefix(sc.Text(), "btime "); ok {
+			n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+			return n, err == nil && n > 0
+		}
+	}
+	return 0, false
+}
+
+// parsePasswd maps UIDs to user names from /etc/passwd.
+func parsePasswd(b []byte) map[int]string {
+	out := map[int]string{}
+	sc := bufio.NewScanner(bytes.NewReader(b))
+	for sc.Scan() {
+		f := strings.Split(sc.Text(), ":")
+		if len(f) < 3 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		if uid, err := strconv.Atoi(f[2]); err == nil {
+			if _, dup := out[uid]; !dup {
+				out[uid] = f[0]
+			}
+		}
+	}
+	return out
 }

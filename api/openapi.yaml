@@ -147,6 +147,31 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/services:
+    get:
+      operationId: listServices
+      tags: [machine]
+      summary: systemd services
+      description: Unit state from systemd over D-Bus, refreshed every 10 seconds. Counts cover all services even when `state` filters the items.
+      x-cockpit-scope: system:read
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [active, failed, inactive] }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServicesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/metrics:
     get:
       operationId: getMetrics
@@ -161,7 +186,7 @@ paths:
           description: Comma-separated list of sections to include.
           schema:
             type: string
-            pattern: "^(cpu|memory|memory_pressure|filesystems|network|sensors)(,(cpu|memory|memory_pressure|filesystems|network|sensors))*$"
+            pattern: "^(cpu|memory|memory_pressure|filesystems|network|sensors|gpu)(,(cpu|memory|memory_pressure|filesystems|network|sensors|gpu))*$"
           example: cpu,memory
       responses:
         "200":
@@ -280,6 +305,93 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/EventsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/events/stream:
+    get:
+      operationId: streamEvents
+      tags: [health]
+      summary: Live events (Server-Sent Events)
+      description: |
+        Streams new events as Server-Sent Events (D17):
+
+        - `event: event` with an `id` and `data` holding an Event object.
+        - `event: lagged` with `data: {"dropped": N}` when the client read
+          too slowly and N events were dropped.
+        - `event: closed` with a reason when the server ends the stream
+          (e.g. the key was revoked).
+        - A `: heartbeat` comment every 15 seconds.
+
+        At most 4 streams per key and 64 in total. The key is re-checked at
+        every heartbeat. `Last-Event-ID` is not supported; resume with
+        `GET /events?since=`.
+      x-cockpit-scope: metrics:read
+      parameters:
+        - name: severity
+          in: query
+          required: false
+          description: Minimum severity.
+          schema: { type: string, enum: [info, warning, critical] }
+      responses:
+        "200":
+          description: An open event stream.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/processes:
+    get:
+      operationId: listProcesses
+      tags: [machine]
+      summary: Processes and their resource use
+      description: |
+        Sampled on demand (cached for 2 seconds). CPU percent is of one core
+        over `window_seconds`, like top; it is null for processes that
+        started after the previous sample. Command lines are never returned
+        (D9). Cursors are bound to one listing and one set of query options.
+      x-cockpit-scope: processes:read
+      parameters:
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, enum: [cpu, memory, pid, name], default: cpu }
+        - name: order
+          in: query
+          required: false
+          description: Default desc for cpu and memory, asc for pid and name.
+          schema: { type: string, enum: [asc, desc] }
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive substring of the process or user name.
+          schema: { type: string, maxLength: 64 }
+        - name: kernel_threads
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+        - { $ref: "#/components/parameters/Limit" }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor from a previous page's `next_cursor`.
+          schema: { type: string, maxLength: 256 }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcessesResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -523,7 +635,7 @@ components:
       type: object
       additionalProperties: false
       description: Admin principal only.
-      required: [listeners, requests, active_clients]
+      required: [listeners, requests, active_clients, open_streams]
       properties:
         listeners:
           type: array
@@ -550,6 +662,10 @@ components:
           type: integer
           minimum: 0
           description: Distinct API keys used in the last 5 minutes.
+        open_streams:
+          type: integer
+          minimum: 0
+          description: Open event streams.
     SystemResponse:
       type: object
       additionalProperties: false
@@ -598,15 +714,20 @@ components:
       type: object
       additionalProperties: false
       description: GET /hardware. Each section reports its own availability and source.
-      required: [schema_version, machine_id, generated_at, cpu, memory, block_devices, network_interfaces]
+      required: [schema_version, machine_id, generated_at, cpu, memory, memory_modules, board, block_devices, network_interfaces, pci_devices, usb_devices, gpus]
       properties:
         schema_version: { $ref: "#/components/schemas/SchemaVersion" }
         machine_id: { $ref: "#/components/schemas/MachineID" }
         generated_at: { $ref: "#/components/schemas/Timestamp" }
         cpu: { $ref: "#/components/schemas/CPUInventorySection" }
         memory: { $ref: "#/components/schemas/MemoryInventorySection" }
+        memory_modules: { $ref: "#/components/schemas/MemoryModulesSection" }
+        board: { $ref: "#/components/schemas/BoardSection" }
         block_devices: { $ref: "#/components/schemas/BlockDevicesSection" }
         network_interfaces: { $ref: "#/components/schemas/NetworkInterfaceInventorySection" }
+        pci_devices: { $ref: "#/components/schemas/PCIDevicesSection" }
+        usb_devices: { $ref: "#/components/schemas/USBDevicesSection" }
+        gpus: { $ref: "#/components/schemas/GPUsSection" }
     CPUInventorySection:
       type: object
       additionalProperties: false
@@ -669,13 +790,187 @@ components:
             - type: array
               items: { $ref: "#/components/schemas/NetworkInterfaceInventory" }
             - type: "null"
+    MemoryModulesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/MemoryModule" }
+            - type: "null"
+    BoardSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/Board"
+            - type: "null"
+    PCIDevicesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/PCIDevice" }
+            - type: "null"
+    USBDevicesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/USBDevice" }
+            - type: "null"
+    GPUsSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/GPU" }
+            - type: "null"
     CPUInventory:
       type: object
       additionalProperties: false
-      required: [model_name, logical_cores]
+      required: [model_name, logical_cores, vendor, family, model, stepping, sockets, cores, caches, max_frequency_mhz, virtualization, hypervisor, flags]
       properties:
         model_name: { type: string }
         logical_cores: { type: integer, minimum: 0 }
+        vendor: { type: string, examples: [GenuineIntel, AuthenticAMD, ARM] }
+        family: { type: string }
+        model: { type: string }
+        stepping: { type: string }
+        sockets: { type: integer, minimum: 0 }
+        cores: { type: integer, minimum: 0, description: Physical cores across all sockets. }
+        caches:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [level, type, size_bytes, shared_by]
+            properties:
+              level: { type: integer, minimum: 1 }
+              type: { type: string, examples: [Data, Instruction, Unified] }
+              size_bytes: { type: integer, minimum: 0 }
+              shared_by: { type: integer, minimum: 0, description: Logical CPUs sharing one instance of this cache. }
+        max_frequency_mhz: { type: [number, "null"], minimum: 0 }
+        virtualization: { type: string, enum: ["", VT-x, AMD-V] }
+        hypervisor: { type: boolean, description: Running under a hypervisor. }
+        flags: { type: array, items: { type: string }, description: Notable feature flags only. }
+    MemoryModule:
+      type: object
+      additionalProperties: false
+      required: [locator, size_bytes, type, speed_mts, manufacturer, part_number]
+      properties:
+        locator: { type: string, examples: [DIMM_A1] }
+        size_bytes: { type: integer, minimum: 0 }
+        type: { type: string, examples: [DDR4, DDR5] }
+        speed_mts: { type: integer, minimum: 0 }
+        manufacturer: { type: string }
+        part_number: { type: string }
+        serial: { type: string, x-cockpit-sensitive: true }
+        redacted: { $ref: "#/components/schemas/Redacted" }
+    Board:
+      type: object
+      additionalProperties: false
+      required: [system_vendor, product_name, board_vendor, board_name, bios_vendor, bios_version, bios_date, chassis_type]
+      properties:
+        system_vendor: { type: string }
+        product_name: { type: string }
+        board_vendor: { type: string }
+        board_name: { type: string }
+        bios_vendor: { type: string }
+        bios_version: { type: string }
+        bios_date: { type: string }
+        chassis_type: { type: string, examples: [Desktop, Laptop, Rack mount chassis] }
+        serial: { type: string, x-cockpit-sensitive: true }
+        redacted: { $ref: "#/components/schemas/Redacted" }
+    PCIDevice:
+      type: object
+      additionalProperties: false
+      required: [address, class_code, class_name, vendor_id, device_id, vendor_name, device_name, driver]
+      properties:
+        address: { type: string, examples: ["0000:01:00.0"] }
+        class_code: { type: string, examples: ["0x030000"] }
+        class_name: { type: string }
+        vendor_id: { type: string }
+        device_id: { type: string }
+        vendor_name: { type: string, description: From pci.ids when installed; empty otherwise. }
+        device_name: { type: string }
+        driver: { type: string }
+    USBDevice:
+      type: object
+      additionalProperties: false
+      required: [path, vendor_id, product_id, manufacturer, product, speed_mbps]
+      properties:
+        path: { type: string, examples: ["1-2.4"] }
+        vendor_id: { type: string }
+        product_id: { type: string }
+        manufacturer: { type: string }
+        product: { type: string }
+        speed_mbps: { type: [number, "null"], minimum: 0 }
+        serial: { type: string, x-cockpit-sensitive: true }
+        redacted: { $ref: "#/components/schemas/Redacted" }
+    GPU:
+      type: object
+      additionalProperties: false
+      required: [vendor, name, pci_address, driver, driver_version, memory_total_bytes, memory_used_bytes, utilization_percent, temperature_celsius, power_watts, power_limit_watts, fan_percent, metrics_source]
+      properties:
+        vendor: { type: string, examples: [NVIDIA, AMD, Intel] }
+        name: { type: string }
+        pci_address: { type: string }
+        driver: { type: string }
+        driver_version: { type: string }
+        memory_total_bytes: { type: [integer, "null"], minimum: 0 }
+        memory_used_bytes: { type: [integer, "null"], minimum: 0 }
+        utilization_percent: { type: [number, "null"], minimum: 0, maximum: 100 }
+        temperature_celsius: { type: [number, "null"] }
+        power_watts: { type: [number, "null"], minimum: 0 }
+        power_limit_watts: { type: [number, "null"], minimum: 0 }
+        fan_percent: { type: [number, "null"], minimum: 0 }
+        metrics_source: { type: string, enum: ["", nvidia-smi, amdgpu] }
+        uuid: { type: string, x-cockpit-sensitive: true }
+        redacted: { $ref: "#/components/schemas/Redacted" }
     MemoryInventory:
       type: object
       additionalProperties: false
@@ -723,6 +1018,7 @@ components:
         filesystems: { $ref: "#/components/schemas/FilesystemsSection" }
         network: { $ref: "#/components/schemas/NetworkInterfacesSection" }
         sensors: { $ref: "#/components/schemas/SensorsSection" }
+        gpu: { $ref: "#/components/schemas/GPUsSection" }
     CPUMetricsSection:
       type: object
       additionalProperties: false
@@ -906,7 +1202,7 @@ components:
     NetworkInterface:
       type: object
       additionalProperties: false
-      required: [name, oper_state, loopback, mtu, speed_mbps, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_errors, tx_errors, rx_dropped, tx_dropped, rx_bytes_per_second, tx_bytes_per_second, rate_window_seconds]
+      required: [name, oper_state, loopback, mtu, speed_mbps, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_errors, tx_errors, rx_dropped, tx_dropped, rx_bytes_per_second, tx_bytes_per_second, rate_window_seconds, addresses]
       properties:
         name: { type: string }
         oper_state: { type: string, examples: [up, down, unknown] }
@@ -927,8 +1223,59 @@ components:
           description: Null until two samples exist or after a counter reset.
         tx_bytes_per_second: { type: [number, "null"], minimum: 0 }
         rate_window_seconds: { type: number, minimum: 0 }
+        addresses: { type: array, items: { type: string }, description: "Assigned addresses in CIDR form, e.g. 192.168.1.10/24." }
         mac_address: { type: string, x-cockpit-sensitive: true }
         redacted: { $ref: "#/components/schemas/Redacted" }
+    RoutesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/Route" }
+            - type: "null"
+    DNSSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/DNS"
+            - type: "null"
+    Route:
+      type: object
+      additionalProperties: false
+      required: [family, destination, gateway, interface, metric, default]
+      properties:
+        family: { type: string, enum: [ipv4, ipv6] }
+        destination: { type: string, examples: ["0.0.0.0/0", "192.168.1.0/24"] }
+        gateway: { type: string, description: Empty for directly connected routes. }
+        interface: { type: string }
+        metric: { type: integer, minimum: 0 }
+        default: { type: boolean }
+    DNS:
+      type: object
+      additionalProperties: false
+      required: [nameservers, search, resolver]
+      properties:
+        nameservers: { type: array, items: { type: string } }
+        search: { type: array, items: { type: string } }
+        resolver: { type: string, enum: [resolv.conf, systemd-resolved], description: "With systemd-resolved, nameservers are its upstream servers." }
     Sensor:
       type: object
       additionalProperties: false
@@ -973,13 +1320,15 @@ components:
     NetworkResponse:
       type: object
       additionalProperties: false
-      description: GET /network.
-      required: [schema_version, machine_id, generated_at, interfaces]
+      description: GET /network. Routes and DNS are read passively; nothing is probed.
+      required: [schema_version, machine_id, generated_at, interfaces, routes, dns]
       properties:
         schema_version: { $ref: "#/components/schemas/SchemaVersion" }
         machine_id: { $ref: "#/components/schemas/MachineID" }
         generated_at: { $ref: "#/components/schemas/Timestamp" }
         interfaces: { $ref: "#/components/schemas/NetworkInterfacesSection" }
+        routes: { $ref: "#/components/schemas/RoutesSection" }
+        dns: { $ref: "#/components/schemas/DNSSection" }
     SensorsResponse:
       type: object
       additionalProperties: false
@@ -1010,7 +1359,7 @@ components:
       additionalProperties: false
       required: [id, name, status, availability, findings]
       properties:
-        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health] }
+        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health, services, network_errors] }
         name: { type: string }
         status: { $ref: "#/components/schemas/HealthStatus" }
         availability:
@@ -1056,13 +1405,94 @@ components:
         time: { $ref: "#/components/schemas/Timestamp" }
         type:
           type: string
-          enum: [finding.raised, finding.resolved, collector.degraded, key.created, key.rotated, key.revoked]
+          enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked]
         severity: { type: string, enum: [info, warning, critical] }
         subject: { type: string }
         message: { type: string }
+    ProcessesResponse:
+      type: object
+      additionalProperties: false
+      required: [schema_version, machine_id, generated_at, status, collected_at, window_seconds, partial, total, items, next_cursor, redacted]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        status: { $ref: "#/components/schemas/Availability" }
+        reason: { type: string }
+        collected_at: { type: [string, "null"], format: date-time }
+        window_seconds: { type: number, minimum: 0 }
+        partial:
+          type: boolean
+          description: True when the kernel hides other users' processes (/proc hidepid).
+        total: { type: integer, minimum: 0, description: Matching processes across all pages. }
+        items: { type: array, items: { $ref: "#/components/schemas/Process" } }
+        next_cursor: { type: [string, "null"] }
+        redacted: { $ref: "#/components/schemas/Redacted" }
+    Process:
+      type: object
+      additionalProperties: false
+      required: [pid, ppid, name, user, uid, state, threads, cpu_percent, memory_percent, rss_bytes, virtual_bytes, started_at, kernel_thread]
+      properties:
+        pid: { type: integer, minimum: 1 }
+        ppid: { type: integer, minimum: 0 }
+        name: { type: string, description: Kernel command name (at most 15 characters). }
+        user: { type: string }
+        uid: { type: integer, minimum: -1 }
+        state: { type: string, examples: [R, S, D, Z, T, I] }
+        threads: { type: integer, minimum: 0 }
+        cpu_percent: { type: [number, "null"], minimum: 0 }
+        memory_percent: { type: number, minimum: 0, maximum: 100 }
+        rss_bytes: { type: integer, minimum: 0 }
+        virtual_bytes: { type: integer, minimum: 0 }
+        started_at: { type: [string, "null"], format: date-time }
+        kernel_thread: { type: boolean }
+    ServicesResponse:
+      type: object
+      additionalProperties: false
+      required: [schema_version, machine_id, generated_at, services]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        services: { $ref: "#/components/schemas/ServicesSection" }
+    ServicesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/ServiceList"
+            - type: "null"
+    ServiceList:
+      type: object
+      additionalProperties: false
+      required: [total, active, failed, inactive, items]
+      properties:
+        total: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        inactive: { type: integer, minimum: 0 }
+        items: { type: array, items: { $ref: "#/components/schemas/Service" } }
+    Service:
+      type: object
+      additionalProperties: false
+      required: [name, description, load_state, active_state, sub_state]
+      properties:
+        name: { type: string, examples: [ssh.service] }
+        description: { type: string }
+        load_state: { type: string, examples: [loaded, not-found, masked] }
+        active_state: { type: string, examples: [active, inactive, failed, activating] }
+        sub_state: { type: string, examples: [running, exited, dead] }
     Scope:
       type: string
-      enum: [system:read, metrics:read, admin]
+      enum: [system:read, metrics:read, processes:read, admin]
     APIKey:
       type: object
       additionalProperties: false
@@ -1097,8 +1527,8 @@ components:
         scopes:
           type: array
           minItems: 1
-          description: Phase 1 keys may hold system:read and metrics:read only.
-          items: { type: string, enum: [system:read, metrics:read] }
+          description: Keys may hold system:read, metrics:read and processes:read; never admin.
+          items: { type: string, enum: [system:read, metrics:read, processes:read] }
         expires_at: { type: string, format: date-time }
     CreatedAPIKey:
       type: object

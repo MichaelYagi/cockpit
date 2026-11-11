@@ -36,6 +36,8 @@ type Options struct {
 	// Settings resolves configuration for a collector. Nil uses the
 	// descriptor defaults with the collector enabled.
 	Settings func(collector.Descriptor) Settings
+	// Publish receives collector degraded/recovered events. Optional.
+	Publish func(core.Event)
 }
 
 // Reader gives read-only access to the latest snapshot.
@@ -50,6 +52,13 @@ type Engine struct {
 
 	current atomic.Pointer[core.Snapshot]
 	results chan outcome
+
+	procs processState
+
+	// ready closes once every scheduled collector has reported at least
+	// once, so consumers (health) do not evaluate an empty snapshot.
+	ready     chan struct{}
+	readyOnce sync.Once
 
 	mu      sync.Mutex // guards started/closed
 	started bool
@@ -103,7 +112,7 @@ func New(collectors []collector.Collector, opts Options) (*Engine, error) {
 		return nil, err
 	}
 	sort.Slice(runners, func(i, j int) bool { return runners[i].desc.ID < runners[j].desc.ID })
-	e := &Engine{opts: opts, runners: runners, results: make(chan outcome, 2*len(runners)+1)}
+	e := &Engine{opts: opts, runners: runners, results: make(chan outcome, 2*len(runners)+1), ready: make(chan struct{})}
 	e.current.Store(&core.Snapshot{GeneratedAt: opts.Now().UTC()})
 	return e, nil
 }
@@ -143,6 +152,24 @@ func (e *Engine) Start(ctx context.Context) {
 	agg := newAggregator(e, probes)
 	e.current.Store(agg.publish())
 
+	// Decide what is scheduled before any goroutine starts, so the
+	// aggregator owns pending without sharing it.
+	var scheduled []*runner
+	for i, r := range e.runners {
+		if r.settings.Enabled && anyAvailableOrTransient(probes[i]) {
+			scheduled = append(scheduled, r)
+		}
+		// Otherwise there is nothing this collector can provide here.
+	}
+	if len(scheduled) == 0 {
+		e.markReady()
+	} else {
+		agg.pending = make(map[*runner]bool, len(scheduled))
+		for _, r := range scheduled {
+			agg.pending[r] = true
+		}
+	}
+
 	runCtx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
 	e.aggDone = make(chan struct{})
@@ -150,10 +177,7 @@ func (e *Engine) Start(ctx context.Context) {
 		defer close(e.aggDone)
 		agg.run(runCtx)
 	}()
-	for i, r := range e.runners {
-		if !r.settings.Enabled || !anyAvailableOrTransient(probes[i]) {
-			continue // nothing this collector can ever provide here
-		}
+	for _, r := range scheduled {
 		e.loops.Add(1)
 		go func() {
 			defer e.loops.Done()
@@ -161,6 +185,11 @@ func (e *Engine) Start(ctx context.Context) {
 		}()
 	}
 }
+
+// Ready is closed once every scheduled collector has reported once.
+func (e *Engine) Ready() <-chan struct{} { return e.ready }
+
+func (e *Engine) markReady() { e.readyOnce.Do(func() { close(e.ready) }) }
 
 // anyAvailableOrTransient reports whether collecting could yield data.
 // Capabilities that are unsupported or not configured never change at

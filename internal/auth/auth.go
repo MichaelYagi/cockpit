@@ -15,14 +15,15 @@ import (
 type Scope string
 
 const (
-	ScopeSystemRead  Scope = "system:read"
-	ScopeMetricsRead Scope = "metrics:read"
-	ScopeAdmin       Scope = "admin"
+	ScopeSystemRead    Scope = "system:read"
+	ScopeMetricsRead   Scope = "metrics:read"
+	ScopeProcessesRead Scope = "processes:read"
+	ScopeAdmin         Scope = "admin"
 )
 
 // KnownScopes is the scope registry. Adding a scope here is non-breaking.
 func KnownScopes() []Scope {
-	return []Scope{ScopeSystemRead, ScopeMetricsRead, ScopeAdmin}
+	return []Scope{ScopeSystemRead, ScopeMetricsRead, ScopeProcessesRead, ScopeAdmin}
 }
 
 // Known reports whether s is registered.

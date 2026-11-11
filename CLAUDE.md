@@ -76,6 +76,8 @@ Never create system files, units or users named plain `cockpit`.
 - Linux data: hand-written parsers for `/proc` and `/sys` (see D13),
   `golang.org/x/sys/unix` for `statfs`, `smartctl --json` (optional).
 - Rate limiting: `golang.org/x/time/rate`.
+- systemd: `github.com/godbus/dbus/v5` (read-only `ListUnits`, D15).
+- GPU metrics: `nvidia-smi` CSV query and `amdgpu` sysfs (optional, D16).
 - Streaming: SSE (Phase 2). No WebSocket planned.
 - Service integration: systemd (`cockpit-agent.service`).
 
@@ -117,7 +119,8 @@ internal/
     middleware/              # request ID, recovery, logging, auth, scopes, rate limit, Host check
     handlers/                # thin handlers: decode → service → map → encode
     redact/                  # D9 sensitive-field policy
-  tui/                       # Bubble Tea app: model.go (state, input), view.go, theme.go
+  tui/                       # Bubble Tea app: model.go (state, input, SSE), view.go, theme.go,
+                             # sanitize.go (control characters stripped from API text)
 pkg/
   apiv1/                     # public wire types matching the spec
   client/                    # public Go SDK (Unix socket, TCP, TLS)
@@ -206,7 +209,11 @@ Visual language:
 
 Navigation: Overview, Hardware, Performance, Health, Storage, Network,
 Processes, Services, Events / Logs, API Access, Settings. Screens without
-an implementation are hidden, not shown empty.
+an implementation are hidden, not shown empty (Performance and Settings,
+as of Phase 2).
+
+Text from the API (process names, device strings, descriptions) is
+untrusted: never render it without the sanitization in `sanitize.go`.
 
 The TUI shows API server status, listeners, active client count, request
 statistics and API key management. A full key is shown only immediately

@@ -47,14 +47,108 @@ type HardwareResponse struct {
 	Meta
 	CPU               Section[CPUInventory]                `json:"cpu"`
 	Memory            Section[MemoryInventory]             `json:"memory"`
+	MemoryModules     Section[[]MemoryModule]              `json:"memory_modules"`
+	Board             Section[Board]                       `json:"board"`
 	BlockDevices      Section[[]BlockDevice]               `json:"block_devices"`
 	NetworkInterfaces Section[[]NetworkInterfaceInventory] `json:"network_interfaces"`
+	PCIDevices        Section[[]PCIDevice]                 `json:"pci_devices"`
+	USBDevices        Section[[]USBDevice]                 `json:"usb_devices"`
+	GPUs              Section[[]GPU]                       `json:"gpus"`
 }
 
 // CPUInventory describes the processor.
 type CPUInventory struct {
-	ModelName    string `json:"model_name"`
-	LogicalCores int    `json:"logical_cores"`
+	ModelName       string     `json:"model_name"`
+	LogicalCores    int        `json:"logical_cores"`
+	Vendor          string     `json:"vendor"`
+	Family          string     `json:"family"`
+	Model           string     `json:"model"`
+	Stepping        string     `json:"stepping"`
+	Sockets         int        `json:"sockets"`
+	Cores           int        `json:"cores"`
+	Caches          []CPUCache `json:"caches"`
+	MaxFrequencyMHz *float64   `json:"max_frequency_mhz"`
+	Virtualization  string     `json:"virtualization"`
+	Hypervisor      bool       `json:"hypervisor"`
+	Flags           []string   `json:"flags"`
+}
+
+// CPUCache is one cache level.
+type CPUCache struct {
+	Level     int    `json:"level"`
+	Type      string `json:"type"`
+	SizeBytes uint64 `json:"size_bytes"`
+	SharedBy  int    `json:"shared_by"`
+}
+
+// MemoryModule is one installed DIMM. Serial is sensitive (D9).
+type MemoryModule struct {
+	Locator      string   `json:"locator"`
+	SizeBytes    uint64   `json:"size_bytes"`
+	Type         string   `json:"type"`
+	SpeedMTs     int      `json:"speed_mts"`
+	Manufacturer string   `json:"manufacturer"`
+	PartNumber   string   `json:"part_number"`
+	Serial       string   `json:"serial,omitempty"`
+	Redacted     []string `json:"redacted,omitempty"`
+}
+
+// Board is system, board and firmware identity. Serial is sensitive.
+type Board struct {
+	SystemVendor string   `json:"system_vendor"`
+	ProductName  string   `json:"product_name"`
+	BoardVendor  string   `json:"board_vendor"`
+	BoardName    string   `json:"board_name"`
+	BIOSVendor   string   `json:"bios_vendor"`
+	BIOSVersion  string   `json:"bios_version"`
+	BIOSDate     string   `json:"bios_date"`
+	ChassisType  string   `json:"chassis_type"`
+	Serial       string   `json:"serial,omitempty"`
+	Redacted     []string `json:"redacted,omitempty"`
+}
+
+// PCIDevice is one PCI function.
+type PCIDevice struct {
+	Address    string `json:"address"`
+	ClassCode  string `json:"class_code"`
+	ClassName  string `json:"class_name"`
+	VendorID   string `json:"vendor_id"`
+	DeviceID   string `json:"device_id"`
+	VendorName string `json:"vendor_name"`
+	DeviceName string `json:"device_name"`
+	Driver     string `json:"driver"`
+}
+
+// USBDevice is one USB device. Serial is sensitive.
+type USBDevice struct {
+	Path         string   `json:"path"`
+	VendorID     string   `json:"vendor_id"`
+	ProductID    string   `json:"product_id"`
+	Manufacturer string   `json:"manufacturer"`
+	Product      string   `json:"product"`
+	SpeedMbps    *float64 `json:"speed_mbps"`
+	Serial       string   `json:"serial,omitempty"`
+	Redacted     []string `json:"redacted,omitempty"`
+}
+
+// GPU is one graphics device. Metric fields are null without a metrics
+// source. UUID is sensitive.
+type GPU struct {
+	Vendor             string   `json:"vendor"`
+	Name               string   `json:"name"`
+	PCIAddress         string   `json:"pci_address"`
+	Driver             string   `json:"driver"`
+	DriverVersion      string   `json:"driver_version"`
+	MemoryTotalBytes   *uint64  `json:"memory_total_bytes"`
+	MemoryUsedBytes    *uint64  `json:"memory_used_bytes"`
+	UtilizationPercent *float64 `json:"utilization_percent"`
+	TemperatureCelsius *float64 `json:"temperature_celsius"`
+	PowerWatts         *float64 `json:"power_watts"`
+	PowerLimitWatts    *float64 `json:"power_limit_watts"`
+	FanPercent         *float64 `json:"fan_percent"`
+	MetricsSource      string   `json:"metrics_source"`
+	UUID               string   `json:"uuid,omitempty"`
+	Redacted           []string `json:"redacted,omitempty"`
 }
 
 // MemoryInventory describes installed memory.
@@ -98,10 +192,11 @@ type MetricsResponse struct {
 	Filesystems    *Section[[]Filesystem]       `json:"filesystems,omitempty"`
 	Network        *Section[[]NetworkInterface] `json:"network,omitempty"`
 	Sensors        *Section[[]Sensor]           `json:"sensors,omitempty"`
+	GPU            *Section[[]GPU]              `json:"gpu,omitempty"`
 }
 
 // MetricSections are the valid values of ?sections=.
-var MetricSections = []string{"cpu", "memory", "memory_pressure", "filesystems", "network", "sensors"}
+var MetricSections = []string{"cpu", "memory", "memory_pressure", "filesystems", "network", "sensors", "gpu"}
 
 // CPUMetrics is current CPU utilization.
 type CPUMetrics struct {
@@ -179,6 +274,7 @@ type NetworkInterface struct {
 	RateWindowSeconds float64  `json:"rate_window_seconds"`
 	MACAddress        string   `json:"mac_address,omitempty"`
 	Redacted          []string `json:"redacted,omitempty"`
+	Addresses         []string `json:"addresses"`
 }
 
 // Sensor is one hardware sensor reading.
@@ -222,6 +318,25 @@ type DiskHealth struct {
 type NetworkResponse struct {
 	Meta
 	Interfaces Section[[]NetworkInterface] `json:"interfaces"`
+	Routes     Section[[]Route]            `json:"routes"`
+	DNS        Section[DNS]                `json:"dns"`
+}
+
+// Route is one routing table entry.
+type Route struct {
+	Family      string `json:"family"`
+	Destination string `json:"destination"`
+	Gateway     string `json:"gateway"`
+	Interface   string `json:"interface"`
+	Metric      int    `json:"metric"`
+	Default     bool   `json:"default"`
+}
+
+// DNS is the resolver configuration.
+type DNS struct {
+	Nameservers []string `json:"nameservers"`
+	Search      []string `json:"search"`
+	Resolver    string   `json:"resolver"`
 }
 
 // SensorsResponse is GET /sensors.
@@ -337,6 +452,13 @@ type APIServerStatus struct {
 	Listeners     []Listener   `json:"listeners"`
 	Requests      RequestStats `json:"requests"`
 	ActiveClients int          `json:"active_clients"`
+	OpenStreams   int          `json:"open_streams"`
+}
+
+// StreamLagged is the data of a "lagged" SSE event: events were dropped
+// because the client read too slowly.
+type StreamLagged struct {
+	Dropped int `json:"dropped"`
 }
 
 // Listener is one open API listener.
@@ -354,4 +476,68 @@ type RequestStats struct {
 	Status5xx    uint64 `json:"status_5xx"`
 	AuthFailures uint64 `json:"auth_failures"`
 	RateLimited  uint64 `json:"rate_limited"`
+}
+
+// ---- /processes ----
+
+// ProcessesResponse is GET /processes. Command lines are never included
+// (D9); "redacted" says so explicitly.
+type ProcessesResponse struct {
+	Meta
+	Status        string     `json:"status"`
+	Reason        string     `json:"reason,omitempty"`
+	CollectedAt   *time.Time `json:"collected_at"`
+	WindowSeconds float64    `json:"window_seconds"`
+	Partial       bool       `json:"partial"`
+	Total         int        `json:"total"`
+	Items         []Process  `json:"items"`
+	NextCursor    *string    `json:"next_cursor"`
+	Redacted      []string   `json:"redacted"`
+}
+
+// Process is one process.
+type Process struct {
+	PID           int        `json:"pid"`
+	PPID          int        `json:"ppid"`
+	Name          string     `json:"name"`
+	User          string     `json:"user"`
+	UID           int        `json:"uid"`
+	State         string     `json:"state"`
+	Threads       int        `json:"threads"`
+	CPUPercent    *float64   `json:"cpu_percent"`
+	MemoryPercent float64    `json:"memory_percent"`
+	RSSBytes      uint64     `json:"rss_bytes"`
+	VirtualBytes  uint64     `json:"virtual_bytes"`
+	StartedAt     *time.Time `json:"started_at"`
+	KernelThread  bool       `json:"kernel_thread"`
+}
+
+// ProcessSorts are the valid values of ?sort= for /processes.
+var ProcessSorts = []string{"cpu", "memory", "pid", "name"}
+
+// ---- /services ----
+
+// ServicesResponse is GET /services.
+type ServicesResponse struct {
+	Meta
+	Services Section[ServiceList] `json:"services"`
+}
+
+// ServiceList is the systemd service list with counts by state. Counts
+// cover all services, even when ?state= filters the items.
+type ServiceList struct {
+	Total    int       `json:"total"`
+	Active   int       `json:"active"`
+	Failed   int       `json:"failed"`
+	Inactive int       `json:"inactive"`
+	Items    []Service `json:"items"`
+}
+
+// Service is one systemd service unit.
+type Service struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	LoadState   string `json:"load_state"`
+	ActiveState string `json:"active_state"`
+	SubState    string `json:"sub_state"`
 }
