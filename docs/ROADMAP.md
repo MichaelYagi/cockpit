@@ -130,6 +130,7 @@ adjust thresholds, and exports a redacted diagnostic report.
 ## Phase 4 — Extensibility
 
 - Collector SDK documentation, `core.GenericMetric`, compatibility metadata.
+- Bare `cockpit` opens the TUI in a terminal and prints help otherwise (Q2).
 - Example external collector compiled into a development build.
 - Published Go SDK; Python and TypeScript examples.
 - Docker/Podman, ZFS, UPS, additional GPU collectors.
@@ -146,7 +147,7 @@ adjust thresholds, and exports a redacted diagnostic report.
 | # | Question | Needed by | Current recommendation |
 |---|---|---|---|
 | Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. **Phase 3 done (D20):** `cockpit-smart.timer` runs `cockpit smart-helper` as root hourly and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
-| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 2 | Still prints help. Launching the TUI is now reasonable since it can embed an agent. |
+| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 4 | **Decided (2026-11-11):** launch the TUI when stdin and stdout are terminals; otherwise print help. `cockpit help` and `-h` keep printing help. Scheduled for Phase 4. |
 | Q5 | Should the filesystem skip lists become configurable? | 3 | **Done (Phase 3):** `collection.filesystems` with `exclude_types`, `include_types` and `exclude_mount_points`. Network filesystems stay excluded. |
 | Q6 | Should a dedicated scope cover network addresses, routes and DNS? | 3 | No for now: documented as visible with `metrics:read`. Revisit with fleet mode. |
 | Q7 | Should command lines ever be exposed (behind a new scope)? | 3+ | Not until there is a clear need; they often contain secrets. |
