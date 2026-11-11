@@ -38,6 +38,10 @@ func TestRealValues(t *testing.T) {
 	if load.One < 0 || load.One > 1000 || load.Fifteen < 0 {
 		t.Errorf("load %+v", load)
 	}
+	for _, name := range append([]string{"vm.page_free_count"}, reclaimable...) {
+		n, err := unix.SysctlUint32(name)
+		t.Logf("%s = %d (%v)", name, n, err)
+	}
 	if st := got["darwin.memory"].Status[core.CapMemoryUsage]; st.Availability != core.Available {
 		t.Fatalf("memory %+v", st)
 	}

@@ -115,6 +115,9 @@ func cpu(r *collector.Result) {
 	r.Records = append(r.Records, &core.CPUCounters{LogicalCores: runtime.NumCPU(), Load: &core.LoadAverage{One: l(0), Five: l(1), Fifteen: l(2)}})
 }
 
+// reclaimable page counters; not every macOS version has every one.
+var reclaimable = []string{"vm.page_speculative_count", "vm.page_purgeable_count", "vm.page_pageable_external_count"}
+
 // memory estimates available memory as free, speculative, purgeable and
 // file-backed pages, which the kernel can hand out without swapping.
 func memory(r *collector.Result) {
@@ -128,16 +131,18 @@ func memory(r *collector.Result) {
 		r.Status[core.CapMemoryUsage] = portable.Status(errOr(err), "the page size")
 		return
 	}
-	var pages uint64
-	for _, name := range []string{"vm.page_free_count", "vm.page_speculative_count", "vm.page_purgeable_count", "vm.page_pageable_external_count"} {
-		n, err := unix.SysctlUint32(name)
-		if err != nil {
-			r.Status[core.CapMemoryUsage] = portable.Unavailable(core.Unsupported, "This macOS version does not report "+name+".")
-			return
-		}
-		pages += uint64(n)
+	free, err := unix.SysctlUint32("vm.page_free_count")
+	if err != nil {
+		r.Status[core.CapMemoryUsage] = portable.Unavailable(core.Unsupported, "This macOS version does not report free memory pages.")
+		return
 	}
-	free, _ := unix.SysctlUint32("vm.page_free_count")
+	// Reclaimable pages, where this macOS version reports them.
+	pages := uint64(free)
+	for _, name := range reclaimable {
+		if n, err := unix.SysctlUint32(name); err == nil {
+			pages += uint64(n)
+		}
+	}
 	s := &core.MemoryStats{TotalBytes: total, AvailableBytes: min(total, pages*uint64(page)), FreeBytes: uint64(free) * uint64(page)}
 	// struct xsw_usage { u_int64_t xsu_total, xsu_avail, xsu_used; ... }
 	if b, err := unix.SysctlRaw("vm.swapusage"); err == nil && len(b) >= 16 {
