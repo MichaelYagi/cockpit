@@ -9,6 +9,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,6 +149,7 @@ type APIError struct {
 	Code       string
 	Message    string
 	RequestID  string
+	RetryAfter time.Duration // set for 429 responses
 }
 
 func (e *APIError) Error() string {
@@ -157,33 +160,54 @@ func (e *APIError) Error() string {
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
+	return c.do(ctx, http.MethodGet, path, nil, out)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	u := *c.base
 	u.Path = basePath + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		u.Path, u.RawQuery = basePath+path[:i], path[i+1:]
+	}
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rd = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), rd)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("cockpit API request %s: %w", path, err)
+		return fmt.Errorf("cockpit API request %s: %w", u.Path, err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
-	if len(body) > maxResponseSize {
+	if len(data) > maxResponseSize {
 		return errors.New("cockpit API response too large")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		apiErr := &APIError{StatusCode: resp.StatusCode, RequestID: resp.Header.Get(apiv1.RequestIDHeader)}
+		if ra, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && ra > 0 {
+			apiErr.RetryAfter = time.Duration(ra) * time.Second
+		}
 		var env apiv1.ErrorEnvelope
-		if json.Unmarshal(body, &env) == nil && env.Error.Code != "" {
+		if json.Unmarshal(data, &env) == nil && env.Error.Code != "" {
 			apiErr.Code, apiErr.Message, apiErr.RequestID = env.Error.Code, env.Error.Message, env.Error.RequestID
 		}
 		return apiErr
@@ -191,8 +215,8 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	if out == nil {
 		return nil
 	}
-	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("decode %s response: %w", path, err)
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("decode %s response: %w", u.Path, err)
 	}
 	return nil
 }

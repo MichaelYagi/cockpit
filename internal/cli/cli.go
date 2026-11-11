@@ -27,6 +27,7 @@ const (
 
 // Env abstracts the process environment for testing.
 type Env struct {
+	Stdin          io.Reader // nil: non-interactive
 	Stdout, Stderr io.Writer
 	LookupEnv      func(string) (string, bool)
 	Environ        []string
@@ -36,7 +37,7 @@ type Env struct {
 // OSEnv returns the real process environment.
 func OSEnv() Env {
 	home, _ := os.UserHomeDir()
-	return Env{Stdout: os.Stdout, Stderr: os.Stderr, LookupEnv: os.LookupEnv, Environ: os.Environ(), Home: home}
+	return Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, LookupEnv: os.LookupEnv, Environ: os.Environ(), Home: home}
 }
 
 const usage = `Cockpit: API-first machine monitoring.
@@ -47,6 +48,7 @@ Usage:
 Commands:
   agent          Run the monitoring agent and API server
   tui            Open the terminal UI (connects to a running agent)
+  keys           Create, list, rotate and revoke API keys (local admin)
   config check   Validate configuration and print the effective settings
   version        Print version information
   help           Show this help
@@ -66,6 +68,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return runAgent(ctx, rest, env)
 	case "tui":
 		return runTUI(ctx, rest, env)
+	case "keys":
+		return runKeys(ctx, rest, env)
 	case "config":
 		if len(rest) == 0 || rest[0] != "check" {
 			fmt.Fprintln(env.Stderr, `usage: cockpit config check [flags]`)
@@ -270,6 +274,12 @@ func connect(env Env, mode, cfgPath, socket, apiURL string) (*client.Client, str
 		c, err := client.NewTCP(apiURL, key)
 		return c, apiURL, err
 	}
+	return connectSocket(env, mode, cfgPath, socket)
+}
+
+// connectSocket connects to the agent's admin socket, resolving the
+// default path from configuration when socket is empty.
+func connectSocket(env Env, mode, cfgPath, socket string) (*client.Client, string, error) {
 	if socket == "" {
 		res, err := config.Load(config.Source{Mode: config.Mode(mode), ConfigPath: cfgPath, Env: env.LookupEnv, Home: env.Home})
 		if err != nil {

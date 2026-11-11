@@ -150,3 +150,68 @@ func TestOversizedResponseRejected(t *testing.T) {
 		t.Error("oversized response accepted")
 	}
 }
+
+// Every SDK method must send a request the spec accepts.
+func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
+	var paths []string
+	srv := mockAgent(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.RequestURI())
+		switch {
+		case r.Method == "POST":
+			writeJSON(w, 201, map[string]any{"key": "x", "api_key": map[string]any{"id": "aaaaaaaaaaaa"}})
+		case strings.HasSuffix(r.URL.Path, "/keys"):
+			writeJSON(w, 200, map[string]any{"items": []any{}})
+		default:
+			writeJSON(w, 200, map[string]any{})
+		}
+	})
+	c, _ := NewTCP(srv.URL, testKey)
+	ctx := context.Background()
+	exp := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	calls := []func() error{
+		func() error { _, err := c.System(ctx); return err },
+		func() error { _, err := c.Hardware(ctx); return err },
+		func() error { _, err := c.Metrics(ctx); return err },
+		func() error { _, err := c.Metrics(ctx, "cpu", "memory"); return err },
+		func() error { _, err := c.Storage(ctx); return err },
+		func() error { _, err := c.Network(ctx); return err },
+		func() error { _, err := c.Sensors(ctx); return err },
+		func() error { _, err := c.Health(ctx); return err },
+		func() error {
+			_, err := c.Events(ctx, EventsQuery{Limit: 10, Cursor: "5", Severity: "warning", Since: exp})
+			return err
+		},
+		func() error { _, err := c.ListKeys(ctx); return err },
+		func() error {
+			_, err := c.CreateKey(ctx, apiv1.CreateAPIKeyRequest{Name: "n", Scopes: []string{"metrics:read"}, ExpiresAt: &exp})
+			return err
+		},
+		func() error { _, err := c.RotateKey(ctx, "aaaaaaaaaaaa"); return err },
+		func() error { _, err := c.RevokeKey(ctx, "aaaaaaaaaaaa"); return err },
+	}
+	for i, call := range calls {
+		if err := call(); err != nil {
+			t.Errorf("call %d: %v", i, err)
+		}
+	}
+	if len(paths) != len(calls) {
+		t.Errorf("requests %v", paths)
+	}
+	if paths[3] != "GET /api/v1/metrics?sections=cpu%2Cmemory" {
+		t.Errorf("metrics query %q", paths[3])
+	}
+}
+
+func TestRetryAfterParsed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "7")
+		writeJSON(w, 429, apiv1.ErrorEnvelope{Error: apiv1.ErrorBody{Code: apiv1.CodeRateLimited, Message: "slow down", RequestID: "r"}})
+	}))
+	defer srv.Close()
+	c, _ := NewTCP(srv.URL, "")
+	_, err := c.Health(context.Background())
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.RetryAfter != 7*time.Second || apiErr.Code != apiv1.CodeRateLimited {
+		t.Fatalf("got %v", err)
+	}
+}
