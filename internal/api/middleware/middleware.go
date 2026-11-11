@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/time/rate"
 
 	"github.com/MichaelYagi/cockpit/internal/api/httpx"
 	"github.com/MichaelYagi/cockpit/internal/auth"
@@ -152,31 +153,63 @@ func LocalAdmin(next http.Handler) http.Handler {
 }
 
 // Authenticate requires a valid bearer API key (D4). Every failure reason
-// produces the same response so clients cannot probe key state.
-func Authenticate(v auth.Verifier) func(http.Handler) http.Handler {
+// produces the same response so clients cannot probe key state. With
+// limits set, failed attempts are rate limited per client IP and
+// successful requests per key. Errors from the verifier other than
+// auth.ErrInvalidCredentials are internal failures (500), not 401.
+func Authenticate(v auth.Verifier, limits *Limits, stats *Stats, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if p, ok := auth.PrincipalFrom(r.Context()); ok && p.Kind == auth.KindLocalAdmin {
 				next.ServeHTTP(w, r) // socket requests are already authenticated
 				return
 			}
+			var ipLimit *rate.Limiter
+			if limits != nil {
+				ipLimit = limits.authFail.get(clientIP(r))
+				if ipLimit.Tokens() < 1 {
+					rateLimited(w, r, retryAfter(authFailRPS), stats)
+					return
+				}
+			}
+			fail := func(code, msg, challenge string) {
+				if stats != nil {
+					stats.authFailures.Add(1)
+				}
+				if ipLimit != nil {
+					ipLimit.Allow() // consume a token for the failed attempt
+				}
+				w.Header().Set("WWW-Authenticate", challenge)
+				httpx.WriteError(w, r, http.StatusUnauthorized, code, msg)
+			}
+
 			header := r.Header.Get("Authorization")
 			if header == "" {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="cockpit"`)
-				httpx.WriteError(w, r, http.StatusUnauthorized, apiv1.CodeAuthenticationRequired, "A valid API key is required.")
+				fail(apiv1.CodeAuthenticationRequired, "A valid API key is required.", `Bearer realm="cockpit"`)
 				return
 			}
 			scheme, token, found := strings.Cut(header, " ")
-			if !found || !strings.EqualFold(scheme, "Bearer") || strings.TrimSpace(token) == "" {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="cockpit", error="invalid_request"`)
-				httpx.WriteError(w, r, http.StatusUnauthorized, apiv1.CodeInvalidCredentials, "The API key is invalid.")
+			token = strings.TrimSpace(token)
+			if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
+				fail(apiv1.CodeInvalidCredentials, "The API key is invalid.", `Bearer realm="cockpit", error="invalid_request"`)
 				return
 			}
-			p, err := v.Verify(r.Context(), strings.TrimSpace(token))
-			if err != nil {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="cockpit", error="invalid_token"`)
-				httpx.WriteError(w, r, http.StatusUnauthorized, apiv1.CodeInvalidCredentials, "The API key is invalid.")
+			p, err := v.Verify(r.Context(), token)
+			if errors.Is(err, auth.ErrInvalidCredentials) {
+				fail(apiv1.CodeInvalidCredentials, "The API key is invalid.", `Bearer realm="cockpit", error="invalid_token"`)
 				return
+			}
+			if err != nil {
+				logger.Error("api key verification failed", "request_id", httpx.RequestID(r.Context()), "error", err)
+				httpx.WriteError(w, r, http.StatusInternalServerError, apiv1.CodeInternal, "An unexpected error occurred.")
+				return
+			}
+			if limits != nil && !limits.perKey.get(p.KeyID).Allow() {
+				rateLimited(w, r, retryAfter(rate.Limit(limits.cfg.PerKeyRPS)), stats)
+				return
+			}
+			if stats != nil {
+				stats.seen(p.KeyID)
 			}
 			next.ServeHTTP(w, r.WithContext(setPrincipal(r.Context(), p)))
 		})

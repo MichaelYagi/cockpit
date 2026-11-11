@@ -115,9 +115,10 @@ func (s *Spec) CheckResponse(t testing.TB, req *http.Request, status int, header
 
 // Operation is a spec operation and its declared scope.
 type Operation struct {
-	Method string
-	Path   string
-	Scope  string // "public" or a scope name
+	Method     string
+	Path       string
+	Scope      string // "public" or a scope name
+	SocketOnly bool   // x-cockpit-socket-only
 }
 
 // Operations lists every operation in the spec, sorted.
@@ -126,7 +127,8 @@ func (s *Spec) Operations() []Operation {
 	for path, item := range s.Doc.Paths.Map() {
 		for method, op := range item.Operations() {
 			scope, _ := op.Extensions["x-cockpit-scope"].(string)
-			out = append(out, Operation{Method: strings.ToUpper(method), Path: path, Scope: scope})
+			socketOnly, _ := op.Extensions["x-cockpit-socket-only"].(bool)
+			out = append(out, Operation{Method: strings.ToUpper(method), Path: path, Scope: scope, SocketOnly: socketOnly})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

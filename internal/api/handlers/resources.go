@@ -1,0 +1,290 @@
+package handlers
+
+import (
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/MichaelYagi/cockpit/internal/api/httpx"
+	"github.com/MichaelYagi/cockpit/internal/api/redact"
+	"github.com/MichaelYagi/cockpit/internal/core"
+	"github.com/MichaelYagi/cockpit/pkg/apiv1"
+)
+
+// SnapshotSource provides the latest engine snapshot.
+type SnapshotSource interface {
+	Current() *core.Snapshot
+}
+
+// Resources serves the machine resources from engine snapshots.
+type Resources struct {
+	Snapshots SnapshotSource
+	MachineID core.MachineID
+	Policy    redact.Policy
+	Now       func() time.Time
+}
+
+func (h *Resources) meta(now time.Time) apiv1.Meta {
+	return apiv1.Meta{SchemaVersion: apiv1.SchemaVersion, MachineID: string(h.MachineID), GeneratedAt: now}
+}
+
+// section maps a core section to a wire section, converting data with conv.
+func section[T, U any](s core.Section[T], now time.Time, conv func(*T) *U) apiv1.Section[U] {
+	out := apiv1.Section[U]{
+		Status: string(s.Meta.Status),
+		Stale:  s.Meta.IsStale(now),
+		Source: s.Meta.Source,
+		Reason: s.Meta.Reason,
+	}
+	if !s.Meta.CollectedAt.IsZero() {
+		t := s.Meta.CollectedAt.UTC()
+		out.CollectedAt = &t
+	}
+	if s.Data != nil {
+		out.Data = conv(s.Data)
+	}
+	return out
+}
+
+// derived maps a section's metadata onto data derived from another
+// section (e.g. CPU inventory from CPU metrics).
+func derived[T, U any](s core.Section[T], now time.Time, conv func(*T) *U) apiv1.Section[U] {
+	out := section(s, now, conv)
+	out.Stale = false // inventory facts do not go stale with the sample
+	return out
+}
+
+// ---- /system ----
+
+// System serves GET /system.
+func (h *Resources) System(w http.ResponseWriter, r *http.Request) {
+	if !allowParams(w, r) {
+		return
+	}
+	now := h.Now().UTC()
+	s := h.Snapshots.Current()
+	httpx.WriteJSON(w, http.StatusOK, apiv1.SystemResponse{
+		Meta: h.meta(now),
+		System: section(s.System, now, func(v *core.SystemInfo) *apiv1.System {
+			out := &apiv1.System{
+				Hostname:     v.Hostname,
+				OS:           apiv1.OS{ID: v.OSID, Name: v.OSName, Version: v.OSVersion, PrettyName: v.OSPrettyName},
+				Kernel:       v.Kernel,
+				Architecture: v.Architecture,
+			}
+			if !v.BootTime.IsZero() {
+				bt := v.BootTime.UTC()
+				up := now.Sub(bt).Seconds()
+				out.BootTime, out.UptimeSeconds = &bt, &up
+			}
+			return out
+		}),
+	})
+}
+
+// ---- /hardware ----
+
+// Hardware serves GET /hardware.
+func (h *Resources) Hardware(w http.ResponseWriter, r *http.Request) {
+	if !allowParams(w, r) {
+		return
+	}
+	now := h.Now().UTC()
+	s := h.Snapshots.Current()
+	httpx.WriteJSON(w, http.StatusOK, apiv1.HardwareResponse{
+		Meta: h.meta(now),
+		CPU: derived(s.CPU, now, func(v *core.CPUMetrics) *apiv1.CPUInventory {
+			return &apiv1.CPUInventory{ModelName: v.ModelName, LogicalCores: v.LogicalCores}
+		}),
+		Memory: derived(s.Memory, now, func(v *core.MemoryMetrics) *apiv1.MemoryInventory {
+			return &apiv1.MemoryInventory{TotalBytes: v.TotalBytes, SwapTotalBytes: v.SwapTotalBytes}
+		}),
+		BlockDevices: section(s.BlockDevices, now, h.blockDevices),
+		NetworkInterfaces: derived(s.Network, now, func(v *[]core.NetInterfaceMetrics) *[]apiv1.NetworkInterfaceInventory {
+			out := make([]apiv1.NetworkInterfaceInventory, 0, len(*v))
+			for _, n := range *v {
+				inv := apiv1.NetworkInterfaceInventory{Name: n.Name, MTU: n.MTU, Loopback: n.Loopback, SpeedMbps: n.SpeedMbps}
+				h.Policy.Field(redact.MACAddress, n.MACAddress, &inv.MACAddress, &inv.Redacted)
+				out = append(out, inv)
+			}
+			return &out
+		}),
+	})
+}
+
+func (h *Resources) blockDevices(v *core.BlockDevices) *[]apiv1.BlockDevice {
+	out := make([]apiv1.BlockDevice, 0, len(*v))
+	for _, d := range *v {
+		b := apiv1.BlockDevice{Name: d.Name, Model: d.Model, Transport: d.Transport, Rotational: d.Rotational,
+			Removable: d.Removable, SizeBytes: d.SizeBytes}
+		h.Policy.Field(redact.Serial, d.Serial, &b.Serial, &b.Redacted)
+		h.Policy.Field(redact.WWN, d.WWN, &b.WWN, &b.Redacted)
+		out = append(out, b)
+	}
+	return &out
+}
+
+// ---- /metrics ----
+
+func cpuMetrics(v *core.CPUMetrics) *apiv1.CPUMetrics {
+	out := &apiv1.CPUMetrics{UsagePercent: v.UsagePercent, PerCoreUsagePercent: v.PerCoreUsagePercent,
+		WindowSeconds: v.WindowSeconds, LogicalCores: v.LogicalCores}
+	if v.Load != nil {
+		out.LoadAverage = &apiv1.LoadAverage{One: v.Load.One, Five: v.Load.Five, Fifteen: v.Load.Fifteen}
+	}
+	return out
+}
+
+func memoryMetrics(v *core.MemoryMetrics) *apiv1.MemoryMetrics {
+	return &apiv1.MemoryMetrics{
+		TotalBytes: v.TotalBytes, AvailableBytes: v.AvailableBytes, UsedBytes: v.UsedBytes, UsedPercent: v.UsedPercent,
+		FreeBytes: v.FreeBytes, BuffersBytes: v.BuffersBytes, CachedBytes: v.CachedBytes,
+		SwapTotalBytes: v.SwapTotalBytes, SwapUsedBytes: v.SwapUsedBytes, SwapUsedPercent: v.SwapUsedPercent,
+	}
+}
+
+func memoryPressure(v *core.MemoryPressure) *apiv1.MemoryPressure {
+	return &apiv1.MemoryPressure{
+		SomeAvg10Percent: v.SomeAvg10, SomeAvg60Percent: v.SomeAvg60, SomeAvg300Percent: v.SomeAvg300,
+		FullAvg10Percent: v.FullAvg10, FullAvg60Percent: v.FullAvg60, FullAvg300Percent: v.FullAvg300,
+	}
+}
+
+func filesystems(v *core.Filesystems) *[]apiv1.Filesystem {
+	out := make([]apiv1.Filesystem, 0, len(*v))
+	for _, f := range *v {
+		fs := apiv1.Filesystem{MountPoint: f.MountPoint, Device: f.Device, Type: f.Type, ReadOnly: f.ReadOnly,
+			TotalBytes: f.TotalBytes, AvailableBytes: f.AvailableBytes, InodesTotal: f.TotalInodes, InodesFree: f.FreeInodes}
+		if f.FreeBytes <= f.TotalBytes {
+			fs.UsedBytes = f.TotalBytes - f.FreeBytes
+			if d := fs.UsedBytes + f.AvailableBytes; d > 0 {
+				fs.UsedPercent = float64(fs.UsedBytes) / float64(d) * 100
+			}
+		}
+		if f.TotalInodes > 0 && f.FreeInodes <= f.TotalInodes {
+			p := float64(f.TotalInodes-f.FreeInodes) / float64(f.TotalInodes) * 100
+			fs.InodesUsedPercent = &p
+		}
+		out = append(out, fs)
+	}
+	return &out
+}
+
+func (h *Resources) network(v *[]core.NetInterfaceMetrics) *[]apiv1.NetworkInterface {
+	out := make([]apiv1.NetworkInterface, 0, len(*v))
+	for _, n := range *v {
+		ni := apiv1.NetworkInterface{
+			Name: n.Name, OperState: n.OperState, Loopback: n.Loopback, MTU: n.MTU, SpeedMbps: n.SpeedMbps,
+			RxBytes: n.RxBytes, TxBytes: n.TxBytes, RxPackets: n.RxPackets, TxPackets: n.TxPackets,
+			RxErrors: n.RxErrors, TxErrors: n.TxErrors, RxDropped: n.RxDropped, TxDropped: n.TxDropped,
+			RxBytesPerSecond: n.RxBytesPerSecond, TxBytesPerSecond: n.TxBytesPerSecond, RateWindowSeconds: n.WindowSeconds,
+		}
+		h.Policy.Field(redact.MACAddress, n.MACAddress, &ni.MACAddress, &ni.Redacted)
+		out = append(out, ni)
+	}
+	return &out
+}
+
+func sensors(v *core.Sensors) *[]apiv1.Sensor {
+	out := make([]apiv1.Sensor, 0, len(*v))
+	for _, s := range *v {
+		out = append(out, apiv1.Sensor{Kind: string(s.Kind), Chip: s.Chip, Label: s.Label, Value: s.Value, Unit: s.Unit,
+			High: s.High, Critical: s.Critical, Source: s.Source, CPU: s.CPU})
+	}
+	return &out
+}
+
+func diskHealth(v *core.DiskHealthList) *[]apiv1.DiskHealth {
+	out := make([]apiv1.DiskHealth, 0, len(*v))
+	for _, d := range *v {
+		out = append(out, apiv1.DiskHealth{Device: d.Device, Protocol: d.Protocol, SmartPassed: d.Passed,
+			TemperatureCelsius: d.TemperatureCelsius, PowerOnHours: d.PowerOnHours, PercentageUsed: d.PercentageUsed,
+			CriticalWarning: d.CriticalWarning, ReallocatedSectors: d.ReallocatedSectors, PendingSectors: d.PendingSectors,
+			MediaErrors: d.MediaErrors})
+	}
+	return &out
+}
+
+func ptrTo[T any](v T) *T { return &v }
+
+// Metrics serves GET /metrics.
+func (h *Resources) Metrics(w http.ResponseWriter, r *http.Request) {
+	if !allowParams(w, r, "sections") {
+		return
+	}
+	want := map[string]bool{}
+	if raw := r.URL.Query().Get("sections"); raw != "" {
+		for _, name := range strings.Split(raw, ",") {
+			valid := false
+			for _, s := range apiv1.MetricSections {
+				if s == name {
+					valid = true
+				}
+			}
+			if !valid {
+				badParam(w, r, "sections", "unknown section "+quote(name)+"; valid sections are "+strings.Join(apiv1.MetricSections, ", "))
+				return
+			}
+			want[name] = true
+		}
+	} else {
+		for _, s := range apiv1.MetricSections {
+			want[s] = true
+		}
+	}
+	now := h.Now().UTC()
+	s := h.Snapshots.Current()
+	out := apiv1.MetricsResponse{Meta: h.meta(now)}
+	if want["cpu"] {
+		out.CPU = ptrTo(section(s.CPU, now, cpuMetrics))
+	}
+	if want["memory"] {
+		out.Memory = ptrTo(section(s.Memory, now, memoryMetrics))
+	}
+	if want["memory_pressure"] {
+		out.MemoryPressure = ptrTo(section(s.MemoryPressure, now, memoryPressure))
+	}
+	if want["filesystems"] {
+		out.Filesystems = ptrTo(section(s.Filesystems, now, filesystems))
+	}
+	if want["network"] {
+		out.Network = ptrTo(section(s.Network, now, h.network))
+	}
+	if want["sensors"] {
+		out.Sensors = ptrTo(section(s.Sensors, now, sensors))
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// Storage serves GET /storage.
+func (h *Resources) Storage(w http.ResponseWriter, r *http.Request) {
+	if !allowParams(w, r) {
+		return
+	}
+	now := h.Now().UTC()
+	s := h.Snapshots.Current()
+	httpx.WriteJSON(w, http.StatusOK, apiv1.StorageResponse{
+		Meta:         h.meta(now),
+		BlockDevices: section(s.BlockDevices, now, h.blockDevices),
+		Filesystems:  section(s.Filesystems, now, filesystems),
+		DiskHealth:   section(s.DiskHealth, now, diskHealth),
+	})
+}
+
+// Network serves GET /network.
+func (h *Resources) Network(w http.ResponseWriter, r *http.Request) {
+	if !allowParams(w, r) {
+		return
+	}
+	now := h.Now().UTC()
+	httpx.WriteJSON(w, http.StatusOK, apiv1.NetworkResponse{Meta: h.meta(now), Interfaces: section(h.Snapshots.Current().Network, now, h.network)})
+}
+
+// Sensors serves GET /sensors.
+func (h *Resources) Sensors(w http.ResponseWriter, r *http.Request) {
+	if !allowParams(w, r) {
+		return
+	}
+	now := h.Now().UTC()
+	httpx.WriteJSON(w, http.StatusOK, apiv1.SensorsResponse{Meta: h.meta(now), Sensors: section(h.Snapshots.Current().Sensors, now, sensors)})
+}

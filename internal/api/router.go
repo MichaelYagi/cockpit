@@ -16,7 +16,9 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/api/handlers"
 	"github.com/MichaelYagi/cockpit/internal/api/httpx"
 	"github.com/MichaelYagi/cockpit/internal/api/middleware"
+	"github.com/MichaelYagi/cockpit/internal/api/redact"
 	"github.com/MichaelYagi/cockpit/internal/auth"
+	"github.com/MichaelYagi/cockpit/internal/core"
 	"github.com/MichaelYagi/cockpit/pkg/apiv1"
 )
 
@@ -48,11 +50,20 @@ type Route struct {
 
 // Deps are the services handlers need.
 type Deps struct {
-	Logger   *slog.Logger
-	Verifier auth.Verifier
-	Status   handlers.StatusSource
-	SpecJSON []byte
-	Now      func() time.Time
+	Logger    *slog.Logger
+	Verifier  auth.Verifier
+	Status    handlers.StatusSource
+	SpecJSON  []byte
+	Now       func() time.Time
+	Snapshots handlers.SnapshotSource
+	Health    handlers.HealthSource
+	Events    handlers.EventSource
+	Keys      handlers.KeyService
+	Redaction redact.Policy
+	// Stats counts requests on every listener (shared between routers).
+	Stats *middleware.Stats
+	// Listeners reports open listeners for the admin part of /status.
+	Listeners func() []apiv1.Listener
 }
 
 // Options configure one router.
@@ -60,14 +71,49 @@ type Options struct {
 	Listener Listener
 	// CheckLoopbackHost enables the Host header check (loopback TCP only).
 	CheckLoopbackHost bool
+	// Limits enables rate limiting (TCP only). Nil disables it.
+	Limits *middleware.Limits
 }
 
 // Routes returns the route table.
 func Routes(d Deps) []Route {
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	var machineID core.MachineID
+	if d.Status != nil {
+		machineID = d.Status.MachineID()
+	}
+	res := &handlers.Resources{Snapshots: d.Snapshots, MachineID: machineID, Policy: d.Redaction, Now: d.Now}
+	keys := &handlers.Keys{Service: d.Keys, Now: d.Now, Logger: d.Logger}
+	admin := func() *apiv1.APIServerStatus {
+		st := &apiv1.APIServerStatus{Listeners: []apiv1.Listener{}}
+		if d.Listeners != nil {
+			st.Listeners = d.Listeners()
+		}
+		if d.Stats != nil {
+			st.Requests, st.ActiveClients = d.Stats.Snapshot()
+		}
+		return st
+	}
+	get, post, del := http.MethodGet, http.MethodPost, http.MethodDelete
+	sys, met, adm := auth.ScopeSystemRead, auth.ScopeMetricsRead, auth.ScopeAdmin
 	return []Route{
-		{Method: http.MethodGet, Path: "/livez", Public: true, Handler: handlers.Livez},
-		{Method: http.MethodGet, Path: "/openapi.json", Public: true, Handler: handlers.OpenAPI(d.SpecJSON)},
-		{Method: http.MethodGet, Path: "/status", Scope: auth.ScopeSystemRead, Handler: handlers.Status(d.Status, d.Now)},
+		{Method: get, Path: "/livez", Public: true, Handler: handlers.Livez},
+		{Method: get, Path: "/openapi.json", Public: true, Handler: handlers.OpenAPI(d.SpecJSON)},
+		{Method: get, Path: "/status", Scope: sys, Handler: handlers.Status(d.Status, admin, d.Now)},
+		{Method: get, Path: "/system", Scope: sys, Handler: res.System},
+		{Method: get, Path: "/hardware", Scope: sys, Handler: res.Hardware},
+		{Method: get, Path: "/metrics", Scope: met, Handler: res.Metrics},
+		{Method: get, Path: "/storage", Scope: met, Handler: res.Storage},
+		{Method: get, Path: "/network", Scope: met, Handler: res.Network},
+		{Method: get, Path: "/sensors", Scope: met, Handler: res.Sensors},
+		{Method: get, Path: "/health", Scope: met, Handler: handlers.Health(d.Health, machineID, d.Now)},
+		{Method: get, Path: "/events", Scope: met, Handler: handlers.Events(d.Events, machineID, d.Now)},
+		{Method: get, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.List},
+		{Method: post, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.Create},
+		{Method: del, Path: "/keys/{id}", Scope: adm, SocketOnly: true, Handler: keys.Revoke},
+		{Method: post, Path: "/keys/{id}/rotate", Scope: adm, SocketOnly: true, Handler: keys.Rotate},
 	}
 }
 
@@ -87,8 +133,14 @@ func newRouter(d Deps, o Options, routes []Route) (http.Handler, error) {
 	r.Use(middleware.RequestID(d.Now))
 	r.Use(middleware.AccessLog(d.Logger, string(o.Listener)))
 	r.Use(middleware.Recover(d.Logger))
+	if d.Stats != nil {
+		r.Use(d.Stats.Count)
+	}
 	if o.CheckLoopbackHost {
 		r.Use(middleware.HostCheck)
+	}
+	if o.Limits != nil && o.Listener == ListenerTCP {
+		r.Use(middleware.GlobalRateLimit(o.Limits, d.Stats))
 	}
 	r.Use(middleware.BodyLimit(middleware.MaxBodyBytes))
 	r.Use(middleware.WriteDeadline(writeDeadline))
@@ -103,7 +155,11 @@ func newRouter(d Deps, o Options, routes []Route) (http.Handler, error) {
 		httpx.WriteError(w, req, http.StatusMethodNotAllowed, apiv1.CodeMethodNotAllowed, "Method not allowed for this resource.")
 	})
 
-	authn := middleware.Authenticate(d.Verifier)
+	var limits *middleware.Limits
+	if o.Listener == ListenerTCP {
+		limits = o.Limits
+	}
+	authn := middleware.Authenticate(d.Verifier, limits, d.Stats, d.Logger)
 	for _, rt := range routes {
 		if err := rt.validate(); err != nil {
 			return nil, err
