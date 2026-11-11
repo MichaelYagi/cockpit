@@ -51,6 +51,8 @@ type Snapshot struct {
 	Board          Section[BoardInfo]
 	MemoryModules  Section[MemoryModules]
 	GPUs           Section[GPUs]
+	Routes         Section[Routes]
+	DNS            Section[DNSConfig]
 
 	Collectors []CollectorStatus
 }

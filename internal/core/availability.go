@@ -57,6 +57,8 @@ const (
 	CapHardwareMemory     Capability = "hardware.memory_modules"
 	CapGPUDevices         Capability = "gpu.devices"
 	CapGPUMetrics         Capability = "gpu.metrics"
+	CapNetworkRoutes      Capability = "network.routes"
+	CapNetworkDNS         Capability = "network.dns"
 )
 
 // KnownCapabilities returns every defined capability in a stable order.
@@ -71,6 +73,7 @@ func KnownCapabilities() []Capability {
 		CapProcessesList, CapServicesSystemd,
 		CapHardwareCPU, CapHardwarePCI, CapHardwareUSB, CapHardwareBoard, CapHardwareMemory,
 		CapGPUDevices, CapGPUMetrics,
+		CapNetworkRoutes, CapNetworkDNS,
 	}
 }
 

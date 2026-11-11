@@ -36,6 +36,9 @@ func section[T, U any](s core.Section[T], now time.Time, conv func(*T) *U) apiv1
 		Source: s.Meta.Source,
 		Reason: s.Meta.Reason,
 	}
+	if out.Status == "" { // a section no collector has filled in
+		out.Status, out.Reason = string(core.Unsupported), "Not collected on this platform."
+	}
 	if !s.Meta.CollectedAt.IsZero() {
 		t := s.Meta.CollectedAt.UTC()
 		out.CollectedAt = &t
@@ -249,6 +252,7 @@ func (h *Resources) network(v *[]core.NetInterfaceMetrics) *[]apiv1.NetworkInter
 			RxBytesPerSecond: n.RxBytesPerSecond, TxBytesPerSecond: n.TxBytesPerSecond, RateWindowSeconds: n.WindowSeconds,
 		}
 		h.Policy.Field(redact.MACAddress, n.MACAddress, &ni.MACAddress, &ni.Redacted)
+		ni.Addresses = append([]string{}, n.Addresses...)
 		out = append(out, ni)
 	}
 	return &out
@@ -349,7 +353,23 @@ func (h *Resources) Network(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := h.Now().UTC()
-	httpx.WriteJSON(w, http.StatusOK, apiv1.NetworkResponse{Meta: h.meta(now), Interfaces: section(h.Snapshots.Current().Network, now, h.network)})
+	s := h.Snapshots.Current()
+	httpx.WriteJSON(w, http.StatusOK, apiv1.NetworkResponse{
+		Meta:       h.meta(now),
+		Interfaces: section(s.Network, now, h.network),
+		Routes: section(s.Routes, now, func(v *core.Routes) *[]apiv1.Route {
+			out := make([]apiv1.Route, 0, len(*v))
+			for _, r := range *v {
+				out = append(out, apiv1.Route{Family: r.Family, Destination: r.Destination, Gateway: r.Gateway, Interface: r.Interface,
+					Metric: r.Metric, Default: r.Default})
+			}
+			return &out
+		}),
+		DNS: section(s.DNS, now, func(v *core.DNSConfig) *apiv1.DNS {
+			d := &apiv1.DNS{Nameservers: append([]string{}, v.Nameservers...), Search: append([]string{}, v.Search...), Resolver: v.Resolver}
+			return d
+		}),
+	})
 }
 
 // Sensors serves GET /sensors.

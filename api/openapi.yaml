@@ -1202,7 +1202,7 @@ components:
     NetworkInterface:
       type: object
       additionalProperties: false
-      required: [name, oper_state, loopback, mtu, speed_mbps, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_errors, tx_errors, rx_dropped, tx_dropped, rx_bytes_per_second, tx_bytes_per_second, rate_window_seconds]
+      required: [name, oper_state, loopback, mtu, speed_mbps, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_errors, tx_errors, rx_dropped, tx_dropped, rx_bytes_per_second, tx_bytes_per_second, rate_window_seconds, addresses]
       properties:
         name: { type: string }
         oper_state: { type: string, examples: [up, down, unknown] }
@@ -1223,8 +1223,59 @@ components:
           description: Null until two samples exist or after a counter reset.
         tx_bytes_per_second: { type: [number, "null"], minimum: 0 }
         rate_window_seconds: { type: number, minimum: 0 }
+        addresses: { type: array, items: { type: string }, description: "Assigned addresses in CIDR form, e.g. 192.168.1.10/24." }
         mac_address: { type: string, x-cockpit-sensitive: true }
         redacted: { $ref: "#/components/schemas/Redacted" }
+    RoutesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/Route" }
+            - type: "null"
+    DNSSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/DNS"
+            - type: "null"
+    Route:
+      type: object
+      additionalProperties: false
+      required: [family, destination, gateway, interface, metric, default]
+      properties:
+        family: { type: string, enum: [ipv4, ipv6] }
+        destination: { type: string, examples: ["0.0.0.0/0", "192.168.1.0/24"] }
+        gateway: { type: string, description: Empty for directly connected routes. }
+        interface: { type: string }
+        metric: { type: integer, minimum: 0 }
+        default: { type: boolean }
+    DNS:
+      type: object
+      additionalProperties: false
+      required: [nameservers, search, resolver]
+      properties:
+        nameservers: { type: array, items: { type: string } }
+        search: { type: array, items: { type: string } }
+        resolver: { type: string, enum: [resolv.conf, systemd-resolved], description: "With systemd-resolved, nameservers are its upstream servers." }
     Sensor:
       type: object
       additionalProperties: false
@@ -1269,13 +1320,15 @@ components:
     NetworkResponse:
       type: object
       additionalProperties: false
-      description: GET /network.
-      required: [schema_version, machine_id, generated_at, interfaces]
+      description: GET /network. Routes and DNS are read passively; nothing is probed.
+      required: [schema_version, machine_id, generated_at, interfaces, routes, dns]
       properties:
         schema_version: { $ref: "#/components/schemas/SchemaVersion" }
         machine_id: { $ref: "#/components/schemas/MachineID" }
         generated_at: { $ref: "#/components/schemas/Timestamp" }
         interfaces: { $ref: "#/components/schemas/NetworkInterfacesSection" }
+        routes: { $ref: "#/components/schemas/RoutesSection" }
+        dns: { $ref: "#/components/schemas/DNSSection" }
     SensorsResponse:
       type: object
       additionalProperties: false

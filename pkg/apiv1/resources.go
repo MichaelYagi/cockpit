@@ -274,6 +274,7 @@ type NetworkInterface struct {
 	RateWindowSeconds float64  `json:"rate_window_seconds"`
 	MACAddress        string   `json:"mac_address,omitempty"`
 	Redacted          []string `json:"redacted,omitempty"`
+	Addresses         []string `json:"addresses"`
 }
 
 // Sensor is one hardware sensor reading.
@@ -317,6 +318,25 @@ type DiskHealth struct {
 type NetworkResponse struct {
 	Meta
 	Interfaces Section[[]NetworkInterface] `json:"interfaces"`
+	Routes     Section[[]Route]            `json:"routes"`
+	DNS        Section[DNS]                `json:"dns"`
+}
+
+// Route is one routing table entry.
+type Route struct {
+	Family      string `json:"family"`
+	Destination string `json:"destination"`
+	Gateway     string `json:"gateway"`
+	Interface   string `json:"interface"`
+	Metric      int    `json:"metric"`
+	Default     bool   `json:"default"`
+}
+
+// DNS is the resolver configuration.
+type DNS struct {
+	Nameservers []string `json:"nameservers"`
+	Search      []string `json:"search"`
+	Resolver    string   `json:"resolver"`
 }
 
 // SensorsResponse is GET /sensors.

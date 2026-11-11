@@ -29,6 +29,8 @@ const (
 	secBoard
 	secMemoryModules
 	secGPUs
+	secRoutes
+	secDNS
 	numSections
 )
 
@@ -51,6 +53,8 @@ var sectionCaps = [numSections][]core.Capability{
 	secBoard:          {core.CapHardwareBoard},
 	secMemoryModules:  {core.CapHardwareMemory},
 	secGPUs:           {core.CapGPUDevices},
+	secRoutes:         {core.CapNetworkRoutes},
+	secDNS:            {core.CapNetworkDNS},
 }
 
 func sectionOf(r core.Record) (section, bool) {
@@ -87,6 +91,10 @@ func sectionOf(r core.Record) (section, bool) {
 		return secMemoryModules, true
 	case core.GPUs:
 		return secGPUs, true
+	case core.Routes:
+		return secRoutes, true
+	case *core.DNSConfig:
+		return secDNS, true
 	}
 	return 0, false
 }
@@ -277,6 +285,12 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 	case core.GPUs:
 		c := append(core.GPUs(nil), v...)
 		return &c
+	case core.Routes:
+		c := append(core.Routes(nil), v...)
+		return &c
+	case *core.DNSConfig:
+		c := *v
+		return &c
 	}
 	return nil
 }
@@ -389,6 +403,8 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.Board = sec[core.BoardInfo](a, secBoard)
 	snap.MemoryModules = sec[core.MemoryModules](a, secMemoryModules)
 	snap.GPUs = sec[core.GPUs](a, secGPUs)
+	snap.Routes = sec[core.Routes](a, secRoutes)
+	snap.DNS = sec[core.DNSConfig](a, secDNS)
 
 	for _, r := range a.e.runners {
 		caps := make(map[core.Capability]core.CapabilityStatus, len(a.caps[r.desc.ID]))

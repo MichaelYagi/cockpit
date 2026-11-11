@@ -87,5 +87,8 @@ func FuzzParsers(f *testing.F) {
 		_ = parseNvidiaCSV(b)
 		_ = countCPUList(string(b))
 		_ = parseSize(string(b))
+		_ = parseIPv4Routes(b)
+		_ = parseIPv6Routes(b)
+		_ = parseResolvConf(b)
 	})
 }
