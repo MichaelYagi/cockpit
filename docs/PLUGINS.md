@@ -168,6 +168,24 @@ reported once, at the shortest mount point. Since Phase 3 the type and
 mount-point lists are configurable (`collection.filesystems`, Q5); network
 filesystems are always skipped.
 
+### macOS and Windows collectors (D32)
+
+| ID | Capabilities | Sources |
+|---|---|---|
+| `darwin.system` | `system.identity`, `system.uptime` | `sysctl` (`kern.osproductversion`, `kern.boottime`) |
+| `darwin.cpu` | `cpu.load` (`cpu.usage` unsupported: needs Mach) | `vm.loadavg` |
+| `darwin.memory` | `memory.usage` | `hw.memsize`; free, speculative, purgeable and file-backed pages; `vm.swapusage` |
+| `darwin.filesystems` | `storage.filesystems` | `getfsstat`; APFS system volumes (`MNT_DONTBROWSE`) and network filesystems skipped |
+| `darwin.network` | `network.interfaces`, `network.throughput` | `net.Interfaces`; counters from `NET_RT_IFLIST2` |
+| `windows.system` | `system.identity`, `system.uptime` | `RtlGetVersion`, registry product name, `GetTickCount64` |
+| `windows.cpu` | `cpu.usage` (`cpu.load` unsupported: none on Windows) | `GetSystemTimes` |
+| `windows.memory` | `memory.usage` | `GlobalMemoryStatusEx` |
+| `windows.filesystems` | `storage.filesystems` | fixed drives: `GetDiskFreeSpaceExW`, `GetVolumeInformationW` |
+| `windows.network` | `network.interfaces`, `network.throughput` | `net.Interfaces`; counters from `GetIfEntry2Ex` |
+
+`darwin.unsupported` and `windows.unsupported` report every other
+capability as `unsupported` with a reason.
+
 ### External tools
 
 Optional tools such as `smartctl` are:

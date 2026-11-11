@@ -101,7 +101,9 @@ internal/
   collector/                 # Collector contract, descriptor, result, env, fakes
   platform/
     linux/                   # Linux collectors (+ testdata/ fixture trees)
-    unsupported/             # non-Linux default: everything unsupported
+    darwin/, windows/        # macOS and Windows collectors without cgo (D32)
+    portable/                # shared helpers (interfaces, collector shell)
+    unsupported/             # other systems, and Rest for unimplemented capabilities
   engine/                    # scheduling, timeouts, rates, staleness, snapshot store
   health/                    # health checks, hysteresis, findings
   events/                    # event bus and ring buffer

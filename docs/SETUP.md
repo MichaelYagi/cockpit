@@ -7,8 +7,13 @@ Phase 3.
 
 ## Requirements
 
-- Linux (amd64 or arm64). Other platforms build and run, but report every
-  capability as `unsupported` until their collectors exist.
+- Linux (amd64 or arm64), with everything described here.
+- macOS and Windows: basic monitoring (D32) of identity, uptime, CPU,
+  memory, disks and network. macOS reports the load average but not CPU
+  usage; Windows reports CPU usage but has no load average. Sensors, disk
+  health, services, processes and history-specific sources are reported
+  `unsupported`. The admin connection is a Unix socket on macOS and a
+  named pipe on Windows.
 - Go 1.27.4 to build (pinned in `go.mod`; the `go` command downloads it if
   needed). No C compiler or database server is needed.
 - Optional: `smartctl` from smartmontools 7.0 or newer, for disk health.

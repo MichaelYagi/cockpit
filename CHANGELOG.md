@@ -17,6 +17,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **macOS and Windows (D32).** Identity, uptime, CPU (load average on
+  macOS, usage on Windows), memory, filesystems and network with counters,
+  without cgo. Every other capability is reported unsupported with a
+  reason. CI runs the conformance suite and real-value checks on both.
 - **Fleet console (D30).** `cockpit fleet add/list/remove/check` and the
   `cockpit fleet` console: one row per machine with health, CPU, memory,
   fullest disk and last contact, polled concurrently with pinned TLS.
