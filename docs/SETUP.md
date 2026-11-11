@@ -293,6 +293,37 @@ Without both files, the agent refuses to start on a non-loopback
 address. Clients refuse to send a key over plain HTTP to a non-loopback
 host.
 
+## Watching several machines
+
+`cockpit fleet` is a console for many machines (D30). Nothing central is
+installed. Each machine keeps its own agent, and the console polls them
+with a key per machine.
+
+```sh
+# on each machine: enable TLS (see Remote access) and create a key
+sudo cockpit keys create --mode system --name fleet --scope system:read --scope metrics:read > web01.key
+# on the console machine
+chmod 600 web01.key
+cockpit fleet add web01 https://web01.example:7878 --key-file ./web01.key
+cockpit fleet                    # the console; Enter opens the full TUI for a machine
+cockpit fleet check              # one-line status per machine, for scripts
+cockpit fleet list               # remove with: cockpit fleet remove web01
+```
+
+`fleet add` shows the server certificate's fingerprint and pins it once
+you confirm. Compare it with `cockpit tls show` on that machine, or pass
+`--tls-fingerprint` (or `--tls-ca`) to skip the question. It also records
+the machine ID. If either changes, for example after a reinstall or an
+impersonation, the console marks the machine **REFUSED** and stops
+polling it until you run `fleet add NAME ... --replace`. The list is
+`~/.config/cockpit-monitor/fleet.yaml` (mode `0600`). It names key files
+but never contains keys. Keys can also come from an environment variable
+(`--key-env`).
+
+Give fleet keys `system:read` and `metrics:read`. Add `network:read` only
+if you want addresses on the console host. Protect the console host as
+well as the machines it watches, because it holds their keys.
+
 ## What you may see as "unavailable"
 
 Unavailable data is reported with a reason, never as an error:

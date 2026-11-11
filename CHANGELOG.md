@@ -17,6 +17,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Fleet console (D30).** `cockpit fleet add/list/remove/check` and the
+  `cockpit fleet` console: one row per machine with health, CPU, memory,
+  fullest disk and last contact, polled concurrently with pinned TLS.
+  Enter opens the full TUI. Machines whose ID or certificate changes are
+  refused.
 - **TLS tooling (D29).** `cockpit tls init`, `renew` and `show` create and
   manage a private CA and server certificate. Clients pin the certificate
   (`--tls-fingerprint`, `COCKPIT_TLS_FINGERPRINT`,

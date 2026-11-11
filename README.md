@@ -66,6 +66,8 @@ cockpit                # in a terminal: same as cockpit tui; otherwise help
 cockpit tui            # terminal UI (API client)
 cockpit keys ...       # create / list / rotate / revoke API keys (local admin)
 cockpit report         # diagnostic report (Markdown or JSON, optionally anonymized)
+cockpit fleet          # console for several machines (pinned TLS, no central server)
+cockpit tls init       # certificate for remote access
 cockpit config check   # validate configuration
 cockpit version
 ```

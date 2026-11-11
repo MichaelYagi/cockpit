@@ -49,6 +49,23 @@ Threats:
 - Peer credentials (`SO_PEERCRED`) are logged for audit.
 - Key management routes exist only on the socket (Phase 1).
 
+## 3a. Fleet console
+
+The fleet console (D30) is only a client: no listener, no agent change.
+
+- It polls each machine with that machine's own key, over pinned TLS
+  (`fleet add` pins the certificate after confirmation; non-interactive
+  enrollment needs an explicit fingerprint or `--yes`).
+- Enrollment records the machine ID. A different ID, or a certificate
+  that no longer matches the pin, makes the console refuse the machine and
+  stop polling until it is enrolled again with `--replace`.
+- `fleet.yaml` and every key file must be `0600`. Keys are never written
+  into the list.
+- All text from agents is sanitized before display, as in the TUI.
+- The console host holds a key for every machine. Keys should be
+  read-only and narrow (`system:read`, `metrics:read`), and revoked on the
+  machine when it leaves the fleet.
+
 ## 4. API keys
 
 - Format `ckp_<id>_<secret>`: 12-character random base32 ID, 256-bit

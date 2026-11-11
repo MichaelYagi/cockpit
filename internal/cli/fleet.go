@@ -14,6 +14,7 @@ import (
 
 	"github.com/MichaelYagi/cockpit/internal/config"
 	"github.com/MichaelYagi/cockpit/internal/fleet"
+	"github.com/MichaelYagi/cockpit/internal/tui"
 	"github.com/MichaelYagi/cockpit/pkg/client"
 )
 
@@ -236,8 +237,52 @@ func fleetAdd(ctx context.Context, path string, args []string, env Env) int {
 	return ExitOK
 }
 
-// runFleetConsole opens the fleet console (5E).
-func runFleetConsole(_ context.Context, env Env) int {
-	fmt.Fprintln(env.Stderr, "The fleet console is not available yet.")
-	return ExitError
+// runFleetConsole opens the fleet console (D30). Enter opens the full TUI
+// for one machine; quitting it returns to the console.
+func runFleetConsole(ctx context.Context, env Env) int {
+	if !env.Interactive {
+		fmt.Fprintln(env.Stderr, "cockpit fleet needs an interactive terminal. Use cockpit fleet check for a text summary.")
+		return ExitUsage
+	}
+	path, err := fleetPath(env)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return ExitError
+	}
+	l, err := fleet.Load(path)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, "error:", err)
+		return ExitError
+	}
+	if len(l.Machines) == 0 {
+		fmt.Fprintln(env.Stdout, "No machines enrolled. Add one with: cockpit fleet add NAME URL --key-file FILE")
+		return ExitOK
+	}
+	machines := make([]tui.FleetMachine, 0, len(l.Machines))
+	clients := map[string]*client.Client{}
+	for _, m := range l.Machines {
+		fm := tui.FleetMachine{Name: m.Name, URL: m.URL, MachineID: m.MachineID}
+		if c, err := m.Client(env.LookupEnv, client.WithTimeout(5*time.Second)); err != nil {
+			fm.Err = err.Error()
+		} else {
+			fm.API, clients[m.Name] = c, c
+			defer c.Close()
+		}
+		machines = append(machines, fm)
+	}
+	for {
+		open, err := tui.RunFleet(ctx, machines, tui.FleetRunOptions{})
+		if err != nil {
+			fmt.Fprintln(env.Stderr, "error:", err)
+			return ExitError
+		}
+		if open == "" || ctx.Err() != nil {
+			return ExitOK
+		}
+		m, _ := l.Get(open)
+		if err := tui.Run(ctx, clients[open], tui.RunOptions{Options: tui.Options{Target: open + " · " + m.URL, Refresh: 2 * time.Second}}); err != nil {
+			fmt.Fprintln(env.Stderr, "error:", err)
+			return ExitError
+		}
+	}
 }
