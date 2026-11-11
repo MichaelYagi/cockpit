@@ -78,13 +78,24 @@ revoked; missing sensors and permissions are reported, not fatal.
 
 ## Phase 2 — Hardware and diagnostics
 
-- Detailed CPU, DIMM (where permitted), PCI and USB inventory.
-- GPU inventory and vendor metrics.
-- More health rules (services, network errors, storage warnings).
-- `/events/stream` (SSE).
-- `/processes` with snapshot-bound pagination; `processes:read` scope.
-- systemd services via D-Bus.
-- Network diagnostics.
+**Status: in progress.**
+
+| # | Milestone | Depends on |
+|---|---|---|
+| 2A | Event streaming: bounded per-subscriber queues with a lag marker; `GET /events/stream` (SSE) with heartbeats, stream limits, and re-verification of the key so revoked or expired keys are disconnected (D17) | 1E |
+| 2B | Processes: on-demand sampler with a short cache and per-process CPU %; `GET /processes` with sorting, search and snapshot-bound cursors; new `processes:read` scope; command lines redacted (D9, D14) | 1A |
+| 2C | systemd services over D-Bus (`godbus/dbus`, D15); `GET /services`; unavailable when systemd or the bus is missing | 1A |
+| 2D | Hardware inventory: CPU topology, caches and flags; PCI and USB devices; board/firmware where readable (DMI, often root-only); GPUs from PCI/DRM with vendor metrics (NVIDIA via `nvidia-smi` CSV, AMD via sysfs; D16) | 1B |
+| 2E | Health rules: failed services, rising network errors; collector degraded/recovered events | 2C, 1E |
+| 2F | Passive network diagnostics: addresses, default routes, DNS servers (no probing) | 1B |
+| 2G | TUI: Hardware, Processes, Services and Events screens; GPU on Overview; live events via SSE | 2A–2F |
+| 2H | Docs, spec review, security review | all |
+
+**Exit criteria:** on a supported host without root, the TUI and API show
+processes, services, detailed hardware (with unavailable parts explained),
+GPU metrics where a supported GPU exists, live events, and the new health
+findings; unprivileged limits (other users' process I/O, DMI tables,
+SMART) are reported, not fatal.
 
 ## Phase 3 — History and operational polish
 

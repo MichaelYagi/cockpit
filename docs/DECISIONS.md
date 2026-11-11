@@ -254,3 +254,52 @@ dependency.
 `/proc/[pid]` details, `/proc/net/*` socket tables), adopting procfs for
 those is reasonable and needs a new entry.
 
+## D14 — Scopes for processes and services
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** Add an issuable `processes:read` scope for `GET /processes`.
+Process lists reveal user names, running software and resource use, so
+they are not covered by `metrics:read`. Services (`GET /services`) use
+`system:read`: the unit list is system inventory, comparable to hardware.
+Command lines remain hidden regardless of scope (D9).
+
+**Consequences.** Existing keys do not gain process access. The scope
+registry and spec gain one entry; this is a non-breaking addition (D8).
+
+## D15 — systemd access through godbus/dbus
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** Read systemd unit state over the system D-Bus with
+`github.com/godbus/dbus/v5` (pure Go, the library underneath
+`coreos/go-systemd`). Only read-only `ListUnits` calls are made.
+
+**Why.** D-Bus is systemd's supported interface; parsing `systemctl`
+output is excluded by principle 9. Using godbus directly avoids the
+larger go-systemd dependency for one call.
+
+## D16 — Vendor GPU metrics as optional tools
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** GPU inventory comes from PCI and DRM in sysfs. Metrics come
+from vendor sources when present: NVIDIA via `nvidia-smi
+--query-gpu=<fixed fields> --format=csv,noheader,nounits` (a documented,
+structured output mode), AMD via `amdgpu` sysfs files. Missing tools are
+`not_configured`; GPUs without a metrics source are listed without
+metrics. NVML (cgo) is not used.
+
+## D17 — Server-Sent Events for the event stream
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** `GET /api/v1/events/stream` (`metrics:read`) sends events as
+SSE with a heartbeat every 15 seconds. Each subscriber has a bounded
+queue (256 events); when a client falls behind, its oldest events are
+dropped and it receives a `lagged` event with the number missed. At most
+4 streams per key and 64 in total. The key is re-verified at every
+heartbeat, so revoked or expired keys are disconnected within 15 seconds.
+Streams close cleanly on shutdown. `Last-Event-ID` is not supported in
+Phase 2; clients resume with `GET /events?since=`.
+
