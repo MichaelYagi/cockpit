@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -213,5 +215,50 @@ func TestRetryAfterParsed(t *testing.T) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.RetryAfter != 7*time.Second || apiErr.Code != apiv1.CodeRateLimited {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestStreamEventsParsing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("severity") != "warning" || r.Header.Get("Authorization") != "Bearer "+testKey {
+			t.Errorf("request %s %v", r.URL, r.Header)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "retry: 5000\n: connected\n\n"+
+			"id: evt_1\nevent: event\ndata: {\"id\":\"evt_1\",\"type\":\"finding.raised\",\"severity\":\"warning\",\"subject\":\"s\",\"message\":\"m\"}\n\n"+
+			": heartbeat\n\n"+
+			"event: lagged\ndata: {\"dropped\":7}\n\n"+
+			"event: future-type\ndata: {}\n\n"+
+			"event: closed\ndata: {\"reason\":\"credentials_revoked\"}\n\n")
+	}))
+	defer srv.Close()
+	c, _ := NewTCP(srv.URL, testKey)
+	var got []string
+	err := c.StreamEvents(context.Background(), "warning", func(m StreamMessage) error {
+		if m.Event != nil {
+			got = append(got, "event:"+m.Event.Message)
+		} else {
+			got = append(got, fmt.Sprintf("lagged:%d", m.Lagged))
+		}
+		return nil
+	})
+	if !errors.Is(err, ErrStreamClosed) || !strings.Contains(err.Error(), "credentials_revoked") {
+		t.Errorf("err %v", err)
+	}
+	if strings.Join(got, ",") != "event:m,lagged:7" {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestStreamEventsHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 429, apiv1.ErrorEnvelope{Error: apiv1.ErrorBody{Code: apiv1.CodeRateLimited, Message: "too many", RequestID: "r"}})
+	}))
+	defer srv.Close()
+	c, _ := NewTCP(srv.URL, "")
+	err := c.StreamEvents(context.Background(), "", func(StreamMessage) error { return nil })
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 {
+		t.Errorf("got %v", err)
 	}
 }

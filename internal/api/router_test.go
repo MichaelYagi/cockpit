@@ -118,9 +118,10 @@ func testSnapshot() *core.Snapshot {
 }
 
 type env struct {
-	d     Deps
-	keys  *auth.Service
-	stats *middleware.Stats
+	d      Deps
+	keys   *auth.Service
+	stats  *middleware.Stats
+	events *events.Log
 }
 
 func newEnv(t *testing.T, logOut io.Writer) env {
@@ -149,8 +150,9 @@ func newEnv(t *testing.T, logOut io.Writer) env {
 	}
 	stats := middleware.NewStats(fixedNow)
 	return env{
-		keys:  keys,
-		stats: stats,
+		keys:   keys,
+		stats:  stats,
+		events: evLog,
 		d: Deps{
 			Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 			Verifier: fakeVerifier{
@@ -159,6 +161,7 @@ func newEnv(t *testing.T, logOut io.Writer) env {
 			},
 			Status: fakeStatus{}, SpecJSON: spec, Now: fixedNow,
 			Snapshots: snap, Health: h, Events: evLog, Keys: keys, Stats: stats,
+			Subscriber: evLog, KeyChecker: keys, StreamHeartbeat: 50 * time.Millisecond,
 			Listeners: func() []apiv1.Listener {
 				return []apiv1.Listener{{Transport: "unix", Address: "/run/test.sock"}, {Transport: "tcp", Address: "127.0.0.1:7878"}}
 			},

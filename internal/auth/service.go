@@ -267,6 +267,19 @@ func (s *Service) Revoke(ctx context.Context, id string) (KeyMeta, error) {
 	return k.KeyMeta, nil
 }
 
+// IsActive reports whether the key with this ID can still authenticate.
+// Long-lived connections use it to drop revoked or expired keys.
+func (s *Service) IsActive(ctx context.Context, id string) (bool, error) {
+	k, err := s.store.GetKey(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return k.Active(s.opts.Now().UTC()), nil
+}
+
 // dummyHash keeps verification time similar when the ID is unknown.
 var dummyHash = hashKey(KeyPrefix + "aaaaaaaaaaaa_" + strings.Repeat("0", keySecretLen))
 

@@ -32,6 +32,7 @@ type Log struct {
 	n    int    // entries stored
 	seq  uint64 // last assigned sequence number
 	now  func() time.Time
+	subs map[*Subscription]struct{}
 }
 
 // NewLog returns a log holding up to capacity events.
@@ -42,7 +43,7 @@ func NewLog(capacity int, now func() time.Time) *Log {
 	if now == nil {
 		now = time.Now
 	}
-	return &Log{buf: make([]entry, capacity), now: now}
+	return &Log{buf: make([]entry, capacity), now: now, subs: map[*Subscription]struct{}{}}
 }
 
 // Publish records e, assigning an ID and time if missing.
@@ -62,7 +63,79 @@ func (l *Log) Publish(e core.Event) core.Event {
 	if l.n < len(l.buf) {
 		l.n++
 	}
+	for s := range l.subs {
+		s.push(e)
+	}
 	return e
+}
+
+// SubscriberQueue is the number of undelivered events kept per subscriber.
+const SubscriberQueue = 256
+
+// Subscription receives events published after it was created. Its queue
+// is bounded: when the consumer falls behind, the oldest events are
+// dropped and counted, so a slow consumer never blocks publishers.
+type Subscription struct {
+	log     *Log
+	filter  Filter
+	mu      sync.Mutex
+	queue   []core.Event
+	dropped int
+	ready   chan struct{} // signalled (non-blocking) when events arrive
+}
+
+// Subscribe returns a subscription for events matching f. Call Close
+// when done.
+func (l *Log) Subscribe(f Filter) *Subscription {
+	s := &Subscription{log: l, filter: f, ready: make(chan struct{}, 1)}
+	l.mu.Lock()
+	l.subs[s] = struct{}{}
+	l.mu.Unlock()
+	return s
+}
+
+// Subscribers returns the number of open subscriptions.
+func (l *Log) Subscribers() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.subs)
+}
+
+func (s *Subscription) push(e core.Event) {
+	if !s.filter.match(e) {
+		return
+	}
+	s.mu.Lock()
+	if len(s.queue) == SubscriberQueue {
+		s.queue = append(s.queue[:0], s.queue[1:]...)
+		s.dropped++
+	}
+	s.queue = append(s.queue, e)
+	s.mu.Unlock()
+	select {
+	case s.ready <- struct{}{}:
+	default:
+	}
+}
+
+// Ready is signalled when events may be available.
+func (s *Subscription) Ready() <-chan struct{} { return s.ready }
+
+// Drain returns queued events in order and how many were dropped since the
+// last call.
+func (s *Subscription) Drain() ([]core.Event, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	evs, dropped := s.queue, s.dropped
+	s.queue, s.dropped = nil, 0
+	return evs, dropped
+}
+
+// Close stops delivery.
+func (s *Subscription) Close() {
+	s.log.mu.Lock()
+	delete(s.log.subs, s)
+	s.log.mu.Unlock()
 }
 
 // Filter selects events.

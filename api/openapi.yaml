@@ -285,6 +285,44 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/events/stream:
+    get:
+      operationId: streamEvents
+      tags: [health]
+      summary: Live events (Server-Sent Events)
+      description: |
+        Streams new events as Server-Sent Events (D17):
+
+        - `event: event` with an `id` and `data` holding an Event object.
+        - `event: lagged` with `data: {"dropped": N}` when the client read
+          too slowly and N events were dropped.
+        - `event: closed` with a reason when the server ends the stream
+          (e.g. the key was revoked).
+        - A `: heartbeat` comment every 15 seconds.
+
+        At most 4 streams per key and 64 in total. The key is re-checked at
+        every heartbeat. `Last-Event-ID` is not supported; resume with
+        `GET /events?since=`.
+      x-cockpit-scope: metrics:read
+      parameters:
+        - name: severity
+          in: query
+          required: false
+          description: Minimum severity.
+          schema: { type: string, enum: [info, warning, critical] }
+      responses:
+        "200":
+          description: An open event stream.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/keys:
     get:
       operationId: listKeys
@@ -523,7 +561,7 @@ components:
       type: object
       additionalProperties: false
       description: Admin principal only.
-      required: [listeners, requests, active_clients]
+      required: [listeners, requests, active_clients, open_streams]
       properties:
         listeners:
           type: array
@@ -550,6 +588,10 @@ components:
           type: integer
           minimum: 0
           description: Distinct API keys used in the last 5 minutes.
+        open_streams:
+          type: integer
+          minimum: 0
+          description: Open event streams.
     SystemResponse:
       type: object
       additionalProperties: false

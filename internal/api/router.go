@@ -64,6 +64,11 @@ type Deps struct {
 	Stats *middleware.Stats
 	// Listeners reports open listeners for the admin part of /status.
 	Listeners func() []apiv1.Listener
+	// Event streaming (D17).
+	Subscriber      handlers.Subscriber
+	KeyChecker      handlers.KeyChecker
+	Streams         *handlers.StreamLimits
+	StreamHeartbeat time.Duration // default 15s
 }
 
 // Options configure one router.
@@ -86,6 +91,13 @@ func Routes(d Deps) []Route {
 	}
 	res := &handlers.Resources{Snapshots: d.Snapshots, MachineID: machineID, Policy: d.Redaction, Now: d.Now}
 	keys := &handlers.Keys{Service: d.Keys, Now: d.Now, Logger: d.Logger}
+	if d.Streams == nil {
+		d.Streams = handlers.NewStreamLimits()
+	}
+	if d.StreamHeartbeat <= 0 {
+		d.StreamHeartbeat = 15 * time.Second
+	}
+	stream := &handlers.EventStream{Events: d.Subscriber, Keys: d.KeyChecker, Limits: d.Streams, Heartbeat: d.StreamHeartbeat, Logger: d.Logger}
 	admin := func() *apiv1.APIServerStatus {
 		st := &apiv1.APIServerStatus{Listeners: []apiv1.Listener{}}
 		if d.Listeners != nil {
@@ -94,6 +106,7 @@ func Routes(d Deps) []Route {
 		if d.Stats != nil {
 			st.Requests, st.ActiveClients = d.Stats.Snapshot()
 		}
+		st.OpenStreams = d.Streams.Open()
 		return st
 	}
 	get, post, del := http.MethodGet, http.MethodPost, http.MethodDelete
@@ -110,6 +123,7 @@ func Routes(d Deps) []Route {
 		{Method: get, Path: "/sensors", Scope: met, Handler: res.Sensors},
 		{Method: get, Path: "/health", Scope: met, Handler: handlers.Health(d.Health, machineID, d.Now)},
 		{Method: get, Path: "/events", Scope: met, Handler: handlers.Events(d.Events, machineID, d.Now)},
+		{Method: get, Path: "/events/stream", Scope: met, Handler: stream.ServeHTTP},
 		{Method: get, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.List},
 		{Method: post, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.Create},
 		{Method: del, Path: "/keys/{id}", Scope: adm, SocketOnly: true, Handler: keys.Revoke},

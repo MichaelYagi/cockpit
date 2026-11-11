@@ -164,6 +164,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	deps := api.Deps{
 		Logger: log.With("component", "api"), Verifier: verifier, Status: status, SpecJSON: specJSON, Now: o.Now,
 		Snapshots: eng, Health: evaluator, Events: eventLog, Keys: keys,
+		Subscriber: eventLog, KeyChecker: keys,
 		Stats: middleware.NewStats(o.Now),
 		Listeners: func() []apiv1.Listener {
 			if l := listeners.Load(); l != nil {

@@ -337,6 +337,13 @@ type APIServerStatus struct {
 	Listeners     []Listener   `json:"listeners"`
 	Requests      RequestStats `json:"requests"`
 	ActiveClients int          `json:"active_clients"`
+	OpenStreams   int          `json:"open_streams"`
+}
+
+// StreamLagged is the data of a "lagged" SSE event: events were dropped
+// because the client read too slowly.
+type StreamLagged struct {
+	Dropped int `json:"dropped"`
 }
 
 // Listener is one open API listener.
