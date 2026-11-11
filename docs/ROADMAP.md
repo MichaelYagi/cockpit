@@ -169,7 +169,7 @@ with checksums and a documented Go SDK is published.
 | 5E ✓ | Fleet console (D30): concurrent polling, overview table, open a machine in the full TUI, identity-change refusal | 5D |
 | 5F ✓ | Platform conformance suite run against every platform's collectors (descriptors, statuses, reasons, cancellation, declared capabilities only); CI on Linux, macOS and Windows | — |
 | 5G ✓ | macOS and Windows collectors (D32) | 5F |
-| 5H | Windows named-pipe admin transport (D31): listener, client and `--pipe` flag | 5G |
+| 5H ✓ | Windows named-pipe admin transport (D31): listener, client and `--pipe` flag | 5G |
 | 5I | Docs, spec and security review; release `v0.5.0` | all |
 
 **Exit criteria:** remote access with TLS is a two-command setup; one

@@ -66,6 +66,23 @@ The fleet console (D30) is only a client: no listener, no agent change.
   read-only and narrow (`system:read`, `metrics:read`), and revoked on the
   machine when it leaves the fleet.
 
+## 3b. Windows admin pipe
+
+On Windows the local admin transport (D3) is a named pipe (D31):
+`\\.\pipe\cockpit-monitor` in system mode, and
+`\\.\pipe\cockpit-monitor-<user SID>` in user mode.
+
+- Its protected DACL grants access only to SYSTEM, the Administrators
+  group and the agent's own account. Remote pipe clients are rejected.
+- The agent refuses to start if the pipe name already exists, so the name
+  cannot be claimed first.
+- Clients check that the pipe's server process runs as SYSTEM, an
+  administrator or themselves before sending a request.
+- The client process ID is logged for audit; Windows has no UID.
+- Windows has no POSIX file modes. The state and configuration files rely
+  on the ACLs of the user's profile directory (user mode) or of
+  `%ProgramData%` (system mode), and the `0600` checks of Unix do not apply.
+
 ## 4. API keys
 
 - Format `ckp_<id>_<secret>`: 12-character random base32 ID, 256-bit

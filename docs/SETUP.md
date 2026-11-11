@@ -18,6 +18,15 @@ Phase 3.
   needed). No C compiler or database server is needed.
 - Optional: `smartctl` from smartmontools 7.0 or newer, for disk health.
 
+### macOS and Windows
+
+`cockpit` runs the same way: `cockpit` opens the TUI with an embedded
+agent, and `cockpit agent` runs one in the foreground. On macOS the admin
+socket is in the state directory, because there is no `XDG_RUNTIME_DIR`. On
+Windows it is a named pipe (`\\.\pipe\cockpit-monitor-<your SID>`, D31),
+which `--socket` also accepts. The system service, the SMART helper and
+`deploy/` are Linux only.
+
 ## Build
 
 ```sh

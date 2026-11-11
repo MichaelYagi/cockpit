@@ -77,6 +77,7 @@ Never create system files, units or users named plain `cockpit`.
   `golang.org/x/sys/unix` for `statfs`, `smartctl --json` (optional).
 - Rate limiting: `golang.org/x/time/rate`.
 - systemd: `github.com/godbus/dbus/v5` (read-only `ListUnits`, D15).
+- Windows admin pipe: `github.com/Microsoft/go-winio` (D31).
 - GPU metrics: `nvidia-smi` CSV query and `amdgpu` sysfs (optional, D16).
 - Streaming: SSE (Phase 2). No WebSocket planned.
 - Service integration: systemd (`cockpit-agent.service`).

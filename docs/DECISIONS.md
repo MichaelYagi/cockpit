@@ -617,6 +617,12 @@ group and the user running the agent. Remote pipe clients are rejected
 Microsoft and widely used, because correct overlapped named-pipe I/O and
 security descriptors are not available in the standard library.
 
+*Clarification (5H):* there is no separate `--pipe` flag. `--socket`
+and `api.socket.path` accept a pipe name, and on Windows they default to
+the pipe. Clients also check the pipe's server: it must run as SYSTEM, an
+administrator or the current user. Otherwise a process that created the
+name first could impersonate the agent.
+
 **Why.** The Unix socket gives local admin access through file
 permissions (D3). A named pipe with an ACL is Windows' equivalent, and the
 roadmap asked for it.

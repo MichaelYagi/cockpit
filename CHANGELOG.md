@@ -17,6 +17,9 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Windows admin pipe (D31).** The local admin API is a named pipe with a
+  DACL for SYSTEM, Administrators and the agent's user. Clients check the
+  pipe server's account before using it. Uses `github.com/Microsoft/go-winio`.
 - **macOS and Windows (D32).** Identity, uptime, CPU (load average on
   macOS, usage on Windows), memory, filesystems and network with counters,
   without cgo. Every other capability is reported unsupported with a
