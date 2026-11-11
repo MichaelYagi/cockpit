@@ -1,166 +1,203 @@
 # API Contract
 
-## 1. General conventions
+`api/openapi.yaml` (OpenAPI 3.1) is the authoritative contract (D6). This
+document explains conventions and the planned endpoints. If the two ever
+disagree, the spec wins and this document must be fixed.
 
--   Base path: `/api/v1`
--   Format: JSON
--   Time: UTC RFC 3339 timestamps
--   Authentication: `Authorization: Bearer <api-key>`
--   Content type: `application/json`
--   All responses should include or be traceable to a request ID.
--   API contract is versioned independently from the TUI.
+## 1. Conventions
 
-The following endpoint list is a proposed MVP contract. Implementations
-should publish a matching OpenAPI 3.x document.
+- Base path: `/api/v1`. Incompatible changes require `/api/v2`.
+- JSON only (`application/json`), UTF-8. SSE uses `text/event-stream`.
+- Timestamps: UTC, RFC 3339 (e.g. `2026-11-11T15:30:00Z`).
+- Every response includes an `X-Request-ID` header. Error bodies repeat it.
+- Every resource includes `schema_version`, `machine_id`, and
+  `generated_at`.
+- Field names: `snake_case`. Units are in the name (`_bytes`, `_percent`,
+  `_celsius`, `_seconds`, `_per_second`).
+- Unknown query parameters are rejected with `400`.
+- Request bodies are limited to 64 KiB.
+- Cross-origin requests are denied by default (no CORS headers).
+- On loopback listeners the `Host` header must be a loopback name/address.
 
-## 2. Endpoints
+## 2. Transports and authentication
 
-  -----------------------------------------------------------------------
-  Method                  Path                    Description
-  ----------------------- ----------------------- -----------------------
-  GET                     `/system`               OS identity, hostname,
-                                                  kernel, uptime
+| Listener | Default | Authentication | Routes |
+|---|---|---|---|
+| Unix socket | on | Filesystem permissions → local admin principal with all scopes (D3) | All, including `/keys` |
+| TCP loopback | on, `127.0.0.1:7878` | `Authorization: Bearer ckp_…` always (D4) | All except `/keys` |
+| TCP remote | off | TLS 1.2+ **and** bearer key; refuses to start without TLS | All except `/keys` |
 
-  GET                     `/hardware`             Hardware inventory
+Keys are never accepted in URLs or query strings.
 
-  GET                     `/metrics`              Latest normalized
-                                                  metrics
+## 3. Scopes
 
-  GET                     `/metrics/history`      Historical metric
-                                                  samples
+| Scope | Routes |
+|---|---|
+| *(public)* | `GET /livez`, `GET /openapi.json` |
+| `system:read` | `/status`, `/system`, `/hardware` |
+| `metrics:read` | `/metrics`, `/storage`, `/network`, `/sensors`, `/health`, `/events` |
+| `admin` | `/keys…`, privileged fields in `/status` |
 
-  GET                     `/health`               Overall status and
-                                                  findings
+No scope implies another (D8). Keys created in Phase 1 may hold
+`system:read` and/or `metrics:read`; `admin` is reserved for the socket
+principal.
 
-  GET                     `/temperatures`         Thermal sensors
+## 4. Endpoints
 
-  GET                     `/storage`              Devices, partitions,
-                                                  filesystems, health
-                                                  where supported
+### Phase 0
 
-  GET                     `/network`              Interfaces and counters
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| GET | `/livez` | public | `{"status":"ok"}`; no other information |
+| GET | `/openapi.json` | public | The embedded spec |
+| GET | `/status` | `system:read` | Agent version, API version, uptime, machine ID, collectors and capability states |
 
-  GET                     `/processes`            Paginated process list
+### Phase 1
 
-  GET                     `/services`             Service state where
-                                                  supported
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| GET | `/status` | `system:read` (+`admin` fields) | Collectors and capability states. With `admin`: listeners, request counters, active clients |
+| GET | `/system` | `system:read` | OS, kernel, hostname, architecture, boot time, uptime |
+| GET | `/hardware` | `system:read` | CPU model/topology, memory total, block devices, network interfaces; each with `source` |
+| GET | `/metrics` | `metrics:read` | Current snapshot. `?sections=cpu,memory,...` selects sections |
+| GET | `/storage` | `metrics:read` | Block devices, filesystems (capacity, inodes), SMART summary |
+| GET | `/network` | `metrics:read` | Interfaces, addresses, counters, rates |
+| GET | `/sensors` | `metrics:read` | Temperatures, fans, voltages |
+| GET | `/health` | `metrics:read` | Overall status, the four checks (D11), active findings |
+| GET | `/events` | `metrics:read` | Recent events (in-memory), paginated, `?severity=&since=` |
+| GET | `/keys` | `admin` (socket) | Key metadata. Never the key or its hash |
+| POST | `/keys` | `admin` (socket) | Create. Response includes the full key once |
+| POST | `/keys/{id}/rotate` | `admin` (socket) | Issue a replacement key (same name/scopes), revoke the old one immediately. Full key shown once |
+| DELETE | `/keys/{id}` | `admin` (socket) | Revoke. Idempotent |
 
-  GET                     `/events`               Paginated event history
+### Later phases
 
-  GET                     `/events/stream`        Server-Sent Events
+`/events/stream` (SSE, Phase 2), `/processes` (Phase 2), `/services`
+(Phase 2), `/metrics/history` (Phase 3). WebSocket is not planned: all
+streaming is server-to-client, which SSE covers.
 
-  GET                     `/stream`               Optional WebSocket live
-                                                  metrics
+## 5. Resource shape
 
-  GET                     `/api-keys`             List key metadata;
-                                                  never return
-                                                  secret/hash
-
-  POST                    `/api-keys`             Create a key; return
-                                                  plaintext once
-
-  DELETE                  `/api-keys/{id}`        Revoke a key
-
-  GET                     `/status`               API/agent status and
-                                                  capabilities
-  -----------------------------------------------------------------------
-
-Do not expose key creation or revocation to a read-only key. The local
-owner/admin workflow should be separately protected.
-
-## 3. Example metric response
-
-``` json
+```json
 {
-  "schema_version": "1.0",
-  "collected_at": "2026-11-11T15:30:00Z",
-  "system": {
-    "hostname": "workstation",
-    "os": "linux",
-    "architecture": "amd64"
-  },
+  "schema_version": "1",
+  "machine_id": "3f0c6c1e-8f5b-4d4e-9a57-2b1d2a2f9b10",
+  "generated_at": "2026-11-11T15:30:00Z",
   "cpu": {
-    "usage_percent": 23.4,
-    "logical_cores": 16,
-    "load_average": [0.72, 0.81, 0.77],
-    "temperature_celsius": {
-      "value": 48.0,
-      "status": "available"
+    "status": "available",
+    "collected_at": "2026-11-11T15:29:59Z",
+    "stale": false,
+    "source": "procfs",
+    "data": {
+      "usage_percent": 23.4,
+      "window_seconds": 2.0,
+      "per_core_usage_percent": [21.0, 25.8],
+      "logical_cores": 2,
+      "load_average": { "1m": 0.72, "5m": 0.81, "15m": 0.77 }
     }
   },
-  "memory": {
-    "total_bytes": 34359738368,
-    "available_bytes": 17179869184,
-    "used_percent": 50.0
+  "sensors": {
+    "status": "unsupported",
+    "collected_at": null,
+    "stale": false,
+    "source": "sysfs/hwmon",
+    "reason": "No hwmon or thermal zone devices found.",
+    "data": null
   }
 }
 ```
 
-This is illustrative, not a promise that every field is available on
-every machine. Optional fields should be omitted or accompanied by an
-explicit availability state.
+- Availability is reported **per section**, not per number.
+- Rates include the window they were computed over (`window_seconds`).
+  The first sample after start has `null` rates.
+- Optional fields inside an available section are `null` when the platform
+  does not provide them, as documented per field in the spec.
 
-## 4. Availability model
+## 6. Sensitive fields
 
-Use a shared status vocabulary: - `available` - `unsupported` -
-`permission_denied` - `temporarily_unavailable` - `not_configured`
+Fields marked `x-cockpit-sensitive: true` in the spec (process command
+lines, serial numbers, MAC addresses, WWNs, hardware UUIDs) are omitted by
+default (D9). The containing object lists what was withheld:
 
-Include `observed_at` or `collected_at` for measurements. Clients should
-be able to identify stale samples.
+```json
+{ "name": "eth0", "mtu": 1500, "redacted": ["mac_address"] }
+```
 
-## 5. Error envelope
+## 7. Errors
 
-Use a consistent shape:
-
-``` json
+```json
 {
   "error": {
-    "code": "authentication_required",
-    "message": "A valid API key is required.",
-    "request_id": "req_01J..."
+    "code": "insufficient_scope",
+    "message": "This key does not have the metrics:read scope.",
+    "request_id": "req_01JCQ7Y8K2M4T6V8X0Z2B4D6F8"
   }
 }
 ```
 
-Do not return internal stack traces or secrets. Suggested HTTP status
-mapping: - 400 invalid request - 401 missing/invalid credentials - 403
-insufficient scope - 404 unknown resource - 409 conflict - 429 rate
-limit - 500 unexpected server error - 503 required subsystem temporarily
-unavailable
+| HTTP | `code` examples |
+|---|---|
+| 400 | `invalid_request`, `invalid_parameter`, `invalid_host` (loopback listener received a non-loopback `Host` header) |
+| 401 | `authentication_required`, `invalid_credentials` (missing, malformed, unknown, revoked, and expired keys are indistinguishable to the client) |
+| 403 | `insufficient_scope` |
+| 404 | `not_found` |
+| 409 | `conflict` |
+| 405 | `method_not_allowed` |
+| 413 | `request_too_large` |
+| 429 | `rate_limited` (with `Retry-After`) |
+| 500 | `internal_error` |
+| 503 | `unavailable` |
 
-## 6. Pagination and filtering
+Messages are safe to show to users and never include secrets, paths to
+secret files, stack traces, or raw command output.
 
-Large collections must be paginated. Use bounded `limit` and an opaque
-`cursor` where practical. Support filters such as: - Process sort and
-search. - Event severity and time range. - History metric name and time
-range.
+## 8. Pagination
 
-Reject unreasonable limits and malformed timestamps.
+List responses use:
 
-## 7. Authentication and scopes
+```json
+{ "items": [ ... ], "next_cursor": "opaque-or-null" }
+```
 
-Suggested initial scopes: - `system:read` - `hardware:read` -
-`metrics:read` - `health:read` - `events:read` - `processes:read` -
-`services:read` - `admin:keys`
+- `limit`: default 50, maximum 500; out-of-range values return `400`.
+- `cursor`: opaque. A cursor that has expired returns `400` with code
+  `invalid_cursor`; clients restart from the first page.
+- For volatile collections (processes), the cursor is bound to the snapshot
+  it was created from.
 
-Default newly created integration keys should receive only explicitly
-selected read scopes. `admin:keys` should be restricted to a local
-owner/admin workflow and never be included in a default integration key.
+## 9. Key resources
 
-## 8. Streaming
+Key metadata (never the key or hash):
 
-SSE is the preferred first streaming mechanism for one-way health and
-event updates. WebSocket may be added for high-frequency metric
-streaming if there is a clear requirement.
+```json
+{
+  "id": "k3p9x2m7q4ta",
+  "name": "grafana-bridge",
+  "display": "ckp_k3p9x2m7q4ta_…",
+  "scopes": ["metrics:read"],
+  "created_at": "2026-11-11T15:30:00Z",
+  "expires_at": null,
+  "last_used_at": "2026-11-11T16:02:11Z",
+  "revoked_at": null,
+  "rotated_from": null
+}
+```
 
-Streaming connections must: - Authenticate at connection
-establishment. - Enforce connection limits. - Send heartbeats. - Close
-cleanly on shutdown. - Avoid unbounded per-client queues. - Respect key
-revocation and expiry.
+Creation and rotation responses add `"key": "ckp_<id>_<secret>"` exactly
+once. `last_used_at` is updated in memory and flushed periodically, so it
+may lag by up to ~30 seconds.
 
-## 9. SDK compatibility
+## 10. Streaming (Phase 2)
 
-Publish the OpenAPI document and a small Go client SDK. Keep generated
-clients optional. Document examples with curl and Python. Avoid changing
-response semantics in a minor release; introduce incompatible changes
-under a new API version.
+SSE connections authenticate at connection time, are limited per key and
+globally, send heartbeats, close cleanly on shutdown, use bounded
+per-client queues, and are closed when the key is revoked or expires.
+Browser clients (future web UI) cannot set headers on `EventSource`; they
+will need a separately designed short-lived ticket. Keys in query strings
+remain forbidden.
+
+## 11. Client SDK and examples
+
+`pkg/client` is the Go SDK and the only way the TUI talks to the agent. It
+supports Unix-socket, TCP and TLS transports. Documentation includes `curl`
+and Python examples. Response semantics do not change within `v1`.

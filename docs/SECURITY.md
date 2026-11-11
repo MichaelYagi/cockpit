@@ -2,106 +2,142 @@
 
 ## 1. Threat model
 
-Linux Cockpit may expose sensitive operational information: process
-names, hostnames, network addresses, device models, filesystem layout,
-and system events. Treat the API as a privileged observability surface
-even when it is read-only.
+Cockpit exposes sensitive operational information: process names,
+hostnames, network addresses, device models, filesystem layout, and system
+events. The API is a privileged observability surface even though it is
+read-only.
 
-Threats include: - Unauthorized access from another local user or
-network host. - API key theft from logs, shell history, screenshots,
-backups, or configuration files. - Excessive API requests causing
-resource exhaustion. - A compromised third-party collector. - Accidental
-remote exposure on an untrusted network. - Information disclosure
-through verbose errors or diagnostic reports.
+Threats:
 
-## 2. Network defaults
+- Unauthorized access from another local user or a network host.
+- Malicious web pages reaching the loopback API (DNS rebinding,
+  cross-origin requests).
+- API key theft from logs, shell history, screenshots, backups, or
+  configuration files.
+- Resource exhaustion through excessive requests or streams.
+- A compromised or buggy collector or external tool.
+- Accidental remote exposure on an untrusted network.
+- Information disclosure through verbose errors, diagnostics, or
+  hardware identifiers.
 
--   Bind to `127.0.0.1` by default.
--   Do not bind to `0.0.0.0` automatically.
--   Remote binding must be an explicit configuration choice.
--   Require TLS for non-loopback connections.
--   Provide clear warnings when remote access is enabled.
--   Consider optional client IP allowlists for remote deployments.
--   Do not assume a private LAN is trusted.
+## 2. Listeners and network defaults
 
-## 3. API key generation and storage
+| Listener | Default | Protection |
+|---|---|---|
+| Unix socket | on | Filesystem permissions (D3) |
+| TCP loopback `127.0.0.1:7878` | on | API key always (D4), `Host` check, no CORS |
+| TCP remote | off | Explicit configuration + TLS + API key |
 
--   Generate at least 256 bits of entropy using Go `crypto/rand`.
--   Use a recognizable prefix for key identification, but do not treat
-    the prefix as secret.
--   Display the full key only once immediately after creation.
--   Store only a cryptographic verifier/hash, never plaintext.
--   Prefer HMAC-SHA-256 with a server-side pepper stored separately from
-    the database, or a carefully selected password-hashing approach.
-    Document the trade-off and key-rotation implications.
--   Use constant-time comparison for secret verification where
-    applicable.
--   Store metadata: key ID, name, scopes, creation time, optional
-    expiry, last-used time, and revocation time.
--   Revoke keys immediately and reject expired keys.
--   Never put API keys in URLs or query strings.
+- Never bind to `0.0.0.0` or `::` unless explicitly configured.
+- A non-loopback bind without valid TLS configuration is a **startup
+  error**, never a warning or fallback.
+- Log a prominent warning at startup whenever a remote listener is active.
+- Do not assume a private LAN is trusted. Client IP allowlists are a
+  candidate future feature.
 
-The dashboard may show a masked representation and metadata after
-creation. It must not be able to reveal the original plaintext later
-because the server does not retain it.
+## 3. Local administration (Unix socket)
 
-## 4. Authorization
+- System mode: `/run/cockpit-monitor/agent.sock`, directory `0750`, socket
+  `0660`, owner `cockpit-monitor:cockpit-monitor`.
+- User mode: `$XDG_RUNTIME_DIR/cockpit-monitor/agent.sock`, directory
+  `0700`, socket `0600`.
+- The agent creates the directory and socket with these modes itself and
+  refuses to start if an existing directory is more permissive or owned by
+  someone else.
+- A socket connection is the local administrator principal. **Membership
+  in the `cockpit-monitor` group grants full local admin.**
+- Peer credentials (`SO_PEERCRED`) are logged for audit.
+- Key management routes exist only on the socket (Phase 1).
 
--   Default to read-only.
--   Enforce scopes on every protected route.
--   Separate local administrative key-management actions from ordinary
-    integration keys.
--   Do not let a monitoring key create, list secret material for, or
-    revoke other keys.
--   Do not implement remote system-control actions in the MVP.
+## 4. API keys
 
-## 5. TLS and certificates
+- Format `ckp_<id>_<secret>`: 12-character random base32 ID, 256-bit
+  secret from `crypto/rand` encoded as 43 base62 characters (D5).
+- Only `SHA-256(full key)` is stored, with metadata: ID, name, scopes,
+  created, optional expiry, last used, revoked, rotated-from.
+- Verification: parse → look up ID → constant-time hash comparison →
+  revocation and expiry checks. All failure reasons return the same `401`.
+- The full key is displayed exactly once, at creation or rotation. It cannot
+  be shown again because the server does not have it.
+- Rotation issues a new key with the same name and scopes and revokes the
+  old key immediately. Revocation takes effect on the next request.
+- The TUI and CLI require explicit confirmation before rotation or
+  revocation.
+- Keys are never accepted in URLs or query strings and never written to the
+  YAML configuration.
+- The `ckp_` prefix allows secret scanners to detect leaked keys.
 
--   Use TLS 1.2 or newer; prefer TLS 1.3 where supported.
--   Validate certificate/key file permissions.
--   Never silently fall back to plaintext for remote binding.
--   Document certificate provisioning and renewal.
--   Consider local self-signed certificate generation only with clear
-    trust/bootstrap guidance.
+## 5. Authorization
 
-## 6. Logging and audit
+- Each route declares one required scope or is explicitly public. A test
+  walks the route table and fails on any undeclared route.
+- No scope implies another. Read-only keys can never perform admin
+  operations (D8).
+- Phase 1 keys may hold only `system:read` and `metrics:read`.
+- No remote system-control actions exist. Monitoring is read-only.
 
-Never log: - API keys or Authorization headers. - TLS private keys. -
-Secret configuration values. - Full request bodies by default.
+## 6. Sensitive data
 
-Log: - Request ID, method, route template, status, latency, and
-authenticated key ID (not secret). - Key creation/revocation events. -
-Remote access configuration changes. - Authentication failures with rate
-limiting and without echoing submitted credentials.
+- Command lines, serial numbers, MAC addresses, WWNs and hardware UUIDs are
+  hidden by default and redacted at the API boundary (D9).
+- `machine_id` is a random identifier generated by the agent, never
+  `/etc/machine-id` or DMI UUIDs.
+- Fixtures and test snapshots must not contain real host identifiers.
 
-## 7. Resource protection
+## 7. TLS
 
--   Rate-limit per key and globally.
--   Bound request sizes, pagination, concurrent streams, and history
-    query ranges.
--   Apply timeouts to handlers and collectors.
--   Avoid unbounded goroutines and queues.
--   Use safe defaults for expensive diagnostics and benchmarks.
+- TLS 1.2 minimum; TLS 1.3 preferred. Go's default cipher suites.
+- The certificate and key are file paths. The agent refuses to start if the
+  key file is readable by group or others.
+- No silent plaintext fallback.
+- Self-signed certificate generation is deferred. If added, it must come
+  with clear trust and bootstrap guidance.
 
-## 8. Plugin security
+## 8. Logging and audit
 
-The MVP should compile trusted collectors into the application. Do not
-load arbitrary native shared libraries or execute third-party plugin
-binaries automatically.
+Never log:
 
-Future extension mechanisms should define: - Explicit trust and
-installation model. - Least-privilege execution. - Version and
-compatibility checks. - Signed artifacts or trusted distribution. -
-Resource limits and timeout behavior. - Clear permissions for any
-collector that can access sensitive system interfaces.
+- API keys, `Authorization` headers, TLS private keys.
+- Request bodies (by default).
+- Sensitive hardware identifiers or command lines.
 
-## 9. Operational safety
+Log:
 
--   Monitoring is read-only by default.
--   Do not run the entire application as root merely to access one
-    privileged metric.
--   Prefer narrowly scoped capabilities, groups, or helper processes
-    where necessary.
--   Explain which metrics are unavailable without elevated permissions.
--   Do not silently change firewall rules, services, kernel settings, or
-    system configuration.
+- Request ID, method, route template, status, latency, principal (key ID or
+  `local-admin` + peer UID).
+- Key creation, rotation and revocation (key ID and name only).
+- Listener configuration at startup, with warnings for remote listeners.
+- Authentication failures, rate-limited, without echoing credentials.
+
+Logging goes through a redaction helper. Tests capture log output and fail
+if any key material appears.
+
+## 9. Resource protection
+
+- Rate limiting per key and globally (`golang.org/x/time/rate`), `429` with
+  `Retry-After`.
+- `ReadHeaderTimeout`, idle timeouts, and maximum header size on every
+  server. Write deadlines are set per route, so SSE is not cut off.
+- Request body limit 64 KiB; bounded pagination and query ranges.
+- Collector and external-tool timeouts. External tools run without a shell,
+  with absolute paths resolved at startup and fixed arguments.
+- No unbounded goroutines or queues.
+
+## 10. Privileges
+
+- The agent never needs root for ordinary metrics.
+- Do not run the agent as root to get one privileged metric.
+- SMART/NVMe data usually requires privileges. Without them, disk health
+  reports `permission_denied` with an explanation. A least-privilege
+  approach is an open question (see ROADMAP).
+- The TUI and setup docs list which capabilities are unavailable without
+  elevated permissions.
+- Never change firewall rules, services, kernel settings or system
+  configuration.
+
+## 11. Plugins
+
+The MVP compiles trusted collectors into the binary. It does not load
+shared libraries or run third-party plugin binaries. Any future extension
+mechanism needs its own security design first (trust and installation,
+least privilege, signing, version checks, resource limits).

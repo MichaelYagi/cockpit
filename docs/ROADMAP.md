@@ -1,123 +1,127 @@
-# Product Roadmap
+# Roadmap
 
 ## Guiding principle
 
-Build a reliable vertical slice before broadening hardware coverage. The
-first milestone should prove that collectors, normalized models, API
-authentication, and the TUI work together through the API boundary.
+Build a reliable vertical slice before broadening hardware coverage. Prove
+early that collectors, normalized models, API authentication, and the TUI
+work together through the API boundary.
 
-## Phase 0 --- Foundation
+Each phase requires review and approval before the next one starts.
 
--   [ ] Initialize Go module and repository structure.
--   [ ] Add `CLAUDE.md` and project documentation.
--   [ ] Implement configuration loading, defaults, and validation.
--   [ ] Add structured logging and request IDs.
--   [ ] Define core domain models and availability states.
--   [ ] Add graceful startup and shutdown.
+## Phase 0 — Foundation
 
-**Exit criteria:** application starts with validated configuration, logs
-clearly, and shuts down cleanly.
+**Status: implemented, awaiting review.** All milestones below are done and
+every exit criterion has been checked with tests and against the built
+binary.
 
-## Phase 1 --- MVP vertical slice
+Goal: a running, well-structured agent skeleton with configuration,
+logging, lifecycle, both listeners, the API conventions, and CI. No real
+collectors yet.
 
--   [ ] System identity and uptime collector.
--   [ ] CPU utilization/load collector.
--   [ ] Memory and swap collector.
--   [ ] Filesystem capacity collector.
--   [ ] Network interface counters and throughput.
--   [ ] Thermal sensor discovery where available.
--   [ ] Normalized snapshot service with partial-result handling.
--   [ ] REST endpoints for system, hardware, metrics, health, and
-    status.
--   [ ] OpenAPI 3.x document.
--   [ ] API key creation, one-time display, listing metadata, and
-    revocation.
--   [ ] Authentication middleware and read scopes.
--   [ ] Bubble Tea dashboard consuming the API.
--   [ ] API Access screen with server status and masked key metadata.
--   [ ] Loopback-only default binding.
--   [ ] Unit and integration tests.
+| # | Milestone | Depends on | Deliverables |
+|---|---|---|---|
+| 0.1 | Module and tooling | — | `go.mod` (`github.com/MichaelYagi/cockpit`, `go 1.27`, `toolchain go1.27.4`, `tool` directives for staticcheck and govulncheck); package skeleton; `Makefile` (`fmt`, `vet`, `lint`, `test`, `test-integration`, `cross`, `vuln`); GitHub Actions CI; `.gitignore`; `.editorconfig` |
+| 0.2 | Configuration | 0.1 | `internal/config`: defaults, strict YAML decoding, `COCKPIT_*` env, flags, precedence, validation reporting all errors, path resolution for system vs user mode; tests |
+| 0.3 | Logging and request IDs | 0.1 | `log/slog` setup (text/JSON, level); redaction helper; request ID generator (`req_` + ULID); tests proving keys are redacted |
+| 0.4 | Domain and collector contracts | 0.1 | `internal/core` (availability, capability status, section metadata, snapshot skeleton, finding, event, machine ID); `internal/collector` (interface, descriptor, result, env, fakes); `internal/platform/unsupported` |
+| 0.5 | Agent lifecycle | 0.2, 0.3 | `internal/app`: state/runtime directories with permission checks, single-instance lock, machine ID file, signal handling, ordered start and shutdown with deadlines |
+| 0.6 | API skeleton | 0.4, 0.5 | `api/openapi.yaml` (conventions, error envelope, `livez`, `openapi.json`, `status`); `pkg/apiv1` types; `internal/api` server with Unix socket and loopback TCP listeners, remote-bind/TLS guard, middleware (request ID, recovery, access log, `Host` check, body limit, no CORS); auth middleware wired with a stub that rejects all keys; contract-test harness |
+| 0.7 | CLI and client skeleton | 0.5, 0.6 | `cmd/cockpit` + `internal/cli`: `agent`, `tui` (placeholder that connects via `pkg/client` and prints status), `config check`, `version`; `pkg/client` with Unix socket and TCP transports |
+| 0.8 | Guard rails | 0.6, 0.7 | Import-boundary test; route-table scope test; cross-compile job; `goleak` in lifecycle tests |
 
-**Exit criteria:** on a supported Linux host, the TUI displays live
-system metrics from the authenticated API; a separate client can
-retrieve the same data.
+**Phase 0 dependencies (runtime):** `github.com/go-chi/chi/v5`,
+`go.yaml.in/yaml/v3`, `golang.org/x/sys`. **Test-only:**
+`github.com/getkin/kin-openapi`, `go.uber.org/goleak`. **Tools:**
+`honnef.co/go/tools` (staticcheck), `golang.org/x/vuln` (govulncheck).
+SQLite and Bubble Tea arrive in Phase 1.
 
-## Phase 2 --- Hardware and diagnostics
+**Exit criteria:**
 
--   [ ] Detailed CPU inventory.
--   [ ] DIMM/memory inventory where available.
--   [ ] PCI and USB device inventory.
--   [ ] GPU inventory and vendor-specific metrics.
--   [ ] Storage device inventory.
--   [ ] SMART/NVMe health integration when tools and permissions allow.
--   [ ] Health rules for thermal thresholds, memory pressure, filesystem
-    capacity, and storage warnings.
--   [ ] Events endpoint and SSE stream.
--   [ ] Processes endpoint with pagination.
--   [ ] systemd service status.
--   [ ] Network diagnostics.
+- `cockpit agent` starts with validated configuration, creates its socket
+  with correct permissions, serves `/api/v1/livez`, `/api/v1/openapi.json`
+  and `/api/v1/status` on the socket and loopback TCP, and shuts down
+  cleanly on SIGINT/SIGTERM within the configured deadline.
+- TCP requests to `/status` without a key return `401` in the standard
+  error envelope with a request ID.
+- A second agent on the same state directory fails with a clear message.
+- A non-loopback bind without TLS fails at startup.
+- `cockpit config check` reports all validation errors.
+- `cockpit tui` (placeholder) reaches the agent only through `pkg/client`.
+- `gofmt`, `go vet`, staticcheck, `go test -race ./...` and govulncheck
+  pass in CI; Linux, macOS and Windows cross-compile.
 
-**Exit criteria:** useful health findings explain the evidence and
-identify unavailable capabilities without crashing.
+## Phase 1 — MVP vertical slice
 
-## Phase 3 --- History and operational polish
+| # | Milestone | Depends on |
+|---|---|---|
+| 1A | Engine: scheduler with jitter, timeouts, panic isolation, rate derivation, staleness, snapshot store | 0.4 |
+| 1B | Linux collectors: system, cpu, memory, filesystems, block devices, network, sensors, smart (with fixtures) | 0.4 (in parallel with 1A) |
+| 1C | SQLite + migrations; `auth` key service (create, list, rotate, revoke, verify); `cockpit keys` CLI over the socket | 0.5 |
+| 1D | API: real auth and scope middleware, rate limiting, redaction, Phase 1 endpoints, contract tests | 1A, 1C |
+| 1E | Health: the four D11 checks with hysteresis; in-memory events | 1A, 1B |
+| 1F | `pkg/client` coverage for all Phase 1 endpoints | spec from 1D |
+| 1G | TUI (Bubble Tea v2): frame, navigation, minimum-size message, theme; Overview, Health, Storage, Network, API Access screens. Other screens hidden until implemented | 1F (can start against a mock server once the spec is fixed) |
+| 1H | Embedded agent mode in `cockpit tui` | 1G |
+| 1I | Setup docs, OpenAPI review, security review, docs match behavior | all |
 
--   [ ] SQLite persistence.
--   [ ] Configurable retention.
--   [ ] Historical metrics API.
--   [ ] Historical charts/sparklines in TUI.
--   [ ] Event filtering and pagination.
--   [ ] API request statistics.
--   [ ] Configurable thresholds and refresh intervals.
--   [ ] Diagnostic report export.
--   [ ] systemd service packaging.
--   [ ] Installation and upgrade documentation.
+**Exit criteria:** on a supported Linux host, without root, the TUI shows
+live CPU, memory, load, uptime, filesystem, network, temperature (where
+available) and health from the API; `curl` with a `metrics:read` key gets
+the same data; keys can be created (shown once), listed, rotated and
+revoked; missing sensors and permissions are reported, not fatal.
 
-**Exit criteria:** the application can run unattended as a headless
-service and retain bounded history.
+## Phase 2 — Hardware and diagnostics
 
-## Phase 4 --- Extensibility
+- Detailed CPU, DIMM (where permitted), PCI and USB inventory.
+- GPU inventory and vendor metrics.
+- More health rules (services, network errors, storage warnings).
+- `/events/stream` (SSE).
+- `/processes` with snapshot-bound pagination; `processes:read` scope.
+- systemd services via D-Bus.
+- Network diagnostics.
 
--   [ ] Public collector SDK/interface documentation.
--   [ ] Collector capability registry.
--   [ ] Compatibility/version metadata.
--   [ ] Example third-party collector compiled into a development build.
--   [ ] Go API client SDK.
--   [ ] Python and TypeScript examples.
--   [ ] Docker/Podman, ZFS, UPS, and additional GPU collectors.
+## Phase 3 — History and operational polish
 
-**Exit criteria:** an external developer can build and test an
-additional collector without changing core collection or TUI packages.
+- SQLite metric history with retention and downsampling; `/metrics/history`.
+- Historical sparklines and charts in the TUI.
+- Event persistence, filtering and pagination.
+- Configurable thresholds and refresh intervals in the TUI.
+- Diagnostic report export (redacted).
+- `cockpit-agent.service`, `cockpit-monitor` user/group, packaging,
+  installation and upgrade docs.
 
-## Phase 5 --- Multi-machine and cross-platform
+## Phase 4 — Extensibility
 
--   [ ] Headless agent mode.
--   [ ] Remote TLS configuration and certificate guidance.
--   [ ] Agent identity and enrollment design.
--   [ ] Central fleet dashboard.
--   [ ] Fleet health and comparison views.
--   [ ] Windows collector implementation.
--   [ ] macOS collector implementation.
--   [ ] Platform capability conformance tests.
+- Collector SDK documentation, `core.GenericMetric`, compatibility metadata.
+- Example external collector compiled into a development build.
+- Published Go SDK; Python and TypeScript examples.
+- Docker/Podman, ZFS, UPS, additional GPU collectors.
 
-**Exit criteria:** multiple agents can be monitored through a common API
-contract with secure enrollment and transport.
+## Phase 5 — Multi-machine and cross-platform
 
-## Explicit non-goals for MVP
+- Remote TLS guidance and certificate tooling.
+- Agent identity and enrollment design; fleet console.
+- Windows and macOS collectors; Windows named-pipe admin transport.
+- Platform capability conformance tests.
 
--   Cloud-hosted control plane.
--   User accounts or SaaS billing.
--   Arbitrary runtime plugin loading.
--   Remote shell or command execution.
--   Automated system remediation.
--   Full Kubernetes observability.
--   Automatic firewall or network configuration changes.
--   AI diagnosis requiring external data transfer.
+## Open questions
+
+| # | Question | Needed by | Current recommendation |
+|---|---|---|---|
+| Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 1B | Phase 1: agent runs `smartctl` directly and reports `permission_denied` when unprivileged. Phase 3 (with packaging): a small root-owned systemd timer runs `smartctl --json` and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
+| Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 0.7 | Print help in Phase 0. Revisit once the TUI exists. |
+| Q3 | Default TCP port | 0.6 | `7878` (avoids 9090, used by Red Hat Cockpit) |
+
+## Non-goals for the MVP
+
+Cloud control plane; user accounts or billing; runtime plugin loading;
+remote shell or command execution; automated remediation; full Kubernetes
+observability; firewall or network changes; AI diagnosis that sends data
+off the machine.
 
 ## Quality gates
 
-Before a milestone is considered complete: - `gofmt` passes. -
-`go vet ./...` passes. - `go test ./...` passes. - API contract is
-updated. - Security implications are reviewed. - Missing permissions and
-unsupported hardware are tested. - Documentation reflects actual
-behavior.
+A milestone is complete only when `gofmt`, `go vet`, staticcheck and
+`go test -race ./...` pass; the OpenAPI spec and docs match behavior;
+security implications are reviewed; and missing-permission and
+unsupported-hardware cases are tested.

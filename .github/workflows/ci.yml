@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: make fmt-check
+      - name: go vet
+        run: make vet
+      - name: staticcheck
+        run: make lint
+      - name: test (race detector)
+        run: make test-race
+      - name: test (integration, non-root)
+        run: make test-integration
+      - name: govulncheck
+        run: make vuln
+      - name: build
+        run: make build
+
+  cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: cross-compile and vet (linux, darwin, windows)
+        run: make cross
