@@ -124,8 +124,9 @@ Filesystem collection skips pseudo, in-memory and image filesystems
 (`proc`, `sysfs`, `cgroup2`, `tmpfs`, `squashfs`, `rootfs`, …), overlays
 other than the root filesystem, and network filesystems (`nfs`, `cifs`,
 `sshfs`, …) whose `statfs` can hang. Bind mounts of the same device are
-reported once, at the shortest mount point. The skip lists are fixed in
-Phase 1.
+reported once, at the shortest mount point. Since Phase 3 the type and
+mount-point lists are configurable (`collection.filesystems`, Q5); network
+filesystems are always skipped.
 
 ### External tools
 

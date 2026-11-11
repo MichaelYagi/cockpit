@@ -305,7 +305,7 @@ Phase 2; clients resume with `GET /events?since=`.
 
 ## D18 — Metric history design
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** A recorder samples the current snapshot every 10 seconds
 (not every collection) into SQLite. Series are a fixed, documented set
@@ -328,7 +328,7 @@ state for a typical machine) and avoid an open-ended metrics database.
 
 ## D19 — Settings changes through the admin socket
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Health thresholds can be changed at runtime through
 `GET /settings` and `PUT /settings`, mounted only on the Unix socket
@@ -343,7 +343,7 @@ authorized and confirmed; the socket is the existing admin boundary.
 
 ## D20 — SMART data through a privileged helper
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** In system mode, `cockpit-smart.service` (run by
 `cockpit-smart.timer`, hourly) executes `cockpit smart-helper` as root,
@@ -362,7 +362,7 @@ agent elevated privileges.
 
 ## D21 — Diagnostic reports
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** `GET /report` and `cockpit report` produce a point-in-time
 report: status, system, hardware, services, health, recent events,
@@ -376,3 +376,124 @@ Formats: JSON and Markdown. Sensitive fields stay redacted (D9).
 strings, user names and mount points under `/home` with stable
 placeholders. Files are written `0600`.
 
+## D22 — Generic metrics for extension collectors
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** Add one open record type, `core.GenericMetric`, alongside the
+sealed built-in records (PLUGINS §3):
+
+| Field | Rules |
+|---|---|
+| `name` | `<collector namespace>.<metric>`, lower-case dotted (`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$`), at most 128 characters |
+| `kind` | `gauge` or `counter`; the engine turns counters into per-second rates, as for built-in counters |
+| `unit` | from a fixed list (`bytes`, `bytes_per_second`, `percent`, `celsius`, `watts`, `seconds`, `count`, `ratio`, …) |
+| `labels` | at most 8; keys `^[a-z][a-z0-9_]{0,31}$`; values at most 128 characters, sanitized like all API text |
+| `value` | finite float64; NaN and infinities are dropped |
+
+Each collector may emit at most 500 series (name + labels); extra series
+are dropped and the collector's status says so. Generic metrics are served
+in a new `custom` section of `GET /metrics` (`metrics:read`) with the
+usual per-collector availability. They enter history (D18) only when the
+collector's descriptor asks for it, within the existing 200-series limit.
+
+**Why.** Third-party collectors need a way to report data without
+changing `internal/core` and the OpenAPI schema for every new domain, and
+without opening the sealed record set that keeps built-in data typed.
+The limits keep a misbehaving collector from flooding memory, the API or
+history.
+
+## D23 — Compile-time extensions through a public collector SDK
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** Third-party collectors are Go code compiled into a custom
+build. Nothing is loaded at runtime: no Go plugins, scripts or
+subprocess protocol.
+
+- `pkg/collectorsdk` (public, imports nothing internal) defines a reduced
+  contract: `Descriptor` (ID in the `custom.` namespace, version, SDK
+  version, interval, timeout, capabilities), `Probe`, `Collect` returning
+  `[]GenericMetric` plus per-capability status, and `Close`.
+- The public package `github.com/MichaelYagi/cockpit/custom` provides
+  `custom.Main(collectors ...collectorsdk.Collector) int`, which runs the
+  normal CLI with the extra collectors added. A custom build is a five-line
+  `main.go` in the author's own module.
+- An internal adapter wraps SDK collectors in the internal contract, so
+  they get the same engine treatment: timeouts, panic recovery, staleness,
+  and status in `/status`.
+- **Compatibility:** `collectorsdk.Version` starts at `1`. A collector
+  declares the SDK version it was written against, and the agent refuses
+  to start one with a different major version. `/status` marks extension
+  collectors with `external: true` and their SDK version.
+- Extension code runs in the agent process with the agent's privileges.
+  It is trusted code, like any other compiled-in dependency, and the docs
+  say so plainly.
+
+**Why.** It keeps the single static binary and the "no dynamic code
+loading" rule while letting people add collectors without forking.
+`internal/` stays private and the public surface is small enough to keep
+stable.
+
+## D24 — Containers from cgroup v2, without the engine socket
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** A `linux.containers` collector finds Docker, Podman
+(rootful and rootless) and containerd containers from the cgroup v2
+hierarchy (`docker-<id>.scope`, `libpod-<id>.scope`, …) and reads their
+CPU, memory, I/O and process counts from `/sys/fs/cgroup`. It never talks
+to the Docker or Podman API socket: access to that socket is equivalent to
+root, and the agent must not hold it. Containers are identified by
+runtime and short ID; names and images are reported as unavailable with
+that reason. `GET /containers` requires `processes:read` (D14), because a
+container list reveals running software in the same way. The TUI gains a
+Containers screen, hidden when no containers are found. cgroup v1 hosts
+report `unsupported`.
+
+**Why.** Per-container resource use is the most asked-for addition and
+cgroup v2 provides it without privileges. See Q8 for names and images.
+
+## D25 — ZFS, batteries and UPS
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.**
+
+- **ZFS** (`linux.zfs`): pool state from `/proc/spl/kstat/zfs/<pool>/state`
+  and ARC statistics from `/proc/spl/kstat/zfs/arcstats`, without
+  privileges. Capacity and errors come from `zpool list -j` and
+  `zpool status -j` (OpenZFS 2.3+, JSON output) as an optional tool;
+  older versions report those parts as unsupported rather than having
+  their text parsed. A new health check raises a warning for a `DEGRADED`
+  pool and a critical finding for `FAULTED`, `UNAVAIL` or `SUSPENDED`.
+- **Batteries** (`linux.power`): `/sys/class/power_supply` gives charge,
+  status, health and power draw for batteries, and the mains status.
+- **UPS** (`linux.ups`, off by default): a read-only client for the
+  Network UPS Tools protocol (`LIST UPS`, `LIST VAR`; default
+  `127.0.0.1:3493`, configurable). It never sends commands that change
+  state. A health check raises a warning when running on battery and a
+  critical finding at low battery.
+- Everything appears in a new `power` section of `/metrics` and in
+  `/storage` (ZFS), under `metrics:read`.
+
+**Why.** These are the remaining common "is my machine healthy" questions
+on servers and laptops. All sources are documented interfaces with
+structured data.
+
+## D26 — Releases and SDK versioning
+
+**Status:** Proposed (2026-11-11)
+
+**Decision.** Releases are git tags `vX.Y.Z`; Phase 4 ships `v0.4.0`. A
+release workflow (GitHub Actions, no new tools) builds `linux/amd64` and
+`linux/arm64` binaries with `CGO_ENABLED=0 -trimpath`, a tarball with
+`deploy/` and the docs, and `SHA256SUMS`, and attaches them to a GitHub
+release. `pkg/client`, `pkg/apiv1` and `pkg/collectorsdk` follow semantic
+versioning: while in `v0`, a minor release may break them, but only with
+a note in `CHANGELOG.md`. From `v1`, never. The REST API keeps its own
+promise (`/api/v1` is not broken, API.md §1), independent of these
+version numbers.
+
+**Why.** "Published SDK" needs a version people can pin, release notes,
+and binaries they can verify.
