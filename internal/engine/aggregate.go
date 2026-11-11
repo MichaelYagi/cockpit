@@ -131,6 +131,8 @@ type aggregator struct {
 
 	degraded map[string]bool  // "collector|capability" currently degraded
 	pending  map[*runner]bool // scheduled collectors that have not reported yet
+
+	custom map[*runner]*customState // collectors reporting generic metrics (D22)
 }
 
 func newAggregator(e *Engine, probes []map[core.Capability]core.CapabilityStatus) *aggregator {
@@ -140,6 +142,12 @@ func newAggregator(e *Engine, probes []map[core.Capability]core.CapabilityStatus
 	}
 	for i, r := range e.runners {
 		a.caps[r.desc.ID] = probes[i]
+		if r.desc.GenericMetrics {
+			if a.custom == nil {
+				a.custom = map[*runner]*customState{}
+			}
+			a.custom[r] = newCustomState(r, probes[i])
+		}
 		for s := section(0); s < numSections; s++ {
 			if provides(r.desc, s) && a.owner[s] == nil {
 				a.owner[s] = r
@@ -239,6 +247,9 @@ func (a *aggregator) apply(o outcome) {
 		}
 		// Otherwise the last good data (if any) is kept and becomes stale.
 		a.meta[s] = meta
+	}
+	if cs := a.custom[r]; cs != nil {
+		cs.apply(a.e.opts.Logger, r, caps, o.result.Records, at)
 	}
 }
 
@@ -414,6 +425,11 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.Routes = sec[core.Routes](a, secRoutes)
 	snap.DNS = sec[core.DNSConfig](a, secDNS)
 
+	for _, r := range a.e.runners {
+		if cs := a.custom[r]; cs != nil {
+			snap.Custom = append(snap.Custom, cs.set)
+		}
+	}
 	for _, r := range a.e.runners {
 		caps := make(map[core.Capability]core.CapabilityStatus, len(a.caps[r.desc.ID]))
 		for k, v := range a.caps[r.desc.ID] {

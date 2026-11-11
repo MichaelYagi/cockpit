@@ -1314,6 +1314,20 @@ func fmtValue(v float64, unit string) string {
 		return fmt.Sprintf("%.0f °C", v)
 	case "watts":
 		return fmt.Sprintf("%.0f W", v)
+	case "volts":
+		return fmt.Sprintf("%.2f V", v)
+	case "hertz":
+		return fmt.Sprintf("%.0f Hz", v)
+	case "rpm":
+		return fmt.Sprintf("%.0f rpm", v)
+	case "seconds":
+		return fmt.Sprintf("%.2f s", v)
+	case "per_second":
+		return fmt.Sprintf("%.2f/s", v)
+	case "seconds_per_second":
+		return fmt.Sprintf("%.2f s/s", v)
+	case "count":
+		return strconv.FormatFloat(v, 'f', -1, 64)
 	}
 	return fmt.Sprintf("%.2f", v)
 }
@@ -1397,6 +1411,9 @@ func (m *Model) performanceScreen(w, h int) string {
 		lines = append(lines, strings.Repeat(" ", 9)+sMuted.Render(axis))
 		title := fmt.Sprintf("%s · avg %s · min %s · max %s", p.title, fmtValue(avg, p.unit), fmtValue(lo, p.unit), fmtValue(hi, p.unit))
 		boxes = append(boxes, box{title: title, lines: lines})
+	}
+	if b, ok := m.customBox(cw - 4); ok {
+		boxes = append(boxes, b)
 	}
 	if len(boxes) == 0 {
 		return column([]box{{title: "Performance", lines: []string{sMuted.Render("No history recorded for this range yet. Samples are taken every 10 seconds.")}}}, w, h)
@@ -1487,4 +1504,52 @@ func (m *Model) settingsScreen(w, h int) string {
 		}
 	}
 	return column([]box{{title: "Terminal UI", lines: local}, {title: "Health thresholds", lines: lines, flex: true}}, w, h)
+}
+
+// customBox lists generic metrics from extension collectors (D22).
+func (m *Model) customBox(w int) (box, bool) {
+	if m.metrics == nil || m.metrics.Custom == nil || len(*m.metrics.Custom) == 0 {
+		return box{}, false
+	}
+	var lines []string
+	for _, set := range *m.metrics.Custom {
+		head := sAccent.Render(set.Collector)
+		if set.Data == nil || set.Status != apiv1.Available {
+			reason := set.Reason
+			if reason == "" {
+				reason = set.Status
+			}
+			lines = append(lines, head+"  "+badge(lvUnknown, set.Status)+" "+sMuted.Render(truncate(reason, max(10, w-30))))
+			continue
+		}
+		if set.DroppedSeries > 0 {
+			head += sMuted.Render(fmt.Sprintf("  %d dropped: %s", set.DroppedSeries, truncate(set.Problem, max(10, w-40))))
+		}
+		lines = append(lines, head)
+		for _, x := range *set.Data {
+			name := strings.TrimPrefix(x.Name, set.Collector+".")
+			if len(x.Labels) > 0 {
+				keys := make([]string, 0, len(x.Labels))
+				for k := range x.Labels {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				parts := make([]string, len(keys))
+				for i, k := range keys {
+					parts[i] = k + "=" + x.Labels[k]
+				}
+				name += " {" + strings.Join(parts, ", ") + "}"
+			}
+			val := fmtValue(x.Value, x.Unit)
+			if x.Kind == "counter" {
+				val = "—"
+				if x.RatePerSecond != nil {
+					val = fmtValue(*x.RatePerSecond, x.RateUnit)
+				}
+			}
+			nameW := max(10, w-14)
+			lines = append(lines, "  "+pad(truncate(name, nameW), nameW)+padLeft(val, 12))
+		}
+	}
+	return box{title: "Extension metrics", lines: lines}, true
 }

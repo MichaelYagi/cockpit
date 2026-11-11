@@ -193,10 +193,38 @@ type MetricsResponse struct {
 	Network        *Section[[]NetworkInterface] `json:"network,omitempty"`
 	Sensors        *Section[[]Sensor]           `json:"sensors,omitempty"`
 	GPU            *Section[[]GPU]              `json:"gpu,omitempty"`
+	// Custom holds generic metrics from extension collectors (D22), one
+	// set per collector.
+	Custom *[]CustomMetricsSet `json:"custom,omitempty"`
+}
+
+// CustomMetricsSet is one collector's generic metrics with its
+// availability.
+type CustomMetricsSet struct {
+	Collector string `json:"collector"`
+	Section[[]CustomMetric]
+	// DroppedSeries counts metrics rejected in the last collection
+	// (invalid, duplicated or over the 500-series limit).
+	DroppedSeries int    `json:"dropped_series"`
+	Problem       string `json:"problem,omitempty"`
+}
+
+// CustomMetric is one generic metric.
+type CustomMetric struct {
+	Name   string            `json:"name"`
+	Kind   string            `json:"kind"` // gauge | counter
+	Unit   string            `json:"unit"`
+	Labels map[string]string `json:"labels"`
+	// Value is the gauge reading or the counter's total.
+	Value float64 `json:"value"`
+	// RatePerSecond is set for counters from the second sample on, in
+	// RateUnit; null otherwise.
+	RatePerSecond *float64 `json:"rate_per_second"`
+	RateUnit      string   `json:"rate_unit,omitempty"`
 }
 
 // MetricSections are the valid values of ?sections=.
-var MetricSections = []string{"cpu", "memory", "memory_pressure", "filesystems", "network", "sensors", "gpu"}
+var MetricSections = []string{"cpu", "memory", "memory_pressure", "filesystems", "network", "sensors", "gpu", "custom"}
 
 // CPUMetrics is current CPU utilization.
 type CPUMetrics struct {

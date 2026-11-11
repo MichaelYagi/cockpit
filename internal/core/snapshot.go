@@ -54,6 +54,10 @@ type Snapshot struct {
 	Routes         Section[Routes]
 	DNS            Section[DNSConfig]
 
+	// Custom holds generic metrics, one set per collector that reports
+	// them (D22), in collector order.
+	Custom []CustomSet
+
 	Collectors []CollectorStatus
 }
 

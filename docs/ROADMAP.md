@@ -132,8 +132,8 @@ adjust thresholds, and exports a redacted diagnostic report.
 
 | # | Milestone | Depends on |
 |---|---|---|
-| 4A | Bare `cockpit` opens the TUI in a terminal and prints help otherwise (Q2) | — |
-| 4B | Generic metrics (D22): `core.GenericMetric`, counter rates, name/label/unit validation, per-collector series cap, `custom` section of `/metrics`, opt-in history, shown on the Performance screen | — |
+| 4A ✓ | Bare `cockpit` opens the TUI in a terminal and prints help otherwise (Q2) | — |
+| 4B ✓ | Generic metrics (D22): `core.GenericMetric`, counter rates, name/label/unit validation, per-collector series cap, `custom` section of `/metrics`, opt-in history, shown on the Performance screen | — |
 | 4C | Collector SDK (D23): `pkg/collectorsdk`, the internal adapter, `custom.Main`, SDK version checks, `external` and `sdk_version` in `/status`; PLUGINS.md rewritten as a guide for collector authors | 4B |
 | 4D | Example extension: a collector in its own module under `examples/collector/` (open file handles and entropy, from `/proc/sys`), built with `custom.Main` in CI and tested end to end | 4C |
 | 4E | Containers (D24): `linux.containers` from cgroup v2, `GET /containers` (`processes:read`), Containers screen, history series for the busiest containers | — |

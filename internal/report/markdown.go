@@ -123,6 +123,28 @@ func Markdown(r *apiv1.Report) []byte {
 		}
 	}
 
+	if m := r.Metrics; m != nil && m.Custom != nil && len(*m.Custom) > 0 {
+		w.heading("Extension metrics")
+		for _, set := range *m.Custom {
+			w.line("**" + esc(set.Collector) + "**")
+			w.line("")
+			if set.DroppedSeries > 0 {
+				w.line(esc(fmt.Sprintf("%d metrics dropped: %s", set.DroppedSeries, set.Problem)))
+				w.line("")
+			}
+			if !w.section(set.Status, set.Reason, set.Data != nil) {
+				w.line("")
+				continue
+			}
+			w.table([]string{"Metric", "Labels", "Value"}, func(row func(...string)) {
+				for _, x := range *set.Data {
+					row(x.Name, labelText(x.Labels), customValue(x))
+				}
+			})
+			w.line("")
+		}
+	}
+
 	if s := r.Storage; s != nil {
 		w.heading("Storage")
 		if w.section(s.Filesystems.Status, s.Filesystems.Reason, s.Filesystems.Data != nil) {
@@ -433,4 +455,27 @@ func duration(sec float64) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
 	return fmt.Sprintf("%dm", m)
+}
+
+func labelText(l map[string]string) string {
+	keys := make([]string, 0, len(l))
+	for k := range l {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + "=" + l[k]
+	}
+	return strings.Join(parts, ", ")
+}
+
+func customValue(m apiv1.CustomMetric) string {
+	if m.Kind == "counter" {
+		if m.RatePerSecond == nil {
+			return fmt.Sprintf("%g %s total", m.Value, m.Unit)
+		}
+		return fmt.Sprintf("%.4g %s", *m.RatePerSecond, m.RateUnit)
+	}
+	return fmt.Sprintf("%.4g %s", m.Value, m.Unit)
 }

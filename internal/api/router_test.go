@@ -129,6 +129,13 @@ func testSnapshot() *core.Snapshot {
 			{Name: "backup.service", Description: "Nightly backup", LoadState: "loaded", ActiveState: "failed", SubState: "failed"},
 			{Name: "ssh.service", Description: "OpenSSH", LoadState: "loaded", ActiveState: "active", SubState: "running"},
 		}},
+		Custom: []core.CustomSet{
+			{Collector: "custom.demo", Meta: meta(), Dropped: 1, Problem: "metric \"x\" has an unknown unit", Metrics: []core.CustomMetric{
+				{Name: "custom.demo.open", Kind: core.Gauge, Unit: "count", Value: 42},
+				{Name: "custom.demo.read", Kind: core.Counter, Unit: "bytes", Labels: map[string]string{"dev": "a"}, Value: 900, RatePerSecond: ptr(30.0)},
+			}},
+			{Collector: "custom.idle", Meta: core.SectionMeta{Status: core.PermissionDenied, Source: "custom", Reason: "Not permitted."}},
+		},
 		Collectors: fakeStatus{}.Collectors(),
 	}
 }
@@ -288,6 +295,7 @@ func TestContract(t *testing.T) {
 		{"metrics", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"metrics subset", tcp, "GET", "/api/v1/metrics?sections=cpu,memory", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"metrics gpu", tcp, "GET", "/api/v1/metrics?sections=gpu", []reqOpt{bearer(metricsKey)}, 200, ""},
+		{"metrics custom", tcp, "GET", "/api/v1/metrics?sections=custom", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"metrics bad section", tcp, "GET", "/api/v1/metrics?sections=cpu,tpu", []reqOpt{bearer(metricsKey)}, 400, apiv1.CodeInvalidParameter},
 		{"metrics needs metrics scope", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(systemKey)}, 403, apiv1.CodeInsufficientScope},
 		{"storage", tcp, "GET", "/api/v1/storage", []reqOpt{bearer(metricsKey)}, 200, ""},
@@ -746,5 +754,28 @@ func TestHardwareDetails(t *testing.T) {
 	}
 	if u := (*hw.USBDevices.Data)[0]; strings.Join(u.Redacted, ",") != "serial" {
 		t.Errorf("usb %+v", u)
+	}
+}
+
+func TestCustomMetricsContent(t *testing.T) {
+	e := newEnv(t, nil)
+	r := do(t, router(t, e.d, Options{Listener: ListenerSocket}), "GET", "/api/v1/metrics?sections=custom")
+	var out apiv1.MetricsResponse
+	if err := json.Unmarshal(r.body, &out); err != nil || out.Custom == nil || out.CPU != nil {
+		t.Fatalf("%v %s", err, r.body)
+	}
+	sets := *out.Custom
+	if len(sets) != 2 || sets[0].Collector != "custom.demo" || sets[0].Status != "available" || sets[0].DroppedSeries != 1 {
+		t.Fatalf("sets %+v", sets)
+	}
+	ms := *sets[0].Data
+	if ms[0].Labels == nil || ms[0].RatePerSecond != nil || ms[0].RateUnit != "" {
+		t.Errorf("gauge %+v", ms[0])
+	}
+	if ms[1].Kind != "counter" || *ms[1].RatePerSecond != 30 || ms[1].RateUnit != "bytes_per_second" || ms[1].Labels["dev"] != "a" {
+		t.Errorf("counter %+v", ms[1])
+	}
+	if sets[1].Data != nil || sets[1].Status != "permission_denied" || sets[1].Reason == "" {
+		t.Errorf("unavailable set %+v", sets[1])
 	}
 }

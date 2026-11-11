@@ -85,6 +85,12 @@ principal.
 | DELETE | `/settings` | `admin` (socket) | Return to the file's thresholds |
 | GET | `/report` | `system:read` | Diagnostic report, `?format=json\|markdown&anonymize=true\|false` (D21; see below) |
 
+### Phase 4
+
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| GET | `/metrics?sections=custom` | `metrics:read` | Generic metrics from extension collectors (D22): one set per collector with availability, `dropped_series` and `problem`; each metric has `name`, `kind`, `unit`, `labels`, `value`, and for counters `rate_per_second` and `rate_unit` |
+
 WebSocket is not planned: all streaming is server-to-client, which SSE
 covers.
 

@@ -47,6 +47,7 @@ type fakeAPI struct {
 	resets      int
 
 	procQueries []client.ProcessesQuery
+	custom      *[]apiv1.CustomMetricsSet
 }
 
 var errDown = errors.New("dial unix /run/x.sock: connect: no such file or directory")
@@ -124,6 +125,7 @@ func (f *fakeAPI) Metrics(context.Context, ...string) (*apiv1.MetricsResponse, e
 		GPU: ptr(avail([]apiv1.GPU{{Vendor: "NVIDIA", Name: "NVIDIA GeForce RTX 3060", Driver: "nvidia", DriverVersion: "610.88",
 			MemoryTotalBytes: ptr(uint64(12 << 30)), MemoryUsedBytes: ptr(uint64(3 << 30)), UtilizationPercent: ptr(64.0),
 			TemperatureCelsius: ptr(61.0), PowerWatts: ptr(120.0), PowerLimitWatts: ptr(170.0), MetricsSource: "nvidia-smi"}})),
+		Custom: f.custom,
 	}, nil
 }
 
@@ -982,5 +984,28 @@ func TestSettingsNeedSocket(t *testing.T) {
 	press(t, m, "+")
 	if m.opts.Refresh != 1500*time.Millisecond {
 		t.Errorf("refresh %v", m.opts.Refresh)
+	}
+}
+
+func TestExtensionMetricsPanel(t *testing.T) {
+	api := &fakeAPI{custom: &[]apiv1.CustomMetricsSet{
+		{Collector: "custom.demo", DroppedSeries: 2, Problem: "bad unit", Section: avail([]apiv1.CustomMetric{
+			{Name: "custom.demo.open_files", Kind: "gauge", Unit: "count", Labels: map[string]string{}, Value: 4096},
+			{Name: "custom.demo.read", Kind: "counter", Unit: "bytes", Labels: map[string]string{"dev": "sda", "evil\x1b[31m": "x\x1b]0;pwn\a"},
+				Value: 9e9, RatePerSecond: ptr(2.5e6), RateUnit: "bytes_per_second"},
+		})},
+		{Collector: "custom.idle", Section: missing[[]apiv1.CustomMetric]("permission_denied", "Needs access to /dev/thing.")},
+	}}
+	m := setup(t, api, 140, 60)
+	press(t, m, key(scrPerformance))
+	out := screenText(m)
+	for _, want := range []string{"Extension metrics", "custom.demo", "2 dropped: bad unit", "open_files", "4096", "read {dev=sda", "2.4 MiB/s",
+		"custom.idle", "Needs access"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("panel missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(m.View().Content, "\x1b[31m") || strings.Contains(m.View().Content, "\x1b]0;") {
+		t.Error("escape sequence from a label reached the terminal")
 	}
 }

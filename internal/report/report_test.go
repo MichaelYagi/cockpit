@@ -142,9 +142,14 @@ func TestMarkdownSections(t *testing.T) {
 		{ID: "cpu_temperature", Name: "CPU temperature", Status: "unknown", Availability: apiv1.Unsupported, Reason: "No sensors."},
 	}}
 	r.Omitted = []apiv1.ReportOmission{{Section: "settings", Reason: "Socket only."}}
+	rate := 30.0
+	r.Metrics.Custom = &[]apiv1.CustomMetricsSet{{Collector: "custom.demo", DroppedSeries: 1, Problem: "bad unit",
+		Section: apiv1.Section[[]apiv1.CustomMetric]{Status: apiv1.Available, Data: &[]apiv1.CustomMetric{
+			{Name: "custom.demo.read", Kind: "counter", Unit: "bytes", Labels: map[string]string{"dev": "a"}, Value: 900, RatePerSecond: &rate, RateUnit: "bytes_per_second"},
+		}}}}
 	md := string(Markdown(r))
 	for _, want := range []string{"# Cockpit diagnostic report", "## System", "Web01.corp.example", "## Health", "WARNING", "No sensors.",
-		"used\\_percent: 90", "## Storage", "## Network", "## Recent events", "## Not included", "settings: Socket only."} {
+		"used\\_percent: 90", "## Extension metrics", "custom.demo.read", "dev=a", "30 bytes\\_per\\_second", "1 metrics dropped", "## Storage", "## Network", "## Recent events", "## Not included", "settings: Socket only."} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown missing %q", want)
 		}

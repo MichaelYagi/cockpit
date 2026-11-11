@@ -127,3 +127,37 @@ func TestRecorderFlushRetriesAndBounds(t *testing.T) {
 		t.Errorf("buffer %d > %d", n, maxBuffered)
 	}
 }
+
+func TestExtractCustomMetrics(t *testing.T) {
+	s := &core.Snapshot{Custom: []core.CustomSet{
+		{Collector: "custom.demo", Meta: meta(), Metrics: []core.CustomMetric{
+			{Name: "custom.demo.open", Kind: core.Gauge, Unit: "count", Value: 42, History: true},
+			{Name: "custom.demo.temp_celsius", Kind: core.Gauge, Unit: "celsius", Labels: map[string]string{"zone": "cpu 0", "chip": "k10"}, Value: 50, History: true},
+			{Name: "custom.demo.read", Kind: core.Counter, Unit: "bytes", Value: 900, RatePerSecond: ptr(30.0), History: true},
+			{Name: "custom.demo.first", Kind: core.Counter, Unit: "count", Value: 1, History: true}, // no rate yet
+			{Name: "custom.demo.quiet", Kind: core.Gauge, Unit: "count", Value: 1},                  // not opted in
+		}},
+		{Collector: "custom.stale", Meta: core.SectionMeta{Status: core.Available, CollectedAt: t0, StaleAfter: t0.Add(-time.Minute)},
+			Metrics: []core.CustomMetric{{Name: "custom.stale.x", Kind: core.Gauge, Unit: "count", History: true}}},
+	}}
+	got := Extract(s, t0)
+	want := map[string]float64{
+		"custom.demo.open_count":                     42,
+		"custom.demo.temp_celsius.k10.cpu_0_celsius": 50, // labels in name order, then the unit
+		"custom.demo.read_bytes_per_second":          30,
+	}
+	if len(got) != len(want) {
+		t.Errorf("got %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %v, want %v", k, got[k], v)
+		}
+	}
+	for series, unit := range map[string]string{"custom.demo.open_count": "count", "custom.demo.read_bytes_per_second": "bytes_per_second", "custom.demo.temp_celsius.k10.cpu_0_celsius": "celsius",
+		"x.rate_per_second": "per_second", "x.busy_seconds_per_second": "seconds_per_second", "cpu.load_1m": ""} {
+		if u := Unit(series); u != unit {
+			t.Errorf("Unit(%s) = %q, want %q", series, u, unit)
+		}
+	}
+}

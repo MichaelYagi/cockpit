@@ -76,9 +76,9 @@ type Result struct {
 - `core.Record` is a sealed interface: only types in `internal/core`
   implement it. Adding a domain means adding a record type and updating the
   OpenAPI spec, which is appropriate because the contract changes too.
-- For future third-party collectors, a single generic record type
-  (`core.GenericMetric{Name, Labels, Value, Unit}`) will be added rather
-  than opening the sealed set.
+- Extension collectors use the one open record type,
+  `core.GenericMetrics` (D22), instead of opening the sealed set. See
+  §3.1.
 - Collectors return **raw counters**. Rates are computed by the engine.
 - Collectors are stateless between calls where possible. Any state they
   keep must be bounded.
@@ -87,6 +87,41 @@ type Result struct {
   capabilities; other collectors are unaffected.
 - Collectors are listed explicitly by `linux.Collectors(env)`. There is no
   `init()` self-registration.
+
+### 3.1 Generic metrics (D22)
+
+A collector whose descriptor sets `GenericMetrics: true` returns a
+`core.GenericMetrics` record: a list of
+
+```go
+core.GenericMetric{
+    Name:   "custom.example.open_files", // must start with the collector ID + "."
+    Kind:   core.Gauge,                  // or core.Counter
+    Unit:   "count",
+    Labels: map[string]string{"kind": "allocated"},
+    Value:  4096,
+}
+```
+
+| Rule | Limit |
+|---|---|
+| Name | lower-case dotted, `^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$`, at most 128 characters, prefixed with the collector ID |
+| Kind | `gauge`, or `counter` (only increases; the engine derives a per-second rate and skips one rate after a reset) |
+| Unit | `bytes`, `bytes_per_second`, `percent`, `ratio`, `celsius`, `watts`, `volts`, `hertz`, `rpm`, `seconds`, `count`, `per_second`; counters use `bytes`, `count` or `seconds` |
+| Labels | at most 8; names `^[a-z][a-z0-9_]{0,31}$`; values at most 128 bytes |
+| Value | finite; counters not negative |
+| Series | at most 500 distinct name + label combinations per collector |
+
+Metrics that break a rule are dropped and counted. The first reason is
+reported as `dropped_series` and `problem` in the API and logged once
+when it changes. The rest of the collection is still published. Such a
+collector may declare its own capabilities named `<ID>.<name>`. Their
+best status is the set's availability. `HistoryMetrics` lists metric names to
+record in history: gauges by value, counters by rate, named
+`<name>[.<label values>]_<unit>`, within the overall 200-series limit.
+
+Generic metrics appear in `GET /metrics?sections=custom`, the diagnostic
+report and the TUI's Performance screen.
 
 ## 4. Capabilities
 

@@ -335,6 +335,9 @@ func (h *Resources) metrics(s *core.Snapshot, now time.Time, want map[string]boo
 	if want["gpu"] {
 		out.GPU = ptrTo(section(s.GPUs, now, h.gpus))
 	}
+	if want["custom"] {
+		out.Custom = ptrTo(customSets(s.Custom, now))
+	}
 	return out
 }
 
@@ -430,4 +433,33 @@ func (h *Resources) services(s *core.Snapshot, now time.Time, state string) apiv
 			return out
 		}),
 	}
+}
+
+// customSets maps generic metrics (D22).
+func customSets(in []core.CustomSet, now time.Time) []apiv1.CustomMetricsSet {
+	out := make([]apiv1.CustomMetricsSet, 0, len(in))
+	for _, cs := range in {
+		set := apiv1.CustomMetricsSet{Collector: cs.Collector, DroppedSeries: cs.Dropped, Problem: cs.Problem}
+		var data *[]core.CustomMetric
+		if cs.Metrics != nil {
+			data = &cs.Metrics
+		}
+		set.Section = section(core.Section[[]core.CustomMetric]{Meta: cs.Meta, Data: data}, now, func(v *[]core.CustomMetric) *[]apiv1.CustomMetric {
+			ms := make([]apiv1.CustomMetric, 0, len(*v))
+			for _, m := range *v {
+				labels := m.Labels
+				if labels == nil {
+					labels = map[string]string{}
+				}
+				cm := apiv1.CustomMetric{Name: m.Name, Kind: string(m.Kind), Unit: m.Unit, Labels: labels, Value: m.Value, RatePerSecond: m.RatePerSecond}
+				if m.Kind == core.Counter {
+					cm.RateUnit = core.RateUnit(m.Unit)
+				}
+				ms = append(ms, cm)
+			}
+			return &ms
+		})
+		out = append(out, set)
+	}
+	return out
 }
