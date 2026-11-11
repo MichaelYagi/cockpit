@@ -3,7 +3,9 @@
 package events
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -33,6 +35,13 @@ type Log struct {
 	seq  uint64 // last assigned sequence number
 	now  func() time.Time
 	subs map[*Subscription]struct{}
+
+	// Persistence (optional): events are queued for an async writer so
+	// publishing never blocks on storage.
+	store   Store
+	queue   chan StoredEvent
+	log     *slog.Logger
+	dropped int
 }
 
 // NewLog returns a log holding up to capacity events.
@@ -65,6 +74,13 @@ func (l *Log) Publish(e core.Event) core.Event {
 	}
 	for s := range l.subs {
 		s.push(e)
+	}
+	if l.queue != nil {
+		select {
+		case l.queue <- StoredEvent{Seq: l.seq, Event: e}:
+		default:
+			l.dropped++ // storage is behind; the event stays in memory
+		}
 	}
 	return e
 }
@@ -140,8 +156,10 @@ func (s *Subscription) Close() {
 
 // Filter selects events.
 type Filter struct {
-	MinSeverity core.Severity // empty = all
-	Since       time.Time     // zero = all
+	MinSeverity core.Severity  // empty = all
+	Since       time.Time      // zero = no lower bound
+	Until       time.Time      // zero = no upper bound (exclusive)
+	Type        core.EventType // empty = all
 }
 
 func severityRank(s core.Severity) int {
@@ -158,11 +176,30 @@ func (f Filter) match(e core.Event) bool {
 	if f.MinSeverity != "" && severityRank(e.Severity) < severityRank(f.MinSeverity) {
 		return false
 	}
+	if f.Type != "" && e.Type != f.Type {
+		return false
+	}
+	if !f.Until.IsZero() && !e.Time.Before(f.Until) {
+		return false
+	}
 	return f.Since.IsZero() || !e.Time.Before(f.Since)
 }
 
+// Severities returns the severities at or above min.
+func Severities(min core.Severity) []core.Severity {
+	var out []core.Severity
+	for _, s := range []core.Severity{core.SeverityInfo, core.SeverityWarning, core.SeverityCritical} {
+		if severityRank(s) >= severityRank(min) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // List returns up to limit matching events, newest first, and the cursor
-// for the next (older) page, or "" when there are no more.
+// for the next (older) page, or "" when there are no more. Recent events
+// come from memory; with a store attached, older ones continue from
+// storage below the oldest event held in memory.
 func (l *Log) List(f Filter, cursor string, limit int) ([]core.Event, string, error) {
 	before := uint64(0) // 0 = start from newest
 	if cursor != "" {
@@ -173,12 +210,10 @@ func (l *Log) List(f Filter, cursor string, limit int) ([]core.Event, string, er
 		before = n
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if before != 0 {
-		oldest := l.seq - uint64(l.n) + 1
-		if before > l.seq+1 || before < oldest {
-			return nil, "", ErrInvalidCursor
-		}
+	oldest := l.seq - uint64(l.n) + 1
+	if before != 0 && (before > l.seq+1 || (l.store == nil && before < oldest)) {
+		l.mu.Unlock()
+		return nil, "", ErrInvalidCursor
 	}
 	var out []core.Event
 	var lastSeq uint64
@@ -197,6 +232,27 @@ func (l *Log) List(f Filter, cursor string, limit int) ([]core.Event, string, er
 		}
 		out = append(out, e.ev)
 		lastSeq = e.seq
+	}
+	store := l.store
+	l.mu.Unlock()
+
+	if !more && store != nil && len(out) < limit+1 {
+		bound := oldest
+		if before != 0 && before < bound {
+			bound = before
+		}
+		older, err := store.ListEvents(context.Background(), f, bound, limit+1-len(out))
+		if err != nil {
+			return nil, "", err
+		}
+		for _, se := range older {
+			if len(out) == limit {
+				more = true
+				break
+			}
+			out = append(out, se.Event)
+			lastSeq = se.Seq
+		}
 	}
 	if !more {
 		return out, "", nil

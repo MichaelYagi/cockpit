@@ -64,6 +64,8 @@ type EventsQuery struct {
 	Cursor   string
 	Severity string // info | warning | critical
 	Since    time.Time
+	Until    time.Time
+	Type     string // e.g. "finding.raised"
 }
 
 // Events returns recent events, newest first.
@@ -80,6 +82,12 @@ func (c *Client) Events(ctx context.Context, q EventsQuery) (*apiv1.EventsRespon
 	}
 	if !q.Since.IsZero() {
 		v.Set("since", q.Since.UTC().Format(time.RFC3339))
+	}
+	if !q.Until.IsZero() {
+		v.Set("until", q.Until.UTC().Format(time.RFC3339))
+	}
+	if q.Type != "" {
+		v.Set("type", q.Type)
 	}
 	path := "/events"
 	if len(v) > 0 {

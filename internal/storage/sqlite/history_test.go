@@ -80,7 +80,7 @@ func TestHistoryPrune(t *testing.T) {
 
 func TestHistoryMigrationVersion(t *testing.T) {
 	db, _ := open(t)
-	if v, _ := db.SchemaVersion(context.Background()); v != 2 {
+	if v, _ := db.SchemaVersion(context.Background()); v != migrationCount(t) {
 		t.Errorf("schema version %d", v)
 	}
 }

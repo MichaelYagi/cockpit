@@ -346,7 +346,7 @@ paths:
       operationId: listEvents
       tags: [health]
       summary: Recent events, newest first
-      description: In-memory log of the most recent events (Phase 1). Use `next_cursor` to page through older events.
+      description: Events newest first, persisted for 30 days (at most 100,000). Use `next_cursor` to page through older events.
       x-cockpit-scope: metrics:read
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -361,6 +361,15 @@ paths:
           required: false
           description: Only events at or after this time (RFC 3339).
           schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          required: false
+          description: Only events before this time (RFC 3339).
+          schema: { type: string, format: date-time }
+        - name: type
+          in: query
+          required: false
+          schema: { type: string, enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked, settings.changed] }
       responses:
         "200":
           description: OK
@@ -1469,7 +1478,7 @@ components:
         time: { $ref: "#/components/schemas/Timestamp" }
         type:
           type: string
-          enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked]
+          enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked, settings.changed]
         severity: { type: string, enum: [info, warning, critical] }
         subject: { type: string }
         message: { type: string }

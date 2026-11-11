@@ -68,7 +68,7 @@ type EventSource interface {
 // Events serves GET /events.
 func Events(src EventSource, machineID core.MachineID, now func() time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !allowParams(w, r, "limit", "cursor", "severity", "since") {
+		if !allowParams(w, r, "limit", "cursor", "severity", "since", "until", "type") {
 			return
 		}
 		limit, ok := intParam(w, r, "limit", 50, 1, 500)
@@ -79,7 +79,19 @@ func Events(src EventSource, machineID core.MachineID, now func() time.Time) htt
 		if !ok {
 			return
 		}
-		f := events.Filter{Since: since}
+		until, ok := timeParam(w, r, "until")
+		if !ok {
+			return
+		}
+		f := events.Filter{Since: since, Until: until}
+		switch typ := core.EventType(r.URL.Query().Get("type")); typ {
+		case "", core.EventFindingRaised, core.EventFindingResolved, core.EventCollectorDegraded, core.EventCollectorRecovered,
+			core.EventKeyCreated, core.EventKeyRotated, core.EventKeyRevoked, core.EventSettingsChanged:
+			f.Type = typ
+		default:
+			badParam(w, r, "type", "is not a known event type")
+			return
+		}
 		switch sev := r.URL.Query().Get("severity"); sev {
 		case "":
 		case "info", "warning", "critical":

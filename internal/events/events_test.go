@@ -1,9 +1,12 @@
 package events
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,4 +148,104 @@ func TestSlowSubscriberDropsOldestWithoutBlocking(t *testing.T) {
 	if evs, _ := sub.Drain(); len(evs) != 0 {
 		t.Error("closed subscription still receives")
 	}
+}
+
+// memStore is an in-memory Store.
+type memStore struct {
+	mu    sync.Mutex
+	evs   []StoredEvent // ascending seq
+	block chan struct{}
+}
+
+func (m *memStore) AppendEvents(_ context.Context, evs []StoredEvent) error {
+	if m.block != nil {
+		<-m.block
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.evs = append(m.evs, evs...)
+	return nil
+}
+func (m *memStore) ListEvents(_ context.Context, f Filter, before uint64, limit int) ([]StoredEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []StoredEvent
+	for i := len(m.evs) - 1; i >= 0 && len(out) < limit; i-- {
+		if (before == 0 || m.evs[i].Seq < before) && f.match(m.evs[i].Event) {
+			out = append(out, m.evs[i])
+		}
+	}
+	return out, nil
+}
+func (m *memStore) RecentEvents(ctx context.Context, n int) ([]StoredEvent, error) {
+	return m.ListEvents(ctx, Filter{}, 0, n)
+}
+func (m *memStore) PruneEvents(context.Context, time.Time, int) error { return nil }
+
+func TestPersistedListingContinuesIntoStorage(t *testing.T) {
+	store := &memStore{}
+	for i := uint64(1); i <= 20; i++ { // events from before a restart
+		store.evs = append(store.evs, StoredEvent{Seq: i, Event: core.Event{ID: fmt.Sprintf("old%d", i), Time: t0, Message: fmt.Sprint(i)}})
+	}
+	l := NewLog(5, nil) // small ring: most history lives only in storage
+	if err := l.Persist(context.Background(), store, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { l.RunWriter(ctx); close(done) }()
+	l.Publish(core.Event{Message: "21"})
+	l.Publish(core.Event{Message: "22"})
+
+	var got []string
+	cursor := ""
+	for page := 0; page < 20; page++ {
+		evs, next, err := l.List(Filter{}, cursor, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range evs {
+			got = append(got, e.Message)
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	want := "22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1"
+	if strings.Join(got, ",") != want {
+		t.Errorf("paged across memory and storage:\n got %s\nwant %s", strings.Join(got, ","), want)
+	}
+	cancel()
+	<-done
+	if len(store.evs) != 22 || store.evs[21].Event.Message != "22" || store.evs[21].Seq != 22 {
+		t.Errorf("new events not written with continuing sequence numbers: %d", len(store.evs))
+	}
+}
+
+func TestPublishNeverBlocksOnStorage(t *testing.T) {
+	store := &memStore{block: make(chan struct{})}
+	l := NewLog(10, nil)
+	_ = l.Persist(context.Background(), store, slog.New(slog.DiscardHandler))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { l.RunWriter(ctx); close(done) }()
+	published := make(chan struct{})
+	go func() {
+		for i := 0; i < writeQueue*3; i++ {
+			l.Publish(core.Event{Message: "x"})
+		}
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Publish blocked on a stuck store")
+	}
+	if l.Dropped() == 0 {
+		t.Error("overflow not counted")
+	}
+	close(store.block)
+	cancel()
+	<-done
 }

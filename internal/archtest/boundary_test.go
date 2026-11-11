@@ -155,7 +155,7 @@ func TestEventsDependsOnDomainOnly(t *testing.T) {
 
 // Storage implements interfaces owned by domain packages.
 func TestStorageDependsOnDomainOnly(t *testing.T) {
-	rule(t, "internal/storage/...", hasPrefix("internal/core", "internal/auth", "internal/history"))
+	rule(t, "internal/storage/...", hasPrefix("internal/core", "internal/auth", "internal/history", "internal/events", "internal/ulid"))
 }
 
 // History records snapshots through an interface; it never reaches the

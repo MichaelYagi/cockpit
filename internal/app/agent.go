@@ -122,6 +122,9 @@ func Run(ctx context.Context, o Options) (err error) {
 	}
 	cleanup = append(cleanup, func(context.Context) error { return db.Close() })
 	eventLog := events.NewLog(events.DefaultCapacity, o.Now)
+	if err := eventLog.Persist(ctx, db, log.With("component", "events")); err != nil {
+		return fmt.Errorf("load events: %w", err)
+	}
 	publish := func(e core.Event) { eventLog.Publish(e) }
 	keys := auth.NewService(db, auth.ServiceOptions{Now: o.Now, Logger: log.With("component", "auth"), OnEvent: publish})
 	verifier := o.Verifier
@@ -131,6 +134,8 @@ func Run(ctx context.Context, o Options) (err error) {
 	cleanup = append(cleanup, stopBackground) // runs before db.Close
 	bg.Add(1)
 	go func() { defer bg.Done(); keys.RunFlusher(bgCtx, 30*time.Second) }()
+	bg.Add(1)
+	go func() { defer bg.Done(); eventLog.RunWriter(bgCtx) }()
 
 	// 3. Collectors and engine.
 	env := collector.DefaultEnv(log.With("component", "collector"), pathTools{})
