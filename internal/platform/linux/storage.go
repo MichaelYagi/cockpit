@@ -43,7 +43,7 @@ var skipFSTypes = map[string]bool{
 	"securityfs": true, "pstore": true, "bpf": true, "tracefs": true, "debugfs": true, "configfs": true,
 	"fusectl": true, "mqueue": true, "hugetlbfs": true, "autofs": true, "binfmt_misc": true,
 	"rpc_pipefs": true, "nsfs": true, "efivarfs": true, "selinuxfs": true, "tmpfs": true, "ramfs": true,
-	"squashfs": true, "iso9660": true,
+	"squashfs": true, "iso9660": true, "rootfs": true,
 }
 
 // networkFSTypes can block for a long time when a server is unreachable,
@@ -96,6 +96,11 @@ func (c *filesystemsCollector) Collect(ctx context.Context) collector.Result {
 			break
 		}
 		if skipFSTypes[m.fsType] || networkFSTypes[m.fsType] || seen[m.majorMinor] {
+			continue
+		}
+		// Overlays are container or system layers; only a root overlay (as
+		// in a container) represents the machine's storage.
+		if m.fsType == "overlay" && m.mountPoint != "/" {
 			continue
 		}
 		st, err := c.statfs(m.mountPoint)

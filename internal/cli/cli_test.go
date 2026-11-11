@@ -94,7 +94,7 @@ func TestTUIWithoutAgent(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "ckp")
 	defer os.RemoveAll(dir)
 	env, _, errb := testEnv("/h", nil)
-	code := Run(context.Background(), []string{"tui", "--socket", filepath.Join(dir, "missing.sock")}, env)
+	code := Run(context.Background(), []string{"tui", "--once", "--socket", filepath.Join(dir, "missing.sock")}, env)
 	if code != ExitError || !strings.Contains(errb.String(), "cockpit agent") {
 		t.Errorf("%d %s", code, errb)
 	}
@@ -102,7 +102,7 @@ func TestTUIWithoutAgent(t *testing.T) {
 
 func TestTUIRequiresKeyFromEnvForTCP(t *testing.T) {
 	env, _, errb := testEnv("/h", nil)
-	code := Run(context.Background(), []string{"tui", "--url", "http://127.0.0.1:7878"}, env)
+	code := Run(context.Background(), []string{"tui", "--once", "--url", "http://127.0.0.1:7878"}, env)
 	if code != ExitError || !strings.Contains(errb.String(), "COCKPIT_API_KEY") {
 		t.Errorf("%d %s", code, errb)
 	}
@@ -133,7 +133,7 @@ func TestAgentAndTUI(t *testing.T) {
 	}
 
 	tenv, tout, terr := testEnv(root, nil)
-	if code := Run(context.Background(), []string{"tui", "--socket", sock}, tenv); code != ExitOK {
+	if code := Run(context.Background(), []string{"tui", "--once", "--socket", sock}, tenv); code != ExitOK {
 		t.Errorf("tui exit %d: %s", code, terr)
 	}
 	if !strings.Contains(tout.String(), "Cockpit agent") || !strings.Contains(tout.String(), "machine:") {
@@ -303,5 +303,59 @@ func TestKeysUsage(t *testing.T) {
 	}
 	if code, _, _ := run(t, "", "keys", "create", "--socket", "/nonexistent.sock", "--name", "x"); code != ExitUsage {
 		t.Errorf("missing scope: %d", code)
+	}
+}
+
+func TestTUINeedsTerminal(t *testing.T) {
+	env, _, errb := testEnv("/h", nil)
+	if code := Run(context.Background(), []string{"tui"}, env); code != ExitUsage || !strings.Contains(errb.String(), "--once") {
+		t.Errorf("%d %s", code, errb)
+	}
+}
+
+// With no agent running on the default socket, the TUI starts an embedded
+// agent on a private socket, uses it through the API, and stops it on exit.
+func TestTUIEmbeddedAgent(t *testing.T) {
+	home, _ := os.MkdirTemp("", "ckp")
+	defer os.RemoveAll(home)
+	runtime := filepath.Join(home, "rt")
+	if err := os.MkdirAll(runtime, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env, out, errb := testEnv(home, map[string]string{"XDG_RUNTIME_DIR": runtime, "XDG_STATE_HOME": filepath.Join(home, "state")})
+	code := Run(context.Background(), []string{"tui", "--once"}, env)
+	if code != ExitOK {
+		t.Fatalf("exit %d: %s", code, errb)
+	}
+	if !strings.Contains(out.String(), "Cockpit agent") || !strings.Contains(out.String(), "linux.cpu") {
+		t.Errorf("summary:\n%s", out)
+	}
+	state := filepath.Join(home, "state", "cockpit-monitor")
+	if fi, err := os.Stat(filepath.Join(state, "embedded-agent.log")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("embedded log: %v", err)
+	}
+	// The private socket is gone and no TCP listener was opened.
+	entries, _ := os.ReadDir(filepath.Join(runtime, "cockpit-monitor"))
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sock") {
+			t.Errorf("socket left behind: %s", e.Name())
+		}
+	}
+	logs, _ := os.ReadFile(filepath.Join(state, "embedded-agent.log"))
+	if strings.Contains(string(logs), `"tcp":"127.0.0.1`) {
+		t.Error("embedded agent opened a TCP listener")
+	}
+}
+
+func TestTUIExplicitSocketDoesNotEmbed(t *testing.T) {
+	home, _ := os.MkdirTemp("", "ckp")
+	defer os.RemoveAll(home)
+	env, _, errb := testEnv(home, nil)
+	code := Run(context.Background(), []string{"tui", "--once", "--socket", filepath.Join(home, "none.sock")}, env)
+	if code != ExitError || !strings.Contains(errb.String(), "cockpit agent") {
+		t.Errorf("%d %s", code, errb)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "state", "cockpit-monitor")); err == nil {
+		t.Error("an embedded agent was started despite an explicit --socket")
 	}
 }

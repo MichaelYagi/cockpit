@@ -159,6 +159,8 @@ func TestFilesystems(t *testing.T) {
 27 22 0:40 / /mnt/nfs rw - nfs4 server:/export rw
 28 22 8:3 / /secret rw - ext4 /dev/sdc1 rw
 29 22 7:0 / /snap/core/1 ro - squashfs /dev/loop0 ro
+30 1 0:2 / /init ro - rootfs rootfs ro
+31 22 0:50 / /usr/lib/modules rw - overlay none rw
 `
 	root := tree(t, map[string]string{"proc/self/mountinfo": mountinfo})
 	c := newFilesystems(env(root))
@@ -188,7 +190,7 @@ func TestFilesystems(t *testing.T) {
 		t.Errorf("escaped mount %+v", fss[1])
 	}
 	for _, q := range queried {
-		if q == "/mnt/nfs" || q == "/proc" || q == "/run" || q == "/srv/home-bind" || q == "/snap/core/1" {
+		if q == "/mnt/nfs" || q == "/proc" || q == "/run" || q == "/srv/home-bind" || q == "/snap/core/1" || q == "/init" || q == "/usr/lib/modules" {
 			t.Errorf("statfs called on %s", q)
 		}
 	}
@@ -310,5 +312,15 @@ func TestSensorsNone(t *testing.T) {
 	wantStatus(t, r, core.CapSensorsThermal, core.Unsupported)
 	if len(r.Records) != 0 {
 		t.Error("records without sensors")
+	}
+}
+
+func TestFilesystemsRootOverlayKept(t *testing.T) {
+	root := tree(t, map[string]string{"proc/self/mountinfo": "1 0 0:30 / / rw - overlay overlay rw,lowerdir=/x\n"})
+	c := newFilesystems(env(root))
+	c.statfs = func(string) (fsStats, error) { return fsStats{total: 100, free: 50, avail: 50}, nil }
+	r := c.Collect(context.Background())
+	if fss := record[core.Filesystems](t, r); len(fss) != 1 || fss[0].Type != "overlay" {
+		t.Errorf("container root overlay dropped: %+v", fss)
 	}
 }
