@@ -13,8 +13,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/api/httpx"

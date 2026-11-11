@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -334,7 +335,7 @@ func TestTUIEmbeddedAgent(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d: %s", code, errb)
 	}
-	if !strings.Contains(out.String(), "Cockpit agent") || !strings.Contains(out.String(), "linux.cpu") {
+	if !strings.Contains(out.String(), "Cockpit agent") || !strings.Contains(out.String(), "collector "+goruntime.GOOS) {
 		t.Errorf("summary:\n%s", out)
 	}
 	state := filepath.Join(home, "state", "cockpit-monitor")

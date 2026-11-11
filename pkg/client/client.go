@@ -100,7 +100,7 @@ func NewUnix(socketPath string, opts ...Option) (*Client, error) {
 	}
 	o := build(opts)
 	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) { return dialAdmin(ctx, socketPath) },
+		DialContext:     func(ctx context.Context, _, _ string) (net.Conn, error) { return dialAdmin(ctx, socketPath) },
 		MaxIdleConns:    4,
 		IdleConnTimeout: 30 * time.Second,
 	}

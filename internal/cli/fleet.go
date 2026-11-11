@@ -37,12 +37,10 @@ Keys need system:read and metrics:read; add network:read only if you want
 network detail. Key files must be chmod 600.
 `
 
+// fleetPath is fleet.yaml in the user's configuration directory. The fleet
+// commands never start an agent, so the agent configuration is not loaded.
 func fleetPath(env Env) (string, error) {
-	res, err := config.Load(config.Source{Mode: config.ModeUser, Env: env.LookupEnv, Home: env.Home})
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(filepath.Dir(res.Paths.ConfigFile), fleet.FileName), nil
+	return filepath.Join(config.UserConfigDir(env.LookupEnv, env.Home), fleet.FileName), nil
 }
 
 func runFleet(ctx context.Context, args []string, env Env) int {

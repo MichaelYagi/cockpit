@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"runtime"
 )
 
 // Name is the directory name used for all system identifiers (D1).
@@ -16,9 +17,20 @@ type Paths struct {
 	SocketPath string
 }
 
-// maxSocketPath is the usable length of sockaddr_un.sun_path on Linux
-// (108 bytes including the terminating NUL).
-const maxSocketPath = 107
+// maxSocketPath is the usable length of sockaddr_un.sun_path: 108 bytes
+// on Linux and 104 on macOS and the BSDs, including the terminating NUL.
+var maxSocketPath = func() int {
+	if runtime.GOOS == "linux" {
+		return 107
+	}
+	return 103
+}()
+
+// UserConfigDir is the user-mode configuration directory, without loading
+// or validating a configuration (fleet.yaml lives here).
+func UserConfigDir(env func(string) (string, bool), home string) string {
+	return filepath.Dir(defaultPaths(ModeUser, env, home).ConfigFile)
+}
 
 // SystemPaths returns the system-mode default locations.
 func SystemPaths() Paths { return defaultPaths(ModeSystem, nil, "") }

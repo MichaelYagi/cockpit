@@ -96,4 +96,3 @@ func trustedSID(sid *windows.SID) bool {
 	me, err := windows.GetCurrentProcessToken().GetTokenUser()
 	return err == nil && windows.EqualSid(sid, me.User.Sid)
 }
-
