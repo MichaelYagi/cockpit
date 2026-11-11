@@ -51,6 +51,11 @@ reported as passing only after it was actually run.
 - Fuzz tests: `FuzzParsers` (every /proc, /sys and smartctl parser) and
   `FuzzParseKey`. Run with `go test -fuzz=<name> -fuzztime=30s <pkg>`.
 - Failed authentication from one IP never locks out a valid key.
+- Event streams: per-key limit, disconnect on revocation, shutdown with an
+  open stream.
+- Process cursors rejected when expired or when the query changes;
+  `processes:read` enforced.
+- Hostile process names and USB strings never reach the terminal raw.
 - `govulncheck` and `staticcheck` in CI.
 
 ## 4. Platform testing

@@ -108,9 +108,14 @@ A collector declares what it can **potentially** provide. `Probe` and each
 | `linux.network` | 1 | `network.interfaces`, `network.throughput` | `/sys/class/net`, `/proc/net/dev` |
 | `linux.sensors` | 1 | `sensors.thermal`, `sensors.fan` | `/sys/class/hwmon`, `/sys/class/thermal` |
 | `linux.smart` | 1 | `storage.smart` | `smartctl --json` (optional, ≥ 7.0), hourly |
-| `linux.processes` | 2 | `processes.list` | `/proc/[pid]` |
-| `linux.systemd` | 2 | `services.systemd` | systemd D-Bus |
-| `linux.gpu.*` | 2+ | `gpu.*` | Vendor libraries/tools |
+| `linux.processes` | 2 | `processes.list` | `/proc/[pid]`, `/etc/passwd`; on demand, never scheduled |
+| `linux.systemd` | 2 | `services.systemd` | systemd D-Bus `ListUnits` (godbus, D15), every 10s |
+| `linux.cpuinfo` | 2 | `hardware.cpu` | `/proc/cpuinfo`, `/sys/devices/system/cpu` |
+| `linux.pci` | 2 | `hardware.pci` | `/sys/bus/pci`, `pci.ids` when installed |
+| `linux.usb` | 2 | `hardware.usb` | `/sys/bus/usb`, `usb.ids` when installed |
+| `linux.dmi` | 2 | `hardware.board`, `hardware.memory_modules` | `/sys/class/dmi/id`, SMBIOS type 17 (root-only) |
+| `linux.gpu` | 2 | `gpu.devices`, `gpu.metrics` | PCI/DRM; `nvidia-smi` CSV query; `amdgpu` sysfs (D16); at least every 5s |
+| `linux.netconfig` | 2 | `network.routes`, `network.dns` | `/proc/net/route`, `/proc/net/ipv6_route`, `resolv.conf` |
 
 Filesystem collection skips pseudo, in-memory and image filesystems
 (`proc`, `sysfs`, `cgroup2`, `tmpfs`, `squashfs`, `rootfs`, …), overlays
@@ -129,6 +134,17 @@ Optional tools such as `smartctl` are:
 - Used only through structured output (`--json`). Human-readable output is
   never parsed.
 - Reported in `/status` as optional dependencies.
+
+Collectors that run an external tool declare `MinInterval` so
+configuration cannot schedule them more often than the tool tolerates.
+
+### On-demand collectors
+
+`linux.processes` implements `collector.ProcessLister` and is never
+scheduled. The engine samples it only when a client asks, caches the
+result for 2 seconds, takes two samples 0.5 seconds apart when no recent
+one exists (CPU usage needs a delta), and keeps a few recent views so
+cursors stay valid while paging.
 
 ## 6. Scheduling
 
