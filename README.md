@@ -62,6 +62,7 @@ One binary, several modes:
 
 ```text
 cockpit agent          # monitoring engine + API server
+cockpit                # in a terminal: same as cockpit tui; otherwise help
 cockpit tui            # terminal UI (API client)
 cockpit keys ...       # create / list / rotate / revoke API keys (local admin)
 cockpit report         # diagnostic report (Markdown or JSON, optionally anonymized)

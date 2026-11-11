@@ -29,7 +29,14 @@ func TestHelpAndUnknown(t *testing.T) {
 	if code := Run(context.Background(), nil, env); code != ExitOK || !strings.Contains(out.String(), "Commands:") {
 		t.Errorf("no args: %d %s", code, out)
 	}
-	env, _, errb := testEnv("/h", nil)
+	// In a terminal, no arguments means the TUI. A missing configuration
+	// file makes it fail before drawing anything, which shows the route.
+	env, _, errb := testEnv("/h", map[string]string{"COCKPIT_CONFIG": "/nonexistent/config.yaml"})
+	env.Interactive = true
+	if code := Run(context.Background(), nil, env); code != ExitError || !strings.Contains(errb.String(), "/nonexistent/config.yaml") {
+		t.Errorf("interactive no args: %d %s", code, errb)
+	}
+	env, _, errb = testEnv("/h", nil)
 	if code := Run(context.Background(), []string{"launch"}, env); code != ExitUsage || !strings.Contains(errb.String(), "unknown command") {
 		t.Errorf("unknown: %d %s", code, errb)
 	}

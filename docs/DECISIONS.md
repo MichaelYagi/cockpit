@@ -378,7 +378,7 @@ placeholders. Files are written `0600`.
 
 ## D22 — Generic metrics for extension collectors
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Add one open record type, `core.GenericMetric`, alongside the
 sealed built-in records (PLUGINS §3):
@@ -405,7 +405,7 @@ history.
 
 ## D23 — Compile-time extensions through a public collector SDK
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Third-party collectors are Go code compiled into a custom
 build. Nothing is loaded at runtime: no Go plugins, scripts or
@@ -437,7 +437,7 @@ stable.
 
 ## D24 — Containers from cgroup v2, without the engine socket
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** A `linux.containers` collector finds Docker, Podman
 (rootful and rootless) and containerd containers from the cgroup v2
@@ -456,7 +456,7 @@ cgroup v2 provides it without privileges. See Q8 for names and images.
 
 ## D25 — ZFS, batteries and UPS
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.**
 
@@ -483,7 +483,7 @@ structured data.
 
 ## D26 — Releases and SDK versioning
 
-**Status:** Proposed (2026-11-11)
+**Status:** Accepted (2026-11-11)
 
 **Decision.** Releases are git tags `vX.Y.Z`; Phase 4 ships `v0.4.0`. A
 release workflow (GitHub Actions, no new tools) builds `linux/amd64` and

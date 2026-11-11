@@ -46,6 +46,7 @@ func OSEnv() Env {
 const usage = `Cockpit: API-first machine monitoring.
 
 Usage:
+  cockpit                 open the terminal UI (in a terminal)
   cockpit <command> [flags]
 
 Commands:
@@ -64,6 +65,11 @@ Run "cockpit <command> -h" for command flags.
 // Run executes the command line and returns the process exit code.
 func Run(ctx context.Context, args []string, env Env) int {
 	if len(args) == 0 {
+		// In a terminal, bare "cockpit" opens the TUI (Q2); scripts and
+		// pipes get the help text.
+		if env.Interactive {
+			return runTUI(ctx, nil, env)
+		}
 		fmt.Fprint(env.Stdout, usage)
 		return ExitOK
 	}

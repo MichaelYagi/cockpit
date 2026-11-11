@@ -23,10 +23,11 @@ make check          # gofmt, vet, staticcheck, race tests, cross-compile
 ## Quick start (user mode)
 
 ```sh
-./bin/cockpit tui
+./bin/cockpit              # same as "cockpit tui" in a terminal
 ```
 
-If no agent is running, the TUI starts an embedded one for the session.
+Without a terminal (in a script or pipe), plain `cockpit` prints the help
+text instead; `cockpit help` always does. If no agent is running, the TUI starts an embedded one for the session.
 It listens only on a private socket and stops when you quit. To keep
 monitoring when the TUI is closed, and to allow API access from other
 programs, run the agent separately:
