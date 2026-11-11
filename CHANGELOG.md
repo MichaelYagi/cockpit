@@ -17,6 +17,12 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **TLS tooling (D29).** `cockpit tls init`, `renew` and `show` create and
+  manage a private CA and server certificate. Clients pin the certificate
+  (`--tls-fingerprint`, `COCKPIT_TLS_FINGERPRINT`,
+  `client.WithPinnedCertificate`) or trust the CA (`--tls-ca`,
+  `COCKPIT_TLS_CA`, `client.WithCAPEM`). The agent warns before expiry and
+  reports `tls_expires_at`.
 - Processes report their `executable` path (from `/proc/<pid>/exe`), or an
   `executable_reason` when it cannot be read. Command lines stay closed
   for good (D28).

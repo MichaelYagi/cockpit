@@ -92,6 +92,7 @@ need `metrics:read`. It does not open a route by itself.
 | Method | Path | Scope | Description |
 |---|---|---|---|
 | GET | `/status` | `system:read` | Collectors now carry `external` (built with the collector SDK, D23) and `sdk_version` |
+| GET | `/status` | `admin` part | TCP listeners with TLS report `tls_expires_at` (D29, Phase 5) |
 | GET | `/containers` | `processes:read` | Docker, Podman (rootful and rootless), containerd and CRI-O containers from cgroup v2, busiest first, at most 500: CPU % of one core, memory and limit, I/O rates, PIDs, rootless owner. No names or images (D24) |
 | GET | `/metrics?sections=power,ups` | `metrics:read` | Batteries and mains from sysfs; UPS from a Network UPS Tools server when enabled (D25) |
 | GET | `/storage` | `metrics:read` | Gains `zfs`: pool state, capacity and error counts (OpenZFS 2.3+ JSON), ARC size and hit rate (D25) |

@@ -123,8 +123,20 @@ product string.
 - The certificate and key are file paths. The agent refuses to start if the
   key file is readable by group or others.
 - No silent plaintext fallback.
-- Self-signed certificate generation is deferred. If added, it must come
-  with clear trust and bootstrap guidance.
+- `cockpit tls init` (D29) creates a private CA (ECDSA P-256, 10 years)
+  and a server certificate (1 year). Keys are written `0600` atomically, the
+  directory is `0700`, and the CA key never leaves root in system mode. The
+  CA is limited to one level (`MaxPathLenZero`).
+- Clients trust a server either through a CA (`--tls-ca`, system roots by
+  default) or by pinning the leaf certificate's SHA-256 fingerprint
+  (`--tls-fingerprint`). A pinned connection accepts exactly that
+  certificate, and only within its validity period. Pinning and private CAs
+  require `https`.
+- `client.ServerCertificate` reads a server's certificate without
+  trusting it, so its fingerprint can be confirmed before pinning. It never
+  sends a key.
+- The agent logs a warning daily from 30 days before its certificate
+  expires, and an error once it has expired.
 
 ## 9. Logging and audit
 

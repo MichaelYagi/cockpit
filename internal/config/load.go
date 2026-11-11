@@ -59,6 +59,8 @@ const (
 	EnvConfig        = "COCKPIT_CONFIG"
 	EnvAPIKey        = "COCKPIT_API_KEY"
 	EnvAPIURL        = "COCKPIT_API_URL"
+	EnvTLSPin        = "COCKPIT_TLS_FINGERPRINT"
+	EnvTLSCA         = "COCKPIT_TLS_CA"
 	envLogLevel      = "COCKPIT_LOG_LEVEL"
 	envLogFormat     = "COCKPIT_LOG_FORMAT"
 	envTCPEnabled    = "COCKPIT_API_TCP_ENABLED"
@@ -205,7 +207,7 @@ func applyFlags(f Overrides, cfg *Config) {
 }
 
 var knownEnv = map[string]bool{
-	EnvMode: true, EnvConfig: true, EnvAPIKey: true, EnvAPIURL: true,
+	EnvMode: true, EnvConfig: true, EnvAPIKey: true, EnvAPIURL: true, EnvTLSPin: true, EnvTLSCA: true,
 	envLogLevel: true, envLogFormat: true, envTCPEnabled: true, envTCPAddress: true,
 	envSocketEnabled: true, envSocketPath: true, envTLSCert: true, envTLSKey: true,
 	envStateDir: true, envRuntimeDir: true,

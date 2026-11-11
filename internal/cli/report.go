@@ -16,7 +16,7 @@ func runReport(ctx context.Context, args []string, env Env) int {
 	mode := fs.String("mode", "", `"user" or "system" (selects the default socket)`)
 	cfgPath := fs.String("config", "", "configuration file")
 	socket := fs.String("socket", "", "agent Unix socket path")
-	apiURL := fs.String("url", "", "agent URL for TCP access (env COCKPIT_API_URL); the key is read from COCKPIT_API_KEY")
+	remote := newRemoteFlags(fs)
 	format := fs.String("format", "markdown", "markdown or json")
 	anonymize := fs.Bool("anonymize", false, "replace host names, addresses, MAC addresses and user names with placeholders")
 	output := fs.String("o", "", "write to this file (created with mode 0600) instead of standard output")
@@ -28,7 +28,7 @@ func runReport(ctx context.Context, args []string, env Env) int {
 		return ExitUsage
 	}
 
-	c, target, err := connect(env, *mode, *cfgPath, *socket, *apiURL)
+	c, target, err := connect(env, *mode, *cfgPath, *socket, remote)
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
 		return ExitError

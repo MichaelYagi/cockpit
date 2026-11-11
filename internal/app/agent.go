@@ -240,7 +240,14 @@ func Run(ctx context.Context, o Options) (err error) {
 		open = append(open, apiv1.Listener{Transport: "unix", Address: ep.SocketPath})
 	}
 	if ep.TCPAddress != "" {
-		open = append(open, apiv1.Listener{Transport: "tcp", Address: ep.TCPAddress, TLS: ep.TCPTLS})
+		l := apiv1.Listener{Transport: "tcp", Address: ep.TCPAddress, TLS: ep.TCPTLS}
+		if !ep.TLSExpiresAt.IsZero() {
+			t := ep.TLSExpiresAt
+			l.TLSExpiresAt = &t
+			bg.Add(1)
+			go func() { defer bg.Done(); watchCertificate(bgCtx, log, t, o.Now) }()
+		}
+		open = append(open, l)
 	}
 	listeners.Store(&open)
 
@@ -338,5 +345,32 @@ func Thresholds(h config.Health) health.Thresholds {
 		StorageWarnPct: h.Storage.WarnPercent, StorageCriticalPct: h.Storage.CriticalPercent,
 		DiskWarnPercentageUsed: h.Disk.WarnPercentageUsed,
 		NetWarnErrorsPerMin:    h.Network.WarnErrorsPerMinute, NetCriticalErrorsPerMin: h.Network.CriticalErrorsPerMinute,
+	}
+}
+
+// certWarnBefore is how early the agent warns about certificate expiry.
+const certWarnBefore = 30 * 24 * time.Hour
+
+// watchCertificate logs a warning at start and daily while the TLS
+// certificate is within certWarnBefore of expiring, or has expired (D29).
+func watchCertificate(ctx context.Context, log *slog.Logger, expires time.Time, now func() time.Time) {
+	check := func() {
+		switch left := expires.Sub(now()); {
+		case left <= 0:
+			log.Error("TLS certificate has expired; clients will refuse it. Run: cockpit tls renew", "expired_at", expires)
+		case left < certWarnBefore:
+			log.Warn("TLS certificate expires soon. Run: cockpit tls renew", "expires_at", expires, "days_left", int(left.Hours()/24))
+		}
+	}
+	check()
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			check()
+		}
 	}
 }

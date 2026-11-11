@@ -251,20 +251,47 @@ The full contract is served at `/api/v1/openapi.json` and lives in
 
 ## Remote access
 
-By default TCP binds to `127.0.0.1` only. Remote access requires TLS:
+By default TCP binds to `127.0.0.1` only. Remote access requires TLS.
+Cockpit can create its own certificate (D29):
+
+```sh
+cockpit tls init --host box.example --host 192.0.2.7   # system mode: sudo cockpit tls init --mode system ...
+# paste the printed api: block into the configuration file, restart the agent
+```
+
+`tls init` writes a private CA and a server certificate into
+`<config dir>/tls/`. Keys are `0600`; in system mode the server key goes to
+the `cockpit-monitor` user and the CA key stays root-only. It prints the
+certificate's SHA-256 fingerprint. On the client:
+
+```sh
+export COCKPIT_API_KEY="$(cat box.key)"
+cockpit tui --url https://box.example:7878 --tls-fingerprint <fingerprint>   # pin this certificate
+cockpit tui --url https://box.example:7878 --tls-ca ca.pem                    # or trust the CA
+```
+
+Both also work as `COCKPIT_TLS_FINGERPRINT` and `COCKPIT_TLS_CA`, and in
+the Go SDK as `client.WithPinnedCertificate` and `client.WithCAPEM`.
+`cockpit tls show` prints the fingerprint again. Server certificates last
+a year, and the agent warns in its log 30 days before expiry. `/status`
+shows `tls_expires_at` to the local admin. `cockpit tls renew` issues a new
+one from the same CA. Clients that trust the CA need no change; pinned
+clients need the new fingerprint.
+
+A certificate from your own CA or ACME works too; set the two paths:
 
 ```yaml
-# ~/.config/cockpit-monitor/config.yaml
 api:
   tcp:
     address: 0.0.0.0:7878
   tls:
-    cert_file: /home/you/.config/cockpit-monitor/tls/cert.pem
-    key_file: /home/you/.config/cockpit-monitor/tls/key.pem   # must be chmod 600
+    cert_file: /etc/cockpit-monitor/tls/server.pem
+    key_file: /etc/cockpit-monitor/tls/server-key.pem   # must be chmod 600
 ```
 
-Without both files, the agent refuses to start. Clients refuse to send a
-key over plain HTTP to a non-loopback host.
+Without both files, the agent refuses to start on a non-loopback
+address. Clients refuse to send a key over plain HTTP to a non-loopback
+host.
 
 ## What you may see as "unavailable"
 

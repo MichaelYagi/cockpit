@@ -846,6 +846,7 @@ components:
               transport: { type: string, enum: [unix, tcp] }
               address: { type: string }
               tls: { type: boolean }
+              tls_expires_at: { type: string, format: date-time, description: When the TLS server certificate expires (D29). }
         requests:
           type: object
           additionalProperties: false

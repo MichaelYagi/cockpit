@@ -409,3 +409,81 @@ func TestSMARTHelperCommand(t *testing.T) {
 		t.Errorf("extra argument exit %d", code)
 	}
 }
+
+// D29: tls init, an agent serving it, and clients that pin the fingerprint
+// or trust the CA.
+func TestTLSEndToEnd(t *testing.T) {
+	root, _ := os.MkdirTemp("", "ckpt")
+	t.Cleanup(func() { os.RemoveAll(root) })
+	tlsDir := filepath.Join(root, "tls")
+	code, out, errOut := run(t, "", "tls", "init", "--dir", tlsDir, "--host", "127.0.0.1")
+	if code != ExitOK || !strings.Contains(out, "fingerprint: ") || !strings.Contains(out, "cert_file: "+filepath.Join(tlsDir, "server.pem")) {
+		t.Fatalf("tls init %d %s\n%s", code, errOut, out)
+	}
+	fp := strings.TrimSpace(strings.SplitN(strings.SplitN(out, "fingerprint: ", 2)[1], "\n", 2)[0])
+	if code, show, _ := run(t, "", "tls", "show", "--dir", tlsDir); code != ExitOK || !strings.Contains(show, fp) {
+		t.Errorf("tls show: %s", show)
+	}
+
+	cfg := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("api:\n  tls:\n    cert_file: "+filepath.Join(tlsDir, "server.pem")+"\n    key_file: "+filepath.Join(tlsDir, "server-key.pem")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(root, "run", "agent.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	aenv, _, aerr := testEnv(root, nil)
+	go func() {
+		done <- Run(ctx, []string{"agent", "--config", cfg, "--state-dir", filepath.Join(root, "state"), "--runtime-dir", filepath.Join(root, "run"), "--tcp-address", "127.0.0.1:0"}, aenv)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("agent did not stop")
+		}
+	})
+	var addr string
+	for deadline := time.Now().Add(10 * time.Second); addr == "" && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		c, err := client.NewUnix(sock)
+		if err != nil {
+			continue
+		}
+		if st, err := c.Status(context.Background()); err == nil && st.API != nil {
+			for _, l := range st.API.Listeners {
+				if l.Transport == "tcp" && l.TLS && l.TLSExpiresAt != nil {
+					addr = l.Address
+				}
+			}
+		}
+		c.Close()
+	}
+	if addr == "" {
+		t.Fatalf("TLS listener not reported:\n%s", aerr)
+	}
+	_, key, _ := run(t, "", "keys", "create", "--socket", sock, "--name", "tls", "--scope", "system:read")
+	key = strings.TrimSpace(key)
+
+	report := func(extra map[string]string, args ...string) (int, string) {
+		vars := map[string]string{"COCKPIT_API_KEY": key}
+		for k, v := range extra {
+			vars[k] = v
+		}
+		env, out, errb := testEnv(root, vars)
+		code := Run(context.Background(), append([]string{"report", "--url", "https://" + addr}, args...), env)
+		return code, out.String() + errb.String()
+	}
+	if code, out := report(nil, "--tls-fingerprint", fp); code != ExitOK || !strings.Contains(out, "# Cockpit diagnostic report") {
+		t.Errorf("pinned: %d %.300s", code, out)
+	}
+	if code, out := report(map[string]string{"COCKPIT_TLS_CA": filepath.Join(tlsDir, "ca.pem")}); code != ExitOK {
+		t.Errorf("CA from env: %d %.300s", code, out)
+	}
+	if code, out := report(nil, "--tls-fingerprint", strings.Repeat("0", 64)); code != ExitError || !strings.Contains(out, "does not match") {
+		t.Errorf("wrong pin: %d %.300s", code, out)
+	}
+	if code, _ := report(nil); code != ExitError {
+		t.Error("untrusted certificate accepted")
+	}
+}
