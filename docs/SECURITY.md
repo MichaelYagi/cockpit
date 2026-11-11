@@ -79,9 +79,11 @@ On Windows the local admin transport (D3) is a named pipe (D31):
 - Clients check that the pipe's server process runs as SYSTEM, an
   administrator or themselves before sending a request.
 - The client process ID is logged for audit; Windows has no UID.
-- Windows has no POSIX file modes. The state and configuration files rely
-  on the ACLs of the user's profile directory (user mode) or of
-  `%ProgramData%` (system mode), and the `0600` checks of Unix do not apply.
+- Windows has no POSIX file modes. State and configuration live in
+  `%LOCALAPPDATA%` and `%APPDATA%` (user mode), protected by the profile's
+  ACLs, or `%ProgramData%\cockpit-monitor` (system mode). The Unix `0600`
+  checks do not apply there; restrict `%ProgramData%\cockpit-monitor` to
+  SYSTEM and Administrators when running as a service.
 
 ## 4. API keys
 

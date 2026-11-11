@@ -38,6 +38,9 @@ func SystemPaths() Paths { return defaultPaths(ModeSystem, nil, "") }
 // defaultPaths returns the mode's default locations. env looks up
 // environment variables; home is the user's home directory.
 func defaultPaths(mode Mode, env func(string) (string, bool), home string) Paths {
+	if runtime.GOOS == "windows" {
+		return windowsPaths(mode, env, home)
+	}
 	if mode == ModeSystem {
 		return Paths{
 			Mode:       ModeSystem,

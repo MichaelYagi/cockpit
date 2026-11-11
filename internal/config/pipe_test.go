@@ -14,3 +14,24 @@ func TestIsPipe(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsPaths(t *testing.T) {
+	env := func(k string) (string, bool) {
+		v, ok := map[string]string{"ProgramData": `D:\Data`, "APPDATA": `C:\Users\u\AppData\Roaming`, "LOCALAPPDATA": `C:\Users\u\AppData\Local`}[k]
+		return v, ok
+	}
+	sys := windowsPaths(ModeSystem, env, "")
+	if sys.ConfigFile != `D:\Data\cockpit-monitor\config.yaml` || sys.StateDir != `D:\Data\cockpit-monitor\state` {
+		t.Errorf("system %+v", sys)
+	}
+	if def := windowsPaths(ModeSystem, nil, ""); def.StateDir != `C:\ProgramData\cockpit-monitor\state` {
+		t.Errorf("system default %+v", def)
+	}
+	u := windowsPaths(ModeUser, env, `C:\Users\u`)
+	if u.ConfigFile != `C:\Users\u\AppData\Roaming\cockpit-monitor\config.yaml` || u.StateDir != `C:\Users\u\AppData\Local\cockpit-monitor\state` {
+		t.Errorf("user %+v", u)
+	}
+	if f := windowsPaths(ModeUser, func(string) (string, bool) { return "", false }, `C:\Users\x`); f.StateDir != `C:\Users\x\AppData\Local\cockpit-monitor\state` {
+		t.Errorf("fallback %+v", f)
+	}
+}
