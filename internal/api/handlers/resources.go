@@ -288,3 +288,41 @@ func (h *Resources) Sensors(w http.ResponseWriter, r *http.Request) {
 	now := h.Now().UTC()
 	httpx.WriteJSON(w, http.StatusOK, apiv1.SensorsResponse{Meta: h.meta(now), Sensors: section(h.Snapshots.Current().Sensors, now, sensors)})
 }
+
+// Services serves GET /services.
+func (h *Resources) Services(w http.ResponseWriter, r *http.Request) {
+	if !allowParams(w, r, "state") {
+		return
+	}
+	state := r.URL.Query().Get("state")
+	switch state {
+	case "", "active", "failed", "inactive":
+	default:
+		badParam(w, r, "state", "must be active, failed or inactive")
+		return
+	}
+	now := h.Now().UTC()
+	httpx.WriteJSON(w, http.StatusOK, apiv1.ServicesResponse{
+		Meta: h.meta(now),
+		Services: section(h.Snapshots.Current().Services, now, func(v *core.Services) *apiv1.ServiceList {
+			out := &apiv1.ServiceList{Items: []apiv1.Service{}}
+			for _, s := range *v {
+				out.Total++
+				switch s.ActiveState {
+				case "active":
+					out.Active++
+				case "failed":
+					out.Failed++
+				case "inactive":
+					out.Inactive++
+				}
+				if state != "" && s.ActiveState != state {
+					continue
+				}
+				out.Items = append(out.Items, apiv1.Service{Name: s.Name, Description: s.Description, LoadState: s.LoadState,
+					ActiveState: s.ActiveState, SubState: s.SubState})
+			}
+			return out
+		}),
+	})
+}

@@ -153,6 +153,20 @@ type DiskHealth struct {
 // DiskHealthList is the disk health record.
 type DiskHealthList []DiskHealth
 
+// Service is one systemd service unit.
+type Service struct {
+	Name        string // e.g. "ssh.service"
+	Description string
+	LoadState   string // loaded, not-found, masked, ...
+	ActiveState string // active, inactive, failed, activating, deactivating, reloading
+	SubState    string // running, exited, dead, ...
+}
+
+// Services is the service record.
+type Services []Service
+
+func (Services) isRecord() {}
+
 func (*SystemInfo) isRecord()     {}
 func (*CPUCounters) isRecord()    {}
 func (*MemoryStats) isRecord()    {}

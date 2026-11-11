@@ -187,6 +187,7 @@ func TestEveryMethodSendsSpecValidRequests(t *testing.T) {
 			_, err := c.Processes(ctx, ProcessesQuery{Sort: "memory", Order: "asc", Search: "ng", Limit: 5, KernelThreads: true})
 			return err
 		},
+		func() error { _, err := c.Services(ctx, "failed"); return err },
 		func() error { _, err := c.ListKeys(ctx); return err },
 		func() error {
 			_, err := c.CreateKey(ctx, apiv1.CreateAPIKeyRequest{Name: "n", Scopes: []string{"metrics:read"}, ExpiresAt: &exp})

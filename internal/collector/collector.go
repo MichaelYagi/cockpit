@@ -84,12 +84,14 @@ type ToolFinder interface {
 }
 
 // Env is injected into collectors so they can be tested against fixture
-// trees and a fake clock. Production roots are "/proc", "/sys", "/etc", "/dev".
+// trees and a fake clock. Production roots are "/proc", "/sys", "/etc",
+// "/dev" and "/run".
 type Env struct {
 	ProcRoot string
 	SysRoot  string
 	EtcRoot  string
 	DevRoot  string
+	RunRoot  string // "/run"
 	Now      func() time.Time
 	Logger   *slog.Logger
 	Tools    ToolFinder
@@ -102,6 +104,7 @@ func DefaultEnv(logger *slog.Logger, tools ToolFinder) Env {
 		SysRoot:  "/sys",
 		EtcRoot:  "/etc",
 		DevRoot:  "/dev",
+		RunRoot:  "/run",
 		Now:      time.Now,
 		Logger:   logger,
 		Tools:    tools,

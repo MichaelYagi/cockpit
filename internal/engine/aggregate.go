@@ -22,6 +22,7 @@ const (
 	secBlockDevices
 	secSensors
 	secDiskHealth
+	secServices
 	numSections
 )
 
@@ -37,6 +38,7 @@ var sectionCaps = [numSections][]core.Capability{
 	secBlockDevices:   {core.CapStorageDevices},
 	secSensors:        {core.CapSensorsThermal, core.CapSensorsFan},
 	secDiskHealth:     {core.CapStorageSMART},
+	secServices:       {core.CapServicesSystemd},
 }
 
 func sectionOf(r core.Record) (section, bool) {
@@ -59,6 +61,8 @@ func sectionOf(r core.Record) (section, bool) {
 		return secSensors, true
 	case core.DiskHealthList:
 		return secDiskHealth, true
+	case core.Services:
+		return secServices, true
 	}
 	return 0, false
 }
@@ -224,6 +228,9 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 	case core.DiskHealthList:
 		c := append(core.DiskHealthList(nil), v...)
 		return &c
+	case core.Services:
+		c := append(core.Services(nil), v...)
+		return &c
 	}
 	return nil
 }
@@ -329,6 +336,7 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.BlockDevices = sec[core.BlockDevices](a, secBlockDevices)
 	snap.Sensors = sec[core.Sensors](a, secSensors)
 	snap.DiskHealth = sec[core.DiskHealthList](a, secDiskHealth)
+	snap.Services = sec[core.Services](a, secServices)
 
 	for _, r := range a.e.runners {
 		caps := make(map[core.Capability]core.CapabilityStatus, len(a.caps[r.desc.ID]))

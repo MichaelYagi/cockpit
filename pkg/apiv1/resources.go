@@ -399,3 +399,30 @@ type Process struct {
 
 // ProcessSorts are the valid values of ?sort= for /processes.
 var ProcessSorts = []string{"cpu", "memory", "pid", "name"}
+
+// ---- /services ----
+
+// ServicesResponse is GET /services.
+type ServicesResponse struct {
+	Meta
+	Services Section[ServiceList] `json:"services"`
+}
+
+// ServiceList is the systemd service list with counts by state. Counts
+// cover all services, even when ?state= filters the items.
+type ServiceList struct {
+	Total    int       `json:"total"`
+	Active   int       `json:"active"`
+	Failed   int       `json:"failed"`
+	Inactive int       `json:"inactive"`
+	Items    []Service `json:"items"`
+}
+
+// Service is one systemd service unit.
+type Service struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	LoadState   string `json:"load_state"`
+	ActiveState string `json:"active_state"`
+	SubState    string `json:"sub_state"`
+}

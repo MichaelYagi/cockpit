@@ -49,6 +49,7 @@ const (
 	CapSensorsThermal     Capability = "sensors.thermal"
 	CapSensorsFan         Capability = "sensors.fan"
 	CapProcessesList      Capability = "processes.list"
+	CapServicesSystemd    Capability = "services.systemd"
 )
 
 // KnownCapabilities returns every defined capability in a stable order.
@@ -60,7 +61,7 @@ func KnownCapabilities() []Capability {
 		CapStorageDevices, CapStorageFilesystems, CapStorageSMART,
 		CapNetworkInterfaces, CapNetworkThroughput,
 		CapSensorsThermal, CapSensorsFan,
-		CapProcessesList,
+		CapProcessesList, CapServicesSystemd,
 	}
 }
 

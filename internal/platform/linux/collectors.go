@@ -269,5 +269,6 @@ func Collectors(env collector.Env) []collector.Collector {
 		newSensors(env),
 		newSMART(env),
 		newProcesses(env),
+		newServices(env),
 	}
 }

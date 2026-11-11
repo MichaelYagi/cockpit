@@ -147,6 +147,31 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/services:
+    get:
+      operationId: listServices
+      tags: [machine]
+      summary: systemd services
+      description: Unit state from systemd over D-Bus, refreshed every 10 seconds. Counts cover all services even when `state` filters the items.
+      x-cockpit-scope: system:read
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [active, failed, inactive] }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServicesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/metrics:
     get:
       operationId: getMetrics
@@ -1188,6 +1213,50 @@ components:
         virtual_bytes: { type: integer, minimum: 0 }
         started_at: { type: [string, "null"], format: date-time }
         kernel_thread: { type: boolean }
+    ServicesResponse:
+      type: object
+      additionalProperties: false
+      required: [schema_version, machine_id, generated_at, services]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        services: { $ref: "#/components/schemas/ServicesSection" }
+    ServicesSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5).
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - $ref: "#/components/schemas/ServiceList"
+            - type: "null"
+    ServiceList:
+      type: object
+      additionalProperties: false
+      required: [total, active, failed, inactive, items]
+      properties:
+        total: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        inactive: { type: integer, minimum: 0 }
+        items: { type: array, items: { $ref: "#/components/schemas/Service" } }
+    Service:
+      type: object
+      additionalProperties: false
+      required: [name, description, load_state, active_state, sub_state]
+      properties:
+        name: { type: string, examples: [ssh.service] }
+        description: { type: string }
+        load_state: { type: string, examples: [loaded, not-found, masked] }
+        active_state: { type: string, examples: [active, inactive, failed, activating] }
+        sub_state: { type: string, examples: [running, exited, dead] }
     Scope:
       type: string
       enum: [system:read, metrics:read, processes:read, admin]

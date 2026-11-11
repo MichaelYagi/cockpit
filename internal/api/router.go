@@ -118,6 +118,7 @@ func Routes(d Deps) []Route {
 		{Method: get, Path: "/status", Scope: sys, Handler: handlers.Status(d.Status, admin, d.Now)},
 		{Method: get, Path: "/system", Scope: sys, Handler: res.System},
 		{Method: get, Path: "/hardware", Scope: sys, Handler: res.Hardware},
+		{Method: get, Path: "/services", Scope: sys, Handler: res.Services},
 		{Method: get, Path: "/metrics", Scope: met, Handler: res.Metrics},
 		{Method: get, Path: "/storage", Scope: met, Handler: res.Storage},
 		{Method: get, Path: "/network", Scope: met, Handler: res.Network},

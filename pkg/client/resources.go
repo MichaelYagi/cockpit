@@ -157,3 +157,13 @@ func (c *Client) Processes(ctx context.Context, q ProcessesQuery) (*apiv1.Proces
 	}
 	return get[apiv1.ProcessesResponse](ctx, c, path)
 }
+
+// Services lists systemd services; state filters by active state
+// ("active", "failed", "inactive", or "" for all). Requires system:read.
+func (c *Client) Services(ctx context.Context, state string) (*apiv1.ServicesResponse, error) {
+	path := "/services"
+	if state != "" {
+		path += "?state=" + url.QueryEscape(state)
+	}
+	return get[apiv1.ServicesResponse](ctx, c, path)
+}

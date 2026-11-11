@@ -44,6 +44,7 @@ type Snapshot struct {
 	BlockDevices   Section[BlockDevices]
 	Sensors        Section[Sensors]
 	DiskHealth     Section[DiskHealthList]
+	Services       Section[Services]
 
 	Collectors []CollectorStatus
 }

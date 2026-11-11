@@ -113,6 +113,10 @@ func testSnapshot() *core.Snapshot {
 		}},
 		Sensors:    core.Section[core.Sensors]{Meta: core.SectionMeta{Status: core.Unsupported, Source: "sysfs/hwmon", Reason: "No hardware temperature sensors are exposed."}},
 		DiskHealth: core.Section[core.DiskHealthList]{Meta: core.SectionMeta{Status: core.NotConfigured, Source: "smartctl", Reason: "smartctl is not installed."}},
+		Services: core.Section[core.Services]{Meta: meta(), Data: &core.Services{
+			{Name: "backup.service", Description: "Nightly backup", LoadState: "loaded", ActiveState: "failed", SubState: "failed"},
+			{Name: "ssh.service", Description: "OpenSSH", LoadState: "loaded", ActiveState: "active", SubState: "running"},
+		}},
 		Collectors: fakeStatus{}.Collectors(),
 	}
 }
@@ -273,6 +277,10 @@ func TestContract(t *testing.T) {
 		{"metrics bad section", tcp, "GET", "/api/v1/metrics?sections=cpu,gpu", []reqOpt{bearer(metricsKey)}, 400, apiv1.CodeInvalidParameter},
 		{"metrics needs metrics scope", tcp, "GET", "/api/v1/metrics", []reqOpt{bearer(systemKey)}, 403, apiv1.CodeInsufficientScope},
 		{"storage", tcp, "GET", "/api/v1/storage", []reqOpt{bearer(metricsKey)}, 200, ""},
+		{"services", tcp, "GET", "/api/v1/services", []reqOpt{bearer(systemKey)}, 200, ""},
+		{"services failed", tcp, "GET", "/api/v1/services?state=failed", []reqOpt{bearer(systemKey)}, 200, ""},
+		{"services bad state", tcp, "GET", "/api/v1/services?state=sleepy", []reqOpt{bearer(systemKey)}, 400, apiv1.CodeInvalidParameter},
+		{"services needs system scope", tcp, "GET", "/api/v1/services", []reqOpt{bearer(metricsKey)}, 403, apiv1.CodeInsufficientScope},
 		{"network", tcp, "GET", "/api/v1/network", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"sensors", tcp, "GET", "/api/v1/sensors", []reqOpt{bearer(metricsKey)}, 200, ""},
 		{"health", tcp, "GET", "/api/v1/health", []reqOpt{bearer(metricsKey)}, 200, ""},
@@ -693,5 +701,15 @@ func TestAccessLogHasNoSecrets(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("access log missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestServicesFilterAndCounts(t *testing.T) {
+	sock := router(t, newEnv(t, nil).d, Options{Listener: ListenerSocket})
+	var r apiv1.ServicesResponse
+	_ = json.Unmarshal(do(t, sock, "GET", "/api/v1/services?state=failed").body, &r)
+	d := r.Services.Data
+	if d.Total != 2 || d.Failed != 1 || d.Active != 1 || len(d.Items) != 1 || d.Items[0].Name != "backup.service" {
+		t.Errorf("%+v", d)
 	}
 }
