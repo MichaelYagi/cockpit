@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -21,10 +22,14 @@ func TestInitRenewAndModes(t *testing.T) {
 		t.Errorf("cert %v %v %v", cert.DNSNames, cert.IPAddresses, cert.NotAfter)
 	}
 	ca, caKey, srv, srvKey := Paths(dir)
-	for path, want := range map[string]os.FileMode{dir: 0o700, ca: 0o644, caKey: 0o600, srv: 0o644, srvKey: 0o600} {
-		fi, err := os.Stat(path)
-		if err != nil || fi.Mode().Perm() != want {
-			t.Errorf("%s mode %v, want %v (%v)", path, fi.Mode().Perm(), want, err)
+	// Windows has no POSIX modes; files under the user's profile are
+	// protected by its ACLs instead (docs/SECURITY.md).
+	if runtime.GOOS != "windows" {
+		for path, want := range map[string]os.FileMode{dir: 0o700, ca: 0o644, caKey: 0o600, srv: 0o644, srvKey: 0o600} {
+			fi, err := os.Stat(path)
+			if err != nil || fi.Mode().Perm() != want {
+				t.Errorf("%s mode %v, want %v (%v)", path, fi.Mode().Perm(), want, err)
+			}
 		}
 	}
 	// The pair loads, and the certificate chains to the CA.
