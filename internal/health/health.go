@@ -90,6 +90,9 @@ type Options struct {
 	Now        func() time.Time
 	Logger     *slog.Logger
 	Publish    func(core.Event) // finding raised/resolved events; optional
+	// Wait, if set, delays the first evaluation until it is closed (the
+	// engine's first collection round) or 3 seconds pass.
+	Wait <-chan struct{}
 }
 
 // Evaluator runs checks and holds the latest report.
@@ -145,6 +148,14 @@ func (e *Evaluator) Current() *Report { return e.report.Load() }
 
 // Run evaluates every interval until ctx is cancelled.
 func (e *Evaluator) Run(ctx context.Context, interval time.Duration) {
+	if e.opts.Wait != nil {
+		select {
+		case <-e.opts.Wait:
+		case <-time.After(3 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+	}
 	e.Evaluate()
 	t := time.NewTicker(interval)
 	defer t.Stop()

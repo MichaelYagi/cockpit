@@ -415,3 +415,38 @@ func TestCollectorTransitionEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestReadyAfterFirstRound(t *testing.T) {
+	slow := fast(collectortest.New("test.slow", core.CapMemoryUsage))
+	release := make(chan struct{})
+	slow.CollectFunc = func(context.Context) collector.Result {
+		<-release
+		return collector.Result{CollectedAt: time.Now(), Records: []core.Record{&core.MemoryStats{TotalBytes: 1}}, Status: avail(core.CapMemoryUsage)}
+	}
+	slow.Desc.DefaultTimeout = time.Minute
+	e := newEngine(t, slow)
+	e.Start(context.Background())
+	select {
+	case <-e.Ready():
+		t.Fatal("ready before the first collection")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-e.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatal("not ready after the first collection")
+	}
+}
+
+func TestReadyWithNothingScheduled(t *testing.T) {
+	f := collectortest.New("test.none", core.CapSensorsThermal)
+	f.ProbeStatus = map[core.Capability]core.CapabilityStatus{core.CapSensorsThermal: {Availability: core.Unsupported}}
+	e := newEngine(t, f)
+	e.Start(context.Background())
+	select {
+	case <-e.Ready():
+	case <-time.After(time.Second):
+		t.Fatal("ready never closed")
+	}
+}

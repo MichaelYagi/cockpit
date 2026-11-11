@@ -103,8 +103,8 @@ func (m *Model) header(w int) string {
 
 func (m *Model) tabs(w int) string {
 	var parts []string
-	for i, name := range screenNames {
-		label := tabLabel(screen(i), name)
+	for i := range screenNames {
+		label := tabLabel(screen(i), w)
 		if screen(i) == m.screen {
 			parts = append(parts, sTabOn.Render(label))
 		} else {
@@ -115,9 +115,21 @@ func (m *Model) tabs(w int) string {
 }
 
 func (m *Model) footer(w int) string {
-	hints := []string{"1-5 screens", "tab next", "r refresh", "? help", "q quit"}
-	if m.screen == scrAccess {
+	hints := []string{"1-9 screens", "tab next", "r refresh", "? help", "q quit"}
+	switch m.screen {
+	case scrAccess:
 		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "? help", "q quit"}
+	case scrProcesses:
+		hints = []string{"s sort:" + processSorts[m.procSort], "/ search", "k kernel threads", "esc clear", "q quit"}
+		if m.searching {
+			hints = []string{"type to search", "enter done", "esc clear"}
+		}
+	case scrServices:
+		label := "failed only"
+		if m.svcFailed {
+			label = "show all"
+		}
+		hints = []string{"f " + label, "1-9 screens", "? help", "q quit"}
 	}
 	if m.modal != modalNone {
 		hints = []string{"enter confirm", "esc cancel"}
@@ -264,6 +276,14 @@ func waiting() []string { return []string{sMuted.Render("waiting for data…")} 
 
 func (m *Model) screenView(w, h int) string {
 	switch m.screen {
+	case scrHardware:
+		return m.hardwareScreen(w, h)
+	case scrProcesses:
+		return m.processesScreen(w, h)
+	case scrServices:
+		return m.servicesScreen(w, h)
+	case scrEvents:
+		return m.eventsScreen(w, h)
 	case scrHealth:
 		return m.healthScreen(w, h)
 	case scrStorage:
@@ -289,6 +309,9 @@ func (m *Model) overview(w, h int) string {
 		{title: "System", lines: m.systemLines(inner)},
 		{title: "CPU", lines: m.cpuLines(inner)},
 		{title: "Memory", lines: m.memoryLines(inner)},
+	}
+	if g := m.gpuLines(inner); g != nil {
+		left = append(left, box{title: "GPU", lines: g, flex: true})
 	}
 	right := []box{
 		{title: "Health", lines: m.healthSummary(inner), flex: true},
@@ -561,13 +584,7 @@ func (m *Model) healthScreen(w, h int) string {
 		}
 	}
 	boxes := []box{{title: "Health checks", lines: lines, flex: true}}
-	var evLines []string
-	if m.events != nil {
-		for _, e := range m.events.Items {
-			sev := map[string]level{"info": lvNeutral, "warning": lvWarn, "critical": lvCrit}[e.Severity]
-			evLines = append(evLines, sMuted.Render(pad(e.Time.Local().Format("Jan 02 15:04:05"), 16))+badge(sev, pad(e.Severity, 8))+" "+e.Message)
-		}
-	}
+	evLines := m.eventLines(20)
 	if len(evLines) == 0 {
 		evLines = []string{sMuted.Render("no events yet")}
 	}
@@ -653,7 +670,11 @@ func (m *Model) networkScreen(w, h int) string {
 	}
 	sw := max(10, inner-16)
 	trend := []string{kv("rx", sparkline(m.rxHist, sw, 0)), kv("tx", sparkline(m.txHist, sw, 0))}
-	return column([]box{{title: "Interfaces" + staleMark(s), lines: lines, flex: true}, {title: "Throughput (all interfaces)", lines: trend}}, w, h)
+	return column([]box{
+		{title: "Interfaces" + staleMark(s), lines: lines, flex: true},
+		{title: "Throughput (all interfaces)", lines: trend},
+		{title: "Addresses, routes and DNS", lines: m.netConfigLines(inner), flex: true},
+	}, w, h)
 }
 
 func (m *Model) accessScreen(w, h int) string {
@@ -789,10 +810,17 @@ func (m *Model) modalView(w int) string {
 func (m *Model) helpView(w, h int) string {
 	lines := []string{
 		sBold.Render("Navigation"),
-		kv("1-5", "switch screen") + "      " + kv("tab", "next screen"),
+		kv("1-9", "switch screen") + "      " + kv("tab", "next screen"),
 		kv("←/→", "previous / next") + "    " + kv("click", "tab bar"),
 		kv("r", "refresh now") + "        " + kv("?", "toggle help"),
 		kv("q", "quit"),
+		"",
+		sBold.Render("Processes"),
+		kv("s", "change sort") + "        " + kv("/", "search"),
+		kv("k", "kernel threads") + "     " + kv("esc", "clear search"),
+		"",
+		sBold.Render("Services"),
+		kv("f", "failed only / all"),
 		"",
 		sBold.Render("API Access"),
 		kv("↑/↓", "select key") + "        " + kv("n", "create key"),
@@ -805,3 +833,344 @@ func (m *Model) helpView(w, h int) string {
 	}
 	return column([]box{{title: "Help", lines: lines}}, w, h)
 }
+
+// ---- Phase 2 screens ----
+
+func optPct(p *float64) string {
+	if p == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%.0f%%", *p)
+}
+
+func (m *Model) gpuLines(inner int) []string {
+	if m.metrics == nil || m.metrics.GPU == nil || m.metrics.GPU.Data == nil || len(*m.metrics.GPU.Data) == 0 {
+		return nil
+	}
+	var out []string
+	barW := max(8, inner-16)
+	for _, g := range *m.metrics.GPU.Data {
+		out = append(out, sBold.Render(g.Name)+sMuted.Render("  "+g.Driver+" "+g.DriverVersion))
+		if g.UtilizationPercent != nil {
+			out = append(out, kv("busy", bar(*g.UtilizationPercent, barW, percentLevel(*g.UtilizationPercent, 90, 98))+" "+pct(*g.UtilizationPercent)))
+		}
+		if g.MemoryTotalBytes != nil && g.MemoryUsedBytes != nil && *g.MemoryTotalBytes > 0 {
+			p := float64(*g.MemoryUsedBytes) / float64(*g.MemoryTotalBytes) * 100
+			out = append(out, kv("vram", bar(p, barW, percentLevel(p, 90, 97))+" "+pct(p)))
+		}
+		var extra []string
+		if g.TemperatureCelsius != nil {
+			extra = append(extra, percentLevel(*g.TemperatureCelsius, 83, 90).style().Render(fmt.Sprintf("%.0f °C", *g.TemperatureCelsius)))
+		}
+		if g.PowerWatts != nil {
+			p := fmt.Sprintf("%.0f W", *g.PowerWatts)
+			if g.PowerLimitWatts != nil {
+				p += fmt.Sprintf(" of %.0f W", *g.PowerLimitWatts)
+			}
+			extra = append(extra, p)
+		}
+		if g.FanPercent != nil {
+			extra = append(extra, "fan "+optPct(g.FanPercent))
+		}
+		if len(extra) > 0 {
+			out = append(out, kv("", strings.Join(extra, sMuted.Render(" · "))))
+		}
+		if g.MetricsSource == "" {
+			out = append(out, sMuted.Render("no metrics source for this GPU"))
+		}
+	}
+	return out
+}
+
+func (m *Model) hardwareScreen(w, h int) string {
+	if m.hardware == nil {
+		return column([]box{{title: "Hardware", lines: waiting()}}, w, h)
+	}
+	hw := m.hardware
+	inner := w - 4
+	var cpu []string
+	if c := hw.CPU.Data; c != nil {
+		cpu = append(cpu, kvw("model", sBold.Render(c.ModelName)), kvw("vendor", c.Vendor+sMuted.Render(fmt.Sprintf("  family %s model %s stepping %s", c.Family, c.Model, c.Stepping))))
+		topo := fmt.Sprintf("%d socket(s) · %d cores · %d threads", c.Sockets, c.Cores, c.LogicalCores)
+		if c.MaxFrequencyMHz != nil {
+			topo += fmt.Sprintf(" · up to %.2f GHz", *c.MaxFrequencyMHz/1000)
+		}
+		cpu = append(cpu, kvw("layout", topo))
+		var caches []string
+		for _, ca := range c.Caches {
+			caches = append(caches, fmt.Sprintf("L%d %s %s", ca.Level, strings.ToLower(ca.Type[:min(1, len(ca.Type))]), bytes(ca.SizeBytes)))
+		}
+		if len(caches) > 0 {
+			cpu = append(cpu, kvw("caches", strings.Join(caches, sMuted.Render(" · "))))
+		}
+		features := strings.Join(c.Flags, " ")
+		if c.Virtualization != "" {
+			features = c.Virtualization + "  " + features
+		}
+		if c.Hypervisor {
+			features += sMuted.Render("  (running in a virtual machine)")
+		}
+		cpu = append(cpu, kvw("features", features))
+	} else {
+		cpu = unavailable(hw.CPU, inner)
+	}
+
+	var mem []string
+	if d := hw.Memory.Data; d != nil {
+		mem = append(mem, kvw("total", bytes(d.TotalBytes))+sMuted.Render("  swap "+bytes(d.SwapTotalBytes)))
+	}
+	if mm := hw.MemoryModules; mm.Data != nil {
+		for _, mod := range *mm.Data {
+			mem = append(mem, pad(mod.Locator, 12)+pad(bytes(mod.SizeBytes), 11)+pad(mod.Type, 7)+pad(fmt.Sprintf("%d MT/s", mod.SpeedMTs), 11)+sMuted.Render(mod.Manufacturer+" "+mod.PartNumber))
+		}
+	} else {
+		mem = append(mem, sMuted.Render("modules: "+availabilityText(mm.Status)+" — "+mm.Reason))
+	}
+
+	var board []string
+	if b := hw.Board.Data; b != nil {
+		board = append(board, kvw("system", strings.TrimSpace(b.SystemVendor+" "+b.ProductName)), kvw("board", strings.TrimSpace(b.BoardVendor+" "+b.BoardName)),
+			kvw("firmware", strings.TrimSpace(b.BIOSVendor+" "+b.BIOSVersion+" "+b.BIOSDate)))
+		if b.ChassisType != "" {
+			board = append(board, kvw("chassis", b.ChassisType))
+		}
+	} else {
+		board = unavailable(hw.Board, inner)
+	}
+
+	var gpus []string
+	if g := hw.GPUs; g.Data != nil {
+		for _, d := range *g.Data {
+			mem := ""
+			if d.MemoryTotalBytes != nil {
+				mem = "  " + bytes(*d.MemoryTotalBytes)
+			}
+			gpus = append(gpus, sBold.Render(d.Name)+sMuted.Render(mem+"  "+d.Driver+" "+d.DriverVersion+"  "+d.PCIAddress))
+		}
+	} else {
+		gpus = unavailable(g, inner)
+	}
+
+	var devs []string
+	if p := hw.PCIDevices; p.Data != nil {
+		for _, d := range *p.Data {
+			name := d.DeviceName
+			if name == "" {
+				name = d.VendorID + ":" + d.DeviceID
+			}
+			devs = append(devs, sMuted.Render(pad(d.Address, 14))+pad(d.ClassName, 26)+pad(strings.TrimSpace(d.VendorName+" "+name), max(10, inner-56))+sMuted.Render(d.Driver))
+		}
+	} else {
+		devs = unavailable(p, inner)
+	}
+	if u := hw.USBDevices; u.Data != nil {
+		for _, d := range *u.Data {
+			devs = append(devs, sMuted.Render(pad("usb "+d.Path, 14))+pad(strings.TrimSpace(d.Manufacturer+" "+d.Product), max(10, inner-14)))
+		}
+	} else {
+		devs = append(devs, sMuted.Render("USB: "+availabilityText(u.Status)+" — "+u.Reason))
+	}
+
+	return column([]box{
+		{title: "Processor", lines: cpu},
+		{title: "Graphics", lines: gpus},
+		{title: "Memory", lines: mem, flex: true},
+		{title: "System and firmware", lines: board},
+		{title: "Devices (PCI, USB)", lines: devs, flex: true},
+	}, w, h)
+}
+
+func (m *Model) processesScreen(w, h int) string {
+	inner := w - 4
+	title := "Processes · sorted by " + processSorts[m.procSort]
+	if m.procSearch != "" || m.searching {
+		cursor := ""
+		if m.searching {
+			cursor = sAccent.Render("█")
+		}
+		title += " · search: " + m.procSearch + cursor
+	}
+	if m.procKernel {
+		title += " · with kernel threads"
+	}
+	var lines []string
+	switch {
+	case m.procsErr != "":
+		lines = []string{sCrit.Render("✖ " + m.procsErr)}
+		if strings.Contains(m.procsErr, "processes:read") {
+			lines = append(lines, sMuted.Render("Create a key with the processes:read scope, or use the local admin socket."))
+		}
+	case m.procs == nil:
+		lines = waiting()
+	case m.procs.Status != apiv1.Available:
+		lines = []string{badge(lvUnknown, availabilityText(m.procs.Status)), sMuted.Render(m.procs.Reason)}
+	default:
+		p := m.procs
+		nameW := max(10, inner-63)
+		lines = append(lines, sMuted.Render(padLeft("PID", 7)+"  "+pad("USER", 12)+padLeft("CPU%", 7)+padLeft("MEM%", 7)+padLeft("RSS", 11)+padLeft("THR", 5)+"  "+pad("S", 3)+pad("NAME", nameW)))
+		for _, pr := range p.Items {
+			cpu := "—"
+			cl := lvNeutral
+			if pr.CPUPercent != nil {
+				cpu = fmt.Sprintf("%.1f", *pr.CPUPercent)
+				cl = percentLevel(*pr.CPUPercent, 50, 90)
+			}
+			state := pr.State
+			if state == "D" || state == "Z" {
+				state = sWarn.Render(state)
+			}
+			name := pr.Name
+			if pr.KernelThread {
+				name = sMuted.Render("[" + name + "]")
+			}
+			lines = append(lines, padLeft(fmt.Sprint(pr.PID), 7)+"  "+pad(pr.User, 12)+cl.style().Render(padLeft(cpu, 7))+padLeft(fmt.Sprintf("%.1f", pr.MemoryPercent), 7)+
+				padLeft(bytes(pr.RSSBytes), 11)+padLeft(fmt.Sprint(pr.Threads), 5)+"  "+pad(state, 3)+pad(name, nameW))
+		}
+		note := fmt.Sprintf("%d processes", p.Total)
+		if p.Total > len(p.Items) {
+			note = fmt.Sprintf("top %d of %d processes", len(p.Items), p.Total)
+		}
+		note += fmt.Sprintf(" · CPU %% of one core over %.1fs · command lines are not shown", p.WindowSeconds)
+		lines = append(lines, sMuted.Render(note))
+		if p.Partial {
+			lines = append(lines, sWarn.Render("▲ "+p.Reason))
+		}
+	}
+	return column([]box{{title: title, lines: lines, flex: true}}, w, h)
+}
+
+func (m *Model) servicesScreen(w, h int) string {
+	inner := w - 4
+	var lines []string
+	title := "Services"
+	switch {
+	case m.svcErr != "":
+		lines = []string{sCrit.Render("✖ " + m.svcErr)}
+	case m.services == nil:
+		lines = waiting()
+	case m.services.Services.Data == nil:
+		lines = unavailable(m.services.Services, inner)
+	default:
+		d := m.services.Services.Data
+		title = fmt.Sprintf("Services · %d total · %d active · %d inactive · ", d.Total, d.Active, d.Inactive)
+		if d.Failed > 0 {
+			title += sCrit.Render(fmt.Sprintf("%d failed", d.Failed))
+		} else {
+			title += sOK.Render("none failed")
+		}
+		items := append([]apiv1.Service(nil), d.Items...)
+		sort.SliceStable(items, func(i, j int) bool {
+			rank := func(s apiv1.Service) int {
+				switch s.ActiveState {
+				case "failed":
+					return 0
+				case "active":
+					return 1
+				}
+				return 2
+			}
+			return rank(items[i]) < rank(items[j])
+		})
+		nameW := min(40, max(20, inner/3))
+		for _, s := range items {
+			if m.svcFailed && s.ActiveState != "failed" {
+				continue
+			}
+			var st string
+			switch s.ActiveState {
+			case "failed":
+				st = badge(lvCrit, pad("failed", 9))
+			case "active":
+				st = badge(lvOK, pad("active", 9))
+			case "activating", "deactivating", "reloading":
+				st = badge(lvWarn, pad(s.ActiveState, 9))
+			default:
+				st = sMuted.Render("○ " + pad(s.ActiveState, 9))
+			}
+			lines = append(lines, pad(s.Name, nameW)+" "+st+" "+sMuted.Render(pad(s.SubState, 9)+" "+s.Description))
+		}
+		if len(lines) == 0 {
+			lines = []string{sOK.Render("● No failed services.")}
+		}
+	}
+	return column([]box{{title: title, lines: lines, flex: true}}, w, h)
+}
+
+// eventLines renders the newest events.
+func (m *Model) eventLines(limit int) []string {
+	var out []string
+	for i, e := range m.eventList {
+		if limit > 0 && i == limit {
+			break
+		}
+		sev := map[string]level{"info": lvNeutral, "warning": lvWarn, "critical": lvCrit}[e.Severity]
+		out = append(out, sMuted.Render(pad(e.Time.Local().Format("Jan 02 15:04:05"), 16))+badge(sev, pad(e.Severity, 8))+" "+e.Message)
+	}
+	if len(out) == 0 {
+		out = []string{sMuted.Render("no events yet")}
+	}
+	return out
+}
+
+func (m *Model) eventsScreen(w, h int) string {
+	status := badge(lvOK, "live")
+	switch {
+	case m.streamLive:
+	case m.streamErr != "":
+		status = badge(lvWarn, "reconnecting") + sMuted.Render(" — "+m.streamErr)
+	default:
+		status = badge(lvUnknown, "connecting")
+	}
+	title := "Events · " + status + sMuted.Render(fmt.Sprintf(" · %d shown, newest first", len(m.eventList)))
+	return column([]box{{title: title, lines: m.eventLines(0), flex: true}}, w, h)
+}
+
+func (m *Model) netConfigLines(inner int) []string {
+	if m.network == nil {
+		return waiting()
+	}
+	n := m.network
+	var out []string
+	if d := n.Interfaces.Data; d != nil {
+		for _, ni := range *d {
+			if len(ni.Addresses) > 0 {
+				out = append(out, sMuted.Render(pad(ni.Name, 12))+strings.Join(ni.Addresses, "  "))
+			}
+		}
+	}
+	if r := n.Routes.Data; r != nil {
+		for _, rt := range *r {
+			if !rt.Default {
+				continue
+			}
+			via := rt.Gateway
+			if via == "" {
+				via = "direct"
+			}
+			out = append(out, sMuted.Render(pad("default", 12))+"via "+via+sMuted.Render(fmt.Sprintf(" dev %s metric %d (%s)", rt.Interface, rt.Metric, rt.Family)))
+		}
+	} else {
+		out = append(out, sMuted.Render("routes: "+availabilityText(n.Routes.Status)))
+	}
+	if d := n.DNS.Data; d != nil {
+		dns := strings.Join(d.Nameservers, ", ")
+		if dns == "" {
+			dns = sWarn.Render("no nameservers configured")
+		}
+		line := sMuted.Render(pad("dns", 12)) + dns
+		if d.Resolver == "systemd-resolved" {
+			line += sMuted.Render("  (via systemd-resolved)")
+		}
+		if len(d.Search) > 0 {
+			line += sMuted.Render("  search " + strings.Join(d.Search, " "))
+		}
+		out = append(out, line)
+	} else {
+		out = append(out, sMuted.Render("dns: "+availabilityText(n.DNS.Status)))
+	}
+	_ = inner
+	return out
+}
+
+// kvw is kv with a fixed label width of 9 (labels up to "features").
+func kvw(k, v string) string { return sMuted.Render(pad(k, 9)) + v }

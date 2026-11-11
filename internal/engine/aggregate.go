@@ -129,7 +129,8 @@ type aggregator struct {
 	prevNet   map[string]core.NetInterface
 	prevNetAt time.Time
 
-	degraded map[string]bool // "collector|capability" currently degraded
+	degraded map[string]bool  // "collector|capability" currently degraded
+	pending  map[*runner]bool // scheduled collectors that have not reported yet
 }
 
 func newAggregator(e *Engine, probes []map[core.Capability]core.CapabilityStatus) *aggregator {
@@ -185,6 +186,13 @@ func (a *aggregator) run(ctx context.Context) {
 		case o := <-a.e.results:
 			a.apply(o)
 			a.e.current.Store(a.publish())
+			if a.pending != nil {
+				delete(a.pending, o.runner)
+				if len(a.pending) == 0 {
+					a.pending = nil
+					a.e.markReady()
+				}
+			}
 		}
 	}
 }

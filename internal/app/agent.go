@@ -151,6 +151,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		Now:        o.Now,
 		Logger:     log.With("component", "health"),
 		Publish:    publish,
+		Wait:       eng.Ready(),
 	})
 	bg.Add(1)
 	go func() { defer bg.Done(); evaluator.Run(bgCtx, cfg.Health.Interval) }()

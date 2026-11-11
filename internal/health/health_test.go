@@ -362,3 +362,28 @@ func TestNetworkErrorRate(t *testing.T) {
 		t.Errorf("counter reset must not count: %+v", c)
 	}
 }
+
+func TestRunWaitsForFirstData(t *testing.T) {
+	wait := make(chan struct{})
+	source := &src{s: healthy()}
+	var evaluated sync.WaitGroup
+	evaluated.Add(1)
+	e := New(source, Options{Thresholds: defaultThresholds, Confirm: 1, Now: func() time.Time { return t0 }, Wait: wait})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { e.Run(ctx, time.Hour); close(done) }()
+	time.Sleep(50 * time.Millisecond)
+	if e.Current().Status != StatusUnknown {
+		t.Error("evaluated before the engine's first round")
+	}
+	close(wait)
+	deadline := time.Now().Add(2 * time.Second)
+	for e.Current().Status == StatusUnknown && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if e.Current().Status != StatusOK {
+		t.Error("not evaluated after the first round")
+	}
+	cancel()
+	<-done
+}
