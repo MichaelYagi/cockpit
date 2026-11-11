@@ -158,10 +158,38 @@ with checksums and a documented Go SDK is published.
 
 ## Phase 5 — Multi-machine and cross-platform
 
-- Remote TLS guidance and certificate tooling.
-- Agent identity and enrollment design; fleet console.
-- Windows and macOS collectors; Windows named-pipe admin transport.
-- Platform capability conformance tests.
+**Status: done, approved and merged (PR #7).** Decisions D27–D32 accepted
+(D31 with the clarification noted there). Verified:
+
+- on Linux, end to end: TLS init and pinning, and fleet enrollment and
+  identity refusal;
+- on real macOS and Windows CI runners: the conformance suite, collector
+  value checks, and the CLI and agent suites. On Windows that includes an
+  agent reached over its named pipe.
+
+macOS and Windows were never run interactively here, so the TUI on those
+systems is checked only by the same tests.
+
+| # | Milestone | Depends on |
+|---|---|---|
+| 5A ✓ | `network:read` scope (D27): addresses, routes and DNS gated; existing metrics keys migrated; TUI and report handle the missing data | — |
+| 5B ✓ | Command lines closed (D28): `executable` and `executable_reason` on processes | — |
+| 5C ✓ | TLS tooling (D29): `cockpit tls init/renew/show`, client pinning and private CA trust in the SDK, TUI and CLI, expiry warning and `tls_expires_at` | — |
+| 5D ✓ | Fleet enrollment (D30): `cockpit fleet add/list/remove/check`, `fleet.yaml` with mode checks, identity pinning | 5A, 5C |
+| 5E ✓ | Fleet console (D30): concurrent polling, overview table, open a machine in the full TUI, identity-change refusal | 5D |
+| 5F ✓ | Platform conformance suite run against every platform's collectors (descriptors, statuses, reasons, cancellation, declared capabilities only); CI on Linux, macOS and Windows | — |
+| 5G ✓ | macOS and Windows collectors (D32) | 5F |
+| 5H ✓ | Windows named-pipe admin transport (D31): listener, client and `--pipe` flag | 5G |
+| 5I ✓ | Docs, spec and security review; release `v0.5.0` | all |
+
+**Exit criteria:** remote access with TLS is a two-command setup; one
+console watches many machines without a central server and refuses
+changed identities; network layout and command lines are protected by
+default; Cockpit runs on macOS and Windows with honest capability
+reporting, checked by the same conformance suite in CI.
+
+**Not in Phase 5:** push-based enrollment, a web UI, write operations,
+cgo-based macOS metrics.
 
 ## Open questions
 
@@ -170,8 +198,8 @@ with checksums and a documented Go SDK is published.
 | Q1 | How does disk health (D11) get SMART privileges without running the agent as root? | 3 | **Phase 1 done as approved:** the agent runs `smartctl` directly and reports `permission_denied` when unprivileged. **Phase 3 done (D20):** `cockpit-smart.timer` runs `cockpit smart-helper` as root hourly and writes results to `/var/lib/cockpit-monitor/smart/` (group-readable), which the agent reads. |
 | Q2 | Should bare `cockpit` (no subcommand) print help or launch the TUI? | 4 | **Done (4A):** launches the TUI when stdin and stdout are terminals; otherwise prints help. `cockpit help` and `-h` keep printing help. |
 | Q5 | Should the filesystem skip lists become configurable? | 3 | **Done (Phase 3):** `collection.filesystems` with `exclude_types`, `include_types` and `exclude_mount_points`. Network filesystems stay excluded. |
-| Q6 | Should a dedicated scope cover network addresses, routes and DNS? | 3 | No for now: documented as visible with `metrics:read`. Revisit with fleet mode. |
-| Q7 | Should command lines ever be exposed (behind a new scope)? | 3+ | Not until there is a clear need; they often contain secrets. |
+| Q6 | Should a dedicated scope cover network addresses, routes and DNS? | 5 | **Yes (D27):** `network:read`, with existing metrics keys migrated. |
+| Q7 | Should command lines ever be exposed (behind a new scope)? | 5 | **No, closed (D28):** never exposed; processes show the executable path instead. |
 | Q8 | Should container names and images come from the Docker/Podman API socket? | 4+ | No in Phase 4: that socket is root-equivalent (D24). Revisit if a read-only, unprivileged source appears, or as an explicit opt-in with a documented risk. |
 | Q3 | Default TCP port | 0.6 | `7878` (avoids 9090, used by Red Hat Cockpit) |
 

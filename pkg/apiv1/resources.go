@@ -558,9 +558,11 @@ type StreamLagged struct {
 
 // Listener is one open API listener.
 type Listener struct {
-	Transport string `json:"transport"` // unix | tcp
+	Transport string `json:"transport"` // unix | pipe (Windows) | tcp
 	Address   string `json:"address"`
 	TLS       bool   `json:"tls"`
+	// TLSExpiresAt is when the server certificate expires (D29).
+	TLSExpiresAt *time.Time `json:"tls_expires_at,omitempty"`
 }
 
 // RequestStats are counters since the agent started.
@@ -605,6 +607,10 @@ type Process struct {
 	VirtualBytes  uint64     `json:"virtual_bytes"`
 	StartedAt     *time.Time `json:"started_at"`
 	KernelThread  bool       `json:"kernel_thread"`
+	// Executable is the program's path (D28); null when unknown, with
+	// ExecutableReason saying why. Command lines are never exposed.
+	Executable       *string `json:"executable"`
+	ExecutableReason string  `json:"executable_reason,omitempty"`
 }
 
 // ProcessSorts are the valid values of ?sort= for /processes.

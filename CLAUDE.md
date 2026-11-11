@@ -52,7 +52,7 @@ decision entry before deviating from one.
 | Item | Value |
 |---|---|
 | Module | `github.com/MichaelYagi/cockpit` |
-| Executable | `cockpit` (`agent`, `tui`, `keys`, `report`, `smart-helper`, `config check`, `version`) |
+| Executable | `cockpit` (`agent`, `tui`, `keys`, `report`, `tls`, `smart-helper`, `config check`, `version`) |
 | systemd units | `cockpit-agent.service`, `cockpit-smart.service` / `.timer` (D20) |
 | System config / data / runtime | `/etc/cockpit-monitor/`, `/var/lib/cockpit-monitor/`, `/run/cockpit-monitor/` |
 | User-mode dirs | `$XDG_{CONFIG,STATE,RUNTIME}_HOME/cockpit-monitor/` |
@@ -77,6 +77,7 @@ Never create system files, units or users named plain `cockpit`.
   `golang.org/x/sys/unix` for `statfs`, `smartctl --json` (optional).
 - Rate limiting: `golang.org/x/time/rate`.
 - systemd: `github.com/godbus/dbus/v5` (read-only `ListUnits`, D15).
+- Windows admin pipe: `github.com/Microsoft/go-winio` (D31).
 - GPU metrics: `nvidia-smi` CSV query and `amdgpu` sysfs (optional, D16).
 - Streaming: SSE (Phase 2). No WebSocket planned.
 - Service integration: systemd (`cockpit-agent.service`).
@@ -101,7 +102,9 @@ internal/
   collector/                 # Collector contract, descriptor, result, env, fakes
   platform/
     linux/                   # Linux collectors (+ testdata/ fixture trees)
-    unsupported/             # non-Linux default: everything unsupported
+    darwin/, windows/        # macOS and Windows collectors without cgo (D32)
+    portable/                # shared helpers (interfaces, collector shell)
+    unsupported/             # other systems, and Rest for unimplemented capabilities
   engine/                    # scheduling, timeouts, rates, staleness, snapshot store
   health/                    # health checks, hysteresis, findings
   events/                    # event bus and ring buffer
@@ -112,6 +115,7 @@ internal/
   report/                    # diagnostic report anonymization and Markdown (D21)
   logging/                   # slog setup, secret redaction, UTC timestamps
   netaddr/                   # loopback classification for listen and Host addresses
+  tlsutil/                   # private CA and server certificates (cockpit tls, D29)
   ulid/                      # request and event IDs
   extension/                 # adapts collectorsdk collectors to the internal contract
   api/

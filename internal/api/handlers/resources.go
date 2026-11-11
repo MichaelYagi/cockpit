@@ -7,6 +7,7 @@ import (
 
 	"github.com/MichaelYagi/cockpit/internal/api/httpx"
 	"github.com/MichaelYagi/cockpit/internal/api/redact"
+	"github.com/MichaelYagi/cockpit/internal/auth"
 	"github.com/MichaelYagi/cockpit/internal/core"
 	"github.com/MichaelYagi/cockpit/pkg/apiv1"
 )
@@ -246,7 +247,13 @@ func filesystems(v *core.Filesystems) *[]apiv1.Filesystem {
 	return &out
 }
 
-func (h *Resources) network(v *[]core.NetInterfaceMetrics) *[]apiv1.NetworkInterface {
+// netInterfaces maps interfaces. Addresses need network:read (D27);
+// without it they are empty and listed as redacted.
+func (h *Resources) netInterfaces(withAddresses bool) func(*[]core.NetInterfaceMetrics) *[]apiv1.NetworkInterface {
+	return func(v *[]core.NetInterfaceMetrics) *[]apiv1.NetworkInterface { return h.network(v, withAddresses) }
+}
+
+func (h *Resources) network(v *[]core.NetInterfaceMetrics, withAddresses bool) *[]apiv1.NetworkInterface {
 	out := make([]apiv1.NetworkInterface, 0, len(*v))
 	for _, n := range *v {
 		ni := apiv1.NetworkInterface{
@@ -256,7 +263,13 @@ func (h *Resources) network(v *[]core.NetInterfaceMetrics) *[]apiv1.NetworkInter
 			RxBytesPerSecond: n.RxBytesPerSecond, TxBytesPerSecond: n.TxBytesPerSecond, RateWindowSeconds: n.WindowSeconds,
 		}
 		h.Policy.Field(redact.MACAddress, n.MACAddress, &ni.MACAddress, &ni.Redacted)
-		ni.Addresses = append([]string{}, n.Addresses...)
+		ni.Addresses = []string{}
+		switch {
+		case withAddresses:
+			ni.Addresses = append(ni.Addresses, n.Addresses...)
+		case len(n.Addresses) > 0:
+			ni.Redacted = append(ni.Redacted, "addresses")
+		}
 		out = append(out, ni)
 	}
 	return &out
@@ -309,10 +322,10 @@ func (h *Resources) Metrics(w http.ResponseWriter, r *http.Request) {
 			want[s] = true
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, h.metrics(h.Snapshots.Current(), h.Now().UTC(), want))
+	httpx.WriteJSON(w, http.StatusOK, h.metrics(h.Snapshots.Current(), h.Now().UTC(), want, hasScope(r, auth.ScopeNetworkRead)))
 }
 
-func (h *Resources) metrics(s *core.Snapshot, now time.Time, want map[string]bool) apiv1.MetricsResponse {
+func (h *Resources) metrics(s *core.Snapshot, now time.Time, want map[string]bool, withNet bool) apiv1.MetricsResponse {
 	out := apiv1.MetricsResponse{Meta: h.meta(now)}
 	if want["cpu"] {
 		out.CPU = ptrTo(section(s.CPU, now, cpuMetrics))
@@ -327,7 +340,7 @@ func (h *Resources) metrics(s *core.Snapshot, now time.Time, want map[string]boo
 		out.Filesystems = ptrTo(section(s.Filesystems, now, filesystems))
 	}
 	if want["network"] {
-		out.Network = ptrTo(section(s.Network, now, h.network))
+		out.Network = ptrTo(section(s.Network, now, h.netInterfaces(withNet)))
 	}
 	if want["sensors"] {
 		out.Sensors = ptrTo(section(s.Sensors, now, sensors))
@@ -370,13 +383,13 @@ func (h *Resources) Network(w http.ResponseWriter, r *http.Request) {
 	if !allowParams(w, r) {
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, h.networkResponse(h.Snapshots.Current(), h.Now().UTC()))
+	httpx.WriteJSON(w, http.StatusOK, h.networkResponse(h.Snapshots.Current(), h.Now().UTC(), hasScope(r, auth.ScopeNetworkRead)))
 }
 
-func (h *Resources) networkResponse(s *core.Snapshot, now time.Time) apiv1.NetworkResponse {
-	return apiv1.NetworkResponse{
+func (h *Resources) networkResponse(s *core.Snapshot, now time.Time, withNet bool) apiv1.NetworkResponse {
+	out := apiv1.NetworkResponse{
 		Meta:       h.meta(now),
-		Interfaces: section(s.Network, now, h.network),
+		Interfaces: section(s.Network, now, h.netInterfaces(withNet)),
 		Routes: section(s.Routes, now, func(v *core.Routes) *[]apiv1.Route {
 			out := make([]apiv1.Route, 0, len(*v))
 			for _, r := range *v {
@@ -390,6 +403,11 @@ func (h *Resources) networkResponse(s *core.Snapshot, now time.Time) apiv1.Netwo
 			return d
 		}),
 	}
+	if !withNet {
+		out.Routes = needsScope[[]apiv1.Route](s.Routes.Meta.Source, auth.ScopeNetworkRead)
+		out.DNS = needsScope[apiv1.DNS](s.DNS.Meta.Source, auth.ScopeNetworkRead)
+	}
+	return out
 }
 
 // Sensors serves GET /sensors.
@@ -508,4 +526,15 @@ func upsList(v *core.UPSList) *[]apiv1.UPS {
 			OutputVolts: u.OutputVolts, Model: u.Model})
 	}
 	return &out
+}
+
+// hasScope reports whether the request's principal holds scope s.
+func hasScope(r *http.Request, s auth.Scope) bool {
+	p, ok := auth.PrincipalFrom(r.Context())
+	return ok && p.Has(s)
+}
+
+// needsScope is a section withheld because the caller lacks a scope.
+func needsScope[T any](source string, s auth.Scope) apiv1.Section[T] {
+	return apiv1.Section[T]{Status: apiv1.PermissionDenied, Source: source, Reason: "Requires the " + string(s) + " scope."}
 }

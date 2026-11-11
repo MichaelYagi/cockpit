@@ -198,6 +198,12 @@ func toAPIProcess(p core.ProcessInfo) apiv1.Process {
 	out := apiv1.Process{PID: p.PID, PPID: p.PPID, Name: p.Name, User: p.User, UID: p.UID, State: p.State, Threads: p.Threads,
 		CPUPercent: p.CPUPercent, MemoryPercent: p.MemoryPercent, RSSBytes: p.RSSBytes, VirtualBytes: p.VirtualBytes,
 		KernelThread: p.KernelThread}
+	if p.Executable != "" {
+		exe := p.Executable
+		out.Executable = &exe
+	} else {
+		out.ExecutableReason = p.ExecutableReason
+	}
 	if !p.StartedAt.IsZero() {
 		t := p.StartedAt.UTC()
 		out.StartedAt = &t

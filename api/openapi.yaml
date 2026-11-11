@@ -843,9 +843,10 @@ components:
             additionalProperties: false
             required: [transport, address, tls]
             properties:
-              transport: { type: string, enum: [unix, tcp] }
+              transport: { type: string, enum: [unix, pipe, tcp] }
               address: { type: string }
               tls: { type: boolean }
+              tls_expires_at: { type: string, format: date-time, description: When the TLS server certificate expires (D29). }
         requests:
           type: object
           additionalProperties: false
@@ -1796,7 +1797,7 @@ components:
     Process:
       type: object
       additionalProperties: false
-      required: [pid, ppid, name, user, uid, state, threads, cpu_percent, memory_percent, rss_bytes, virtual_bytes, started_at, kernel_thread]
+      required: [pid, ppid, name, user, uid, state, threads, cpu_percent, memory_percent, rss_bytes, virtual_bytes, started_at, kernel_thread, executable]
       properties:
         pid: { type: integer, minimum: 1 }
         ppid: { type: integer, minimum: 0 }
@@ -1811,6 +1812,13 @@ components:
         virtual_bytes: { type: integer, minimum: 0 }
         started_at: { type: [string, "null"], format: date-time }
         kernel_thread: { type: boolean }
+        executable:
+          type: [string, "null"]
+          description: The program's path from /proc/<pid>/exe (D28). Command lines are never exposed.
+        executable_reason:
+          type: string
+          enum: [permission_denied, kernel_thread, unavailable]
+          description: Why executable is null. Other users' processes are permission_denied without privileges.
     ServicesResponse:
       type: object
       additionalProperties: false
@@ -2026,7 +2034,7 @@ components:
         health: { $ref: "#/components/schemas/HealthSettings" }
     Scope:
       type: string
-      enum: [system:read, metrics:read, processes:read, admin]
+      enum: [system:read, metrics:read, network:read, processes:read, admin]
     APIKey:
       type: object
       additionalProperties: false
@@ -2061,8 +2069,8 @@ components:
         scopes:
           type: array
           minItems: 1
-          description: Keys may hold system:read, metrics:read and processes:read; never admin.
-          items: { type: string, enum: [system:read, metrics:read, processes:read] }
+          description: Keys may hold system:read, metrics:read, network:read and processes:read; never admin.
+          items: { type: string, enum: [system:read, metrics:read, network:read, processes:read] }
         expires_at: { type: string, format: date-time }
     CreatedAPIKey:
       type: object

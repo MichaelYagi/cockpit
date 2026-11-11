@@ -6,6 +6,39 @@ release may change `pkg/client`, `pkg/apiv1` or `pkg/collectorsdk`, and
 every such change is listed here under **Breaking**. The REST API keeps
 its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
+## v0.5.0 — unreleased
+
+### Changed
+
+- **New `network:read` scope (D27).** Interface addresses, routes and DNS
+  now need it. Existing keys with `metrics:read` were migrated to include
+  it, so nothing changes on upgrade. New keys must request it
+  (`cockpit keys create --scope network:read`).
+
+### Added
+
+- **Windows admin pipe (D31).** The local admin API is a named pipe with a
+  DACL for SYSTEM, Administrators and the agent's user. Clients check the
+  pipe server's account before using it. Uses `github.com/Microsoft/go-winio`.
+- **macOS and Windows (D32).** Identity, uptime, CPU (load average on
+  macOS, usage on Windows), memory, filesystems and network with counters,
+  without cgo. Every other capability is reported unsupported with a
+  reason. CI runs the conformance suite and real-value checks on both.
+- **Fleet console (D30).** `cockpit fleet add/list/remove/check` and the
+  `cockpit fleet` console: one row per machine with health, CPU, memory,
+  fullest disk and last contact, polled concurrently with pinned TLS.
+  Enter opens the full TUI. Machines whose ID or certificate changes are
+  refused.
+- **TLS tooling (D29).** `cockpit tls init`, `renew` and `show` create and
+  manage a private CA and server certificate. Clients pin the certificate
+  (`--tls-fingerprint`, `COCKPIT_TLS_FINGERPRINT`,
+  `client.WithPinnedCertificate`) or trust the CA (`--tls-ca`,
+  `COCKPIT_TLS_CA`, `client.WithCAPEM`). The agent warns before expiry and
+  reports `tls_expires_at`.
+- Processes report their `executable` path (from `/proc/<pid>/exe`), or an
+  `executable_reason` when it cannot be read. Command lines stay closed
+  for good (D28).
+
 ## v0.4.0 — 2026-11-11
 
 The first tagged release. It contains everything from Phases 1–4.

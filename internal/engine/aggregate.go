@@ -42,7 +42,7 @@ const (
 // capabilities (sensors: thermal or fan).
 var sectionCaps = [numSections][]core.Capability{
 	secSystem:         {core.CapSystemIdentity},
-	secCPU:            {core.CapCPUUsage},
+	secCPU:            {core.CapCPUUsage, core.CapCPULoad}, // load alone still counts (macOS, D32)
 	secMemory:         {core.CapMemoryUsage},
 	secMemoryPressure: {core.CapMemoryPressure},
 	secFilesystems:    {core.CapStorageFilesystems},

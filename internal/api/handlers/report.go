@@ -94,9 +94,10 @@ func (h *Report) build(p auth.Principal) *apiv1.Report {
 
 	if p.Has(auth.ScopeMetricsRead) {
 		// Filesystems and interfaces are in the storage and network parts.
-		m := h.Resources.metrics(s, now, map[string]bool{"cpu": true, "memory": true, "memory_pressure": true, "sensors": true, "gpu": true, "custom": true, "power": true, "ups": true})
+		withNet := p.Has(auth.ScopeNetworkRead)
+		m := h.Resources.metrics(s, now, map[string]bool{"cpu": true, "memory": true, "memory_pressure": true, "sensors": true, "gpu": true, "custom": true, "power": true, "ups": true}, withNet)
 		st := h.Resources.storage(s, now)
-		nw := h.Resources.networkResponse(s, now)
+		nw := h.Resources.networkResponse(s, now, withNet)
 		out.Metrics, out.Storage, out.Network = &m, &st, &nw
 		if h.Health != nil {
 			hr := healthResponse(h.Health.Current(), h.Resources.MachineID, now)

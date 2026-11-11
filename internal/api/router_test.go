@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -104,7 +105,8 @@ func testSnapshot() *core.Snapshot {
 			{MountPoint: "/mnt/c", Device: "C:\\", Type: "9p", TotalBytes: 1000, FreeBytes: 900, AvailableBytes: 900},
 		}},
 		Network: core.Section[[]core.NetInterfaceMetrics]{Meta: meta(), Data: &[]core.NetInterfaceMetrics{
-			{NetInterface: core.NetInterface{Name: "eth0", MACAddress: testMAC, MTU: 1500, OperState: "up", SpeedMbps: ptr(1000), RxBytes: 10, TxBytes: 5},
+			{NetInterface: core.NetInterface{Name: "eth0", MACAddress: testMAC, MTU: 1500, OperState: "up", SpeedMbps: ptr(1000), RxBytes: 10, TxBytes: 5,
+				Addresses: []string{"192.0.2.10/24"}},
 				RxBytesPerSecond: ptr(100.0), TxBytesPerSecond: ptr(50.0), WindowSeconds: 2},
 			{NetInterface: core.NetInterface{Name: "lo", Loopback: true, OperState: "unknown"}}, // first sample: rates null
 		}},
@@ -129,6 +131,8 @@ func testSnapshot() *core.Snapshot {
 			{Name: "backup.service", Description: "Nightly backup", LoadState: "loaded", ActiveState: "failed", SubState: "failed"},
 			{Name: "ssh.service", Description: "OpenSSH", LoadState: "loaded", ActiveState: "active", SubState: "running"},
 		}},
+		Routes: core.Section[core.Routes]{Meta: meta(), Data: &core.Routes{{Family: "ipv4", Destination: "0.0.0.0/0", Gateway: "192.0.2.1", Interface: "eth0", Default: true}}},
+		DNS:    core.Section[core.DNSConfig]{Meta: meta(), Data: &core.DNSConfig{Nameservers: []string{"192.0.2.53"}, Resolver: "resolv.conf"}},
 		Containers: core.Section[[]core.ContainerMetrics]{Meta: meta(), Data: &[]core.ContainerMetrics{
 			{ContainerSample: core.ContainerSample{Runtime: "docker", ID: strings.Repeat("a", 64), UID: -1, CPUUsageUsec: 10, MemoryBytes: ptr(uint64(1 << 20))}},
 			{ContainerSample: core.ContainerSample{Runtime: "podman", ID: strings.Repeat("b", 64), Rootless: true, UID: 1000}, CPUPercent: ptr(12.5)},
@@ -805,5 +809,47 @@ func TestContainersContent(t *testing.T) {
 	}
 	if l.Items[1].UID != nil || *l.Items[1].MemoryBytes != 1<<20 || l.Items[1].CPUPercent != nil || l.NamesReason == "" {
 		t.Errorf("second %+v", l.Items[1])
+	}
+}
+
+var networkKey = "ckp" + "_networkread1_" + strings.Repeat("E", 43)
+
+// D27: addresses, routes and DNS need network:read.
+func TestNetworkScope(t *testing.T) {
+	spec := contracttest.Load(t)
+	e := newEnv(t, nil)
+	e.d.Verifier.(fakeVerifier)[networkKey] = auth.Principal{Kind: auth.KindAPIKey, KeyID: "networkread1", Scopes: []auth.Scope{auth.ScopeMetricsRead, auth.ScopeNetworkRead}}
+	tcp := router(t, e.d, Options{Listener: ListenerTCP, CheckLoopbackHost: true})
+	get := func(key, target string) apiv1.NetworkResponse {
+		t.Helper()
+		r := do(t, tcp, "GET", target, bearer(key))
+		if r.status != 200 {
+			t.Fatalf("%s: %d %s", target, r.status, r.body)
+		}
+		spec.CheckResponse(t, r.req, r.status, r.header, r.body)
+		var out apiv1.NetworkResponse
+		_ = json.Unmarshal(r.body, &out)
+		return out
+	}
+	without := get(metricsKey, "/api/v1/network")
+	eth0 := (*without.Interfaces.Data)[0]
+	if len(eth0.Addresses) != 0 || !slices.Contains(eth0.Redacted, "addresses") || eth0.RxBytes != 10 {
+		t.Errorf("metrics-only interface %+v", eth0)
+	}
+	if without.Routes.Status != "permission_denied" || without.Routes.Data != nil || !strings.Contains(without.Routes.Reason, "network:read") ||
+		without.DNS.Status != "permission_denied" || without.DNS.Data != nil {
+		t.Errorf("routes %+v dns %+v", without.Routes, without.DNS)
+	}
+	with := get(networkKey, "/api/v1/network")
+	if a := (*with.Interfaces.Data)[0].Addresses; len(a) != 1 || a[0] != "192.0.2.10/24" || with.Routes.Data == nil || with.DNS.Data == nil {
+		t.Errorf("network key: %+v", with)
+	}
+	r := do(t, tcp, "GET", "/api/v1/metrics?sections=network", bearer(metricsKey))
+	if strings.Contains(string(r.body), "192.0.2.10") {
+		t.Error("/metrics leaks addresses without network:read")
+	}
+	sock := router(t, e.d, Options{Listener: ListenerSocket})
+	if r := do(t, sock, "GET", "/api/v1/network"); !strings.Contains(string(r.body), "192.0.2.53") {
+		t.Error("socket must see DNS")
 	}
 }

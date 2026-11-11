@@ -182,3 +182,9 @@ func TestExtensionDependencies(t *testing.T) {
 	rule(t, "internal/extension/...", hasPrefix("internal/collector", "internal/core", "pkg/collectorsdk"))
 	rule(t, "pkg/collectorsdk/...", func(string) bool { return false })
 }
+
+// The fleet list is client-side (D30): it reaches agents only through the
+// public SDK.
+func TestFleetUsesTheSDK(t *testing.T) {
+	rule(t, "internal/fleet/...", hasPrefix("pkg/client", "pkg/apiv1"))
+}

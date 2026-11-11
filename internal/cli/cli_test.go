@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -98,7 +99,7 @@ func TestAgentRejectsRemoteWithoutTLS(t *testing.T) {
 }
 
 func TestTUIWithoutAgent(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "ckp")
+	dir, _ := os.MkdirTemp(shortTemp(), "ckp")
 	defer os.RemoveAll(dir)
 	env, _, errb := testEnv("/h", nil)
 	code := Run(context.Background(), []string{"tui", "--once", "--socket", filepath.Join(dir, "missing.sock")}, env)
@@ -117,7 +118,7 @@ func TestTUIRequiresKeyFromEnvForTCP(t *testing.T) {
 
 // End to end: agent and TUI placeholder in one test, talking over the socket.
 func TestAgentAndTUI(t *testing.T) {
-	root, _ := os.MkdirTemp("", "ckp")
+	root, _ := os.MkdirTemp(shortTemp(), "ckp")
 	defer os.RemoveAll(root)
 	sock := filepath.Join(root, "run", "agent.sock")
 	agentArgs := []string{"agent", "--state-dir", filepath.Join(root, "state"), "--runtime-dir", filepath.Join(root, "run"), "--tcp-address", "127.0.0.1:0"}
@@ -164,7 +165,7 @@ func TestAgentAndTUI(t *testing.T) {
 // startAgent runs "cockpit agent" in the background and returns its socket.
 func startAgent(t *testing.T) string {
 	t.Helper()
-	root, _ := os.MkdirTemp("", "ckp")
+	root, _ := os.MkdirTemp(shortTemp(), "ckp")
 	sock := filepath.Join(root, "run", "agent.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
@@ -323,7 +324,7 @@ func TestTUINeedsTerminal(t *testing.T) {
 // With no agent running on the default socket, the TUI starts an embedded
 // agent on a private socket, uses it through the API, and stops it on exit.
 func TestTUIEmbeddedAgent(t *testing.T) {
-	home, _ := os.MkdirTemp("", "ckp")
+	home, _ := os.MkdirTemp(shortTemp(), "ckp")
 	defer os.RemoveAll(home)
 	runtime := filepath.Join(home, "rt")
 	if err := os.MkdirAll(runtime, 0o700); err != nil {
@@ -334,7 +335,7 @@ func TestTUIEmbeddedAgent(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d: %s", code, errb)
 	}
-	if !strings.Contains(out.String(), "Cockpit agent") || !strings.Contains(out.String(), "linux.cpu") {
+	if !strings.Contains(out.String(), "Cockpit agent") || !strings.Contains(out.String(), "collector "+goruntime.GOOS) {
 		t.Errorf("summary:\n%s", out)
 	}
 	state := filepath.Join(home, "state", "cockpit-monitor")
@@ -355,7 +356,7 @@ func TestTUIEmbeddedAgent(t *testing.T) {
 }
 
 func TestTUIExplicitSocketDoesNotEmbed(t *testing.T) {
-	home, _ := os.MkdirTemp("", "ckp")
+	home, _ := os.MkdirTemp(shortTemp(), "ckp")
 	defer os.RemoveAll(home)
 	env, _, errb := testEnv(home, nil)
 	code := Run(context.Background(), []string{"tui", "--once", "--socket", filepath.Join(home, "none.sock")}, env)
@@ -408,4 +409,192 @@ func TestSMARTHelperCommand(t *testing.T) {
 	if code, _, _ := run(t, "", "smart-helper", "extra"); code != ExitUsage {
 		t.Errorf("extra argument exit %d", code)
 	}
+}
+
+type tlsAgentInfo struct{ root, sock, addr, fp, tlsDir string }
+
+// startTLSAgent runs "cockpit tls init" and an agent serving TLS on a
+// loopback port.
+func startTLSAgent(t *testing.T) tlsAgentInfo {
+	t.Helper()
+	root, _ := os.MkdirTemp(shortTemp(), "ckpt")
+	t.Cleanup(func() { os.RemoveAll(root) })
+	tlsDir := filepath.Join(root, "tls")
+	code, out, errOut := run(t, "", "tls", "init", "--dir", tlsDir, "--host", "127.0.0.1")
+	if code != ExitOK || !strings.Contains(out, "fingerprint: ") || !strings.Contains(out, "cert_file: "+filepath.Join(tlsDir, "server.pem")) {
+		t.Fatalf("tls init %d %s\n%s", code, errOut, out)
+	}
+	fp := strings.TrimSpace(strings.SplitN(strings.SplitN(out, "fingerprint: ", 2)[1], "\n", 2)[0])
+	if code, show, _ := run(t, "", "tls", "show", "--dir", tlsDir); code != ExitOK || !strings.Contains(show, fp) {
+		t.Errorf("tls show: %s", show)
+	}
+
+	cfg := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("api:\n  tls:\n    cert_file: "+filepath.Join(tlsDir, "server.pem")+"\n    key_file: "+filepath.Join(tlsDir, "server-key.pem")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(root, "run", "agent.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	aenv, _, aerr := testEnv(root, nil)
+	go func() {
+		done <- Run(ctx, []string{"agent", "--config", cfg, "--state-dir", filepath.Join(root, "state"), "--runtime-dir", filepath.Join(root, "run"), "--tcp-address", "127.0.0.1:0"}, aenv)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("agent did not stop")
+		}
+	})
+	var addr string
+	for deadline := time.Now().Add(10 * time.Second); addr == "" && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		c, err := client.NewUnix(sock)
+		if err != nil {
+			continue
+		}
+		if st, err := c.Status(context.Background()); err == nil && st.API != nil {
+			for _, l := range st.API.Listeners {
+				if l.Transport == "tcp" && l.TLS && l.TLSExpiresAt != nil {
+					addr = l.Address
+				}
+			}
+		}
+		c.Close()
+	}
+	if addr == "" {
+		t.Fatalf("TLS listener not reported:\n%s", aerr)
+	}
+	return tlsAgentInfo{root: root, sock: sock, addr: addr, fp: fp, tlsDir: tlsDir}
+}
+
+// D29: tls init, an agent serving it, and clients that pin the fingerprint
+// or trust the CA.
+func TestTLSEndToEnd(t *testing.T) {
+	a := startTLSAgent(t)
+	root, sock, addr, fp, tlsDir := a.root, a.sock, a.addr, a.fp, a.tlsDir
+	_, key, _ := run(t, "", "keys", "create", "--socket", sock, "--name", "tls", "--scope", "system:read")
+	key = strings.TrimSpace(key)
+
+	report := func(extra map[string]string, args ...string) (int, string) {
+		vars := map[string]string{"COCKPIT_API_KEY": key}
+		for k, v := range extra {
+			vars[k] = v
+		}
+		env, out, errb := testEnv(root, vars)
+		code := Run(context.Background(), append([]string{"report", "--url", "https://" + addr}, args...), env)
+		return code, out.String() + errb.String()
+	}
+	if code, out := report(nil, "--tls-fingerprint", fp); code != ExitOK || !strings.Contains(out, "# Cockpit diagnostic report") {
+		t.Errorf("pinned: %d %.300s", code, out)
+	}
+	if code, out := report(map[string]string{"COCKPIT_TLS_CA": filepath.Join(tlsDir, "ca.pem")}); code != ExitOK {
+		t.Errorf("CA from env: %d %.300s", code, out)
+	}
+	if code, out := report(nil, "--tls-fingerprint", strings.Repeat("0", 64)); code != ExitError || !strings.Contains(out, "does not match") {
+		t.Errorf("wrong pin: %d %.300s", code, out)
+	}
+	if code, _ := report(nil); code != ExitError {
+		t.Error("untrusted certificate accepted")
+	}
+}
+
+// D30: enroll a machine over pinned TLS, check it, and refuse it once its
+// identity changes.
+func TestFleetEnrollment(t *testing.T) {
+	a := startTLSAgent(t)
+	_, key, _ := run(t, "", "keys", "create", "--socket", a.sock, "--name", "fleet", "--scope", "system:read", "--scope", "metrics:read")
+	keyPath := filepath.Join(a.root, "agent.key")
+	if err := os.WriteFile(keyPath, []byte(key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(a.root, "home")
+	fleetRun := func(stdin string, interactive bool, args ...string) (int, string) {
+		t.Helper()
+		env, out, errb := testEnv(home, nil)
+		env.Interactive = interactive
+		if stdin != "" {
+			env.Stdin = strings.NewReader(stdin)
+		}
+		code := Run(context.Background(), append([]string{"fleet"}, args...), env)
+		return code, out.String() + errb.String()
+	}
+	url := "https://" + a.addr
+
+	// Not a terminal and no fingerprint: refuse rather than trust blindly.
+	if code, out := fleetRun("", false, "add", "box", url, "--key-file", keyPath); code != ExitUsage || !strings.Contains(out, a.fp) {
+		t.Fatalf("non-interactive add: %d %s", code, out)
+	}
+	// Interactive "no".
+	if code, out := fleetRun("n\n", true, "add", "box", url, "--key-file", keyPath); code != ExitError || !strings.Contains(out, "Not added") {
+		t.Errorf("declined: %d %s", code, out)
+	}
+	// Interactive "yes" pins the shown fingerprint.
+	if code, out := fleetRun("y\n", true, "add", "box", url, "--key-file", keyPath); code != ExitOK || !strings.Contains(out, "Added box") {
+		t.Fatalf("add: %d %s", code, out)
+	}
+	path := filepath.Join(home, ".config", "cockpit-monitor", "fleet.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), a.fp) || strings.Contains(string(data), strings.TrimSpace(key)) {
+		t.Fatalf("fleet file:\n%s %v", data, err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Errorf("fleet file mode %v", fi.Mode())
+	}
+	if code, out := fleetRun("", false, "list"); code != ExitOK || !strings.Contains(out, "box") || !strings.Contains(out, "pinned "+a.fp[:16]) {
+		t.Errorf("list: %s", out)
+	}
+	if code, out := fleetRun("", false, "check"); code != ExitOK || !strings.Contains(out, "✔ box") {
+		t.Errorf("check: %d %s", code, out)
+	}
+	if code, out := fleetRun("", false, "add", "box", url, "--key-file", keyPath, "--yes"); code != ExitError || !strings.Contains(out, "--replace") {
+		t.Errorf("duplicate add: %d %s", code, out)
+	}
+
+	// A different machine ID is refused until --replace.
+	if err := os.WriteFile(path, []byte(replaceMachineID(string(data))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := fleetRun("", false, "check"); code != ExitError || !strings.Contains(out, "machine identity changed") {
+		t.Errorf("changed identity: %d %s", code, out)
+	}
+	if code, out := fleetRun("", false, "add", "box", url, "--key-file", keyPath, "--tls-fingerprint", a.fp, "--replace"); code != ExitOK {
+		t.Errorf("replace: %d %s", code, out)
+	}
+	if code, _ := fleetRun("", false, "check"); code != ExitOK {
+		t.Error("check after replace failed")
+	}
+
+	// A wrong pin never reaches the agent.
+	if code, out := fleetRun("", false, "add", "evil", url, "--key-file", keyPath, "--tls-fingerprint", strings.Repeat("0", 64)); code != ExitError || !strings.Contains(out, "does not match") {
+		t.Errorf("wrong pin: %d %s", code, out)
+	}
+	// A readable key file is refused.
+	_ = os.Chmod(keyPath, 0o644)
+	if code, out := fleetRun("", false, "add", "loose", url, "--key-file", keyPath, "--yes"); code != ExitError || !strings.Contains(out, "chmod 600") {
+		t.Errorf("readable key: %d %s", code, out)
+	}
+	if code, _ := fleetRun("", false, "remove", "box"); code != ExitOK {
+		t.Error("remove failed")
+	}
+}
+
+func replaceMachineID(yaml string) string {
+	lines := strings.Split(yaml, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "machine_id:") {
+			lines[i] = l[:strings.Index(l, "machine_id:")] + "machine_id: 00000000-0000-4000-8000-000000000000"
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// shortTemp is a base for test directories that hold sockets: macOS's
+// default temporary directory is too long for sun_path (104 bytes).
+func shortTemp() string {
+	if goruntime.GOOS == "darwin" {
+		return "/tmp"
+	}
+	return ""
 }

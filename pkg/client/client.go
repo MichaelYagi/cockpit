@@ -11,7 +11,11 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +50,9 @@ type options struct {
 	timeout   time.Duration
 	tlsConfig *tls.Config
 	userAgent string
+	pin       string // normalized SHA-256 fingerprint, or "" (D29)
+	pinErr    error
+	caPEM     []byte
 }
 
 // Option customizes a Client.
@@ -56,6 +63,18 @@ func WithTimeout(d time.Duration) Option { return func(o *options) { o.timeout =
 
 // WithTLSConfig sets the TLS configuration for https URLs (e.g. a custom CA).
 func WithTLSConfig(c *tls.Config) Option { return func(o *options) { o.tlsConfig = c } }
+
+// WithPinnedCertificate trusts exactly the server certificate with this
+// SHA-256 fingerprint (as printed by cockpit tls show), instead of a CA
+// (D29). The certificate must also be within its validity period. Colons,
+// case and a "sha256:" prefix are ignored.
+func WithPinnedCertificate(fingerprint string) Option {
+	return func(o *options) { o.pin, o.pinErr = NormalizeFingerprint(fingerprint) }
+}
+
+// WithCAPEM trusts certificates issued by the PEM-encoded CA (for example
+// the ca.pem from cockpit tls init) in addition to nothing else.
+func WithCAPEM(pemCerts []byte) Option { return func(o *options) { o.caPEM = pemCerts } }
 
 // WithUserAgent sets the User-Agent header.
 func WithUserAgent(ua string) Option { return func(o *options) { o.userAgent = ua } }
@@ -71,16 +90,17 @@ func build(opts []Option) options {
 func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // NewUnix connects to an agent's Unix socket.
+//
+// On Windows socketPath may be a named pipe (\\.\pipe\cockpit-monitor).
+// The client then checks that the pipe's server runs as SYSTEM, an
+// administrator or the current user before sending anything (D31).
 func NewUnix(socketPath string, opts ...Option) (*Client, error) {
 	if socketPath == "" {
 		return nil, errors.New("socket path is required")
 	}
 	o := build(opts)
 	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socketPath)
-		},
+		DialContext:     func(ctx context.Context, _, _ string) (net.Conn, error) { return dialAdmin(ctx, socketPath) },
 		MaxIdleConns:    4,
 		IdleConnTimeout: 30 * time.Second,
 	}
@@ -114,6 +134,12 @@ func NewTCP(baseURL, apiKey string, opts ...Option) (*Client, error) {
 		return nil, errors.New("API key is malformed (expected ckp_...)")
 	}
 	o := build(opts)
+	if o.pinErr != nil {
+		return nil, o.pinErr
+	}
+	if (o.pin != "" || o.caPEM != nil) && u.Scheme != "https" {
+		return nil, errors.New("certificate pinning and a private CA need an https URL")
+	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = nil // do not route API keys through an environment proxy
 	if o.tlsConfig != nil {
@@ -124,6 +150,20 @@ func NewTCP(baseURL, apiKey string, opts ...Option) (*Client, error) {
 	}
 	if tr.TLSClientConfig.MinVersion < tls.VersionTLS12 {
 		tr.TLSClientConfig.MinVersion = tls.VersionTLS12
+	}
+	if o.caPEM != nil {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(o.caPEM) {
+			return nil, errors.New("the CA file contains no PEM certificate")
+		}
+		tr.TLSClientConfig.RootCAs = pool
+	}
+	if o.pin != "" {
+		pin := o.pin
+		// The chain is not verified against a CA; VerifyConnection checks
+		// the pinned leaf instead, so this is not "insecure".
+		tr.TLSClientConfig.InsecureSkipVerify = true
+		tr.TLSClientConfig.VerifyConnection = func(cs tls.ConnectionState) error { return verifyPin(cs, pin, time.Now()) }
 	}
 	u.Path = ""
 	return &Client{
@@ -252,4 +292,63 @@ func (c *Client) Status(ctx context.Context) (*apiv1.Status, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// CertificateFingerprint returns the SHA-256 fingerprint of a DER
+// certificate as lower-case hex (D29).
+func CertificateFingerprint(der []byte) string {
+	sum := sha256.Sum256(der)
+	return hex.EncodeToString(sum[:])
+}
+
+// NormalizeFingerprint accepts a SHA-256 fingerprint with or without
+// colons, a "sha256:" prefix and in any case, and returns lower-case hex.
+func NormalizeFingerprint(fp string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(fp))
+	s = strings.TrimPrefix(s, "sha256:")
+	s = strings.ReplaceAll(s, ":", "")
+	if b, err := hex.DecodeString(s); err != nil || len(b) != sha256.Size {
+		return "", errors.New("certificate fingerprint must be 64 hex characters (SHA-256)")
+	}
+	return s, nil
+}
+
+func verifyPin(cs tls.ConnectionState, pin string, now time.Time) error {
+	if len(cs.PeerCertificates) == 0 {
+		return errors.New("server sent no certificate")
+	}
+	leaf := cs.PeerCertificates[0]
+	if got := CertificateFingerprint(leaf.Raw); subtle.ConstantTimeCompare([]byte(got), []byte(pin)) != 1 {
+		return fmt.Errorf("server certificate fingerprint %s does not match the pinned one", got)
+	}
+	if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		return fmt.Errorf("pinned server certificate is not valid now (valid %s to %s)", leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+// ServerCertificate connects to an https agent without trusting anything
+// and returns its leaf certificate, so a fingerprint can be shown to the
+// operator for confirmation before pinning (fleet enrollment, D30). Never
+// send a key on such a connection.
+func ServerCertificate(ctx context.Context, baseURL string) (*x509.Certificate, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, errors.New("an https URL is required to read a server certificate")
+	}
+	host := u.Host
+	if u.Port() == "" {
+		host = net.JoinHostPort(u.Hostname(), "443")
+	}
+	d := &tls.Dialer{Config: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}} // read only; nothing is sent
+	conn, err := d.DialContext(ctx, "tcp", host)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	certs := conn.(*tls.Conn).ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return nil, errors.New("server sent no certificate")
+	}
+	return certs[0], nil
 }

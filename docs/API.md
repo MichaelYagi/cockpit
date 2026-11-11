@@ -36,12 +36,14 @@ Keys are never accepted in URLs or query strings.
 | *(public)* | `GET /livez`, `GET /openapi.json` |
 | `system:read` | `/status`, `/system`, `/hardware`, `/services`, `/report` (metric parts need `metrics:read` too) |
 | `metrics:read` | `/metrics`, `/metrics/history…`, `/storage`, `/network`, `/sensors`, `/health`, `/events`, `/events/stream` |
+| `network:read` | Interface addresses, routes and DNS inside `/network`, `/metrics` and `/report` (D27). Without it they are withheld: addresses become `[]` and appear in `redacted`, and routes and DNS report `permission_denied` |
 | `processes:read` | `/processes` (D14), `/containers` (D24) |
 | `admin` | `/keys…`, `/settings`, privileged fields in `/status` and `/report` |
 
 No scope implies another (D8). Keys may hold `system:read`,
-`metrics:read` and `processes:read`; `admin` is reserved for the socket
-principal.
+`metrics:read`, `network:read` and `processes:read`; `admin` is reserved
+for the socket principal. `network:read` narrows data inside routes that
+need `metrics:read`. It does not open a route by itself.
 
 ## 4. Endpoints
 
@@ -68,7 +70,7 @@ principal.
 | GET | `/health` | `metrics:read` | Overall status, checks (D11 plus failed services and network errors), active findings |
 | GET | `/events` | `metrics:read` | Events, newest first, paginated, `?severity=&since=&until=&type=`; persisted since Phase 3 |
 | GET | `/events/stream` | `metrics:read` | Live events as Server-Sent Events (D17, Phase 2) |
-| GET | `/processes` | `processes:read` | Processes, sorted/searchable, snapshot-bound cursors; no command lines (D14, Phase 2) |
+| GET | `/processes` | `processes:read` | Processes, sorted/searchable, snapshot-bound cursors; the executable path when readable (`executable`, else `executable_reason`); never command lines (D14, D28) |
 | GET | `/keys` | `admin` (socket) | Key metadata. Never the key or its hash |
 | POST | `/keys` | `admin` (socket) | Create. Response includes the full key once |
 | POST | `/keys/{id}/rotate` | `admin` (socket) | Issue a replacement key (same name/scopes), revoke the old one immediately. Full key shown once |
@@ -90,6 +92,7 @@ principal.
 | Method | Path | Scope | Description |
 |---|---|---|---|
 | GET | `/status` | `system:read` | Collectors now carry `external` (built with the collector SDK, D23) and `sdk_version` |
+| GET | `/status` | `admin` part | TCP listeners with TLS report `tls_expires_at` (D29, Phase 5) |
 | GET | `/containers` | `processes:read` | Docker, Podman (rootful and rootless), containerd and CRI-O containers from cgroup v2, busiest first, at most 500: CPU % of one core, memory and limit, I/O rates, PIDs, rootless owner. No names or images (D24) |
 | GET | `/metrics?sections=power,ups` | `metrics:read` | Batteries and mains from sysfs; UPS from a Network UPS Tools server when enabled (D25) |
 | GET | `/storage` | `metrics:read` | Gains `zfs`: pool state, capacity and error counts (OpenZFS 2.3+ JSON), ARC size and hit rate (D25) |
@@ -174,6 +177,9 @@ default (D9). The containing object lists what was withheld:
 ```json
 { "name": "eth0", "mtu": 1500, "redacted": ["mac_address"] }
 ```
+
+Addresses withheld for lack of `network:read` (D27) are listed the same
+way: `"addresses": [], "redacted": ["mac_address", "addresses"]`.
 
 ## 7. Errors
 

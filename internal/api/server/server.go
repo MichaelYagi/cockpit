@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,6 +48,8 @@ type Endpoints struct {
 	SocketPath string
 	TCPAddress string // resolved, e.g. 127.0.0.1:7878 or the port chosen for :0
 	TCPTLS     bool
+	// TLSExpiresAt is when the server certificate expires (zero without TLS).
+	TLSExpiresAt time.Time
 }
 
 // Server serves API handlers on the configured listeners.
@@ -90,7 +94,7 @@ func (s *Server) Start() (Endpoints, error) {
 		for _, l := range listeners {
 			_ = l.Close()
 		}
-		if s.sockPath != "" {
+		if s.sockPath != "" && !isPipe(s.sockPath) {
 			_ = os.Remove(s.sockPath)
 			s.sockPath = ""
 		}
@@ -116,44 +120,48 @@ func (s *Server) Start() (Endpoints, error) {
 	}
 
 	if s.cfg.TCP.Enabled {
-		l, tlsOn, err := s.listenTCP()
+		l, tlsOn, expires, err := s.listenTCP()
 		if err != nil {
 			return fail(err)
 		}
 		listeners = append(listeners, l)
-		ep.TCPAddress, ep.TCPTLS = l.Addr().String(), tlsOn
+		ep.TCPAddress, ep.TCPTLS, ep.TLSExpiresAt = l.Addr().String(), tlsOn, expires
 		s.serve(s.newHTTPServer(s.tcp), l, "tcp")
 	}
 	return ep, nil
 }
 
-func (s *Server) listenTCP() (net.Listener, bool, error) {
+func (s *Server) listenTCP() (net.Listener, bool, time.Time, error) {
 	host, _, err := net.SplitHostPort(s.cfg.TCP.Address)
 	if err != nil {
-		return nil, false, fmt.Errorf("tcp address %q: %w", s.cfg.TCP.Address, err)
+		return nil, false, time.Time{}, fmt.Errorf("tcp address %q: %w", s.cfg.TCP.Address, err)
 	}
 	loopback, _ := netaddr.IsLoopbackHost(host)
 	tlsOn := s.cfg.TCP.CertFile != "" && s.cfg.TCP.KeyFile != ""
 	// Defense in depth: configuration validation also enforces this.
 	if !loopback && !tlsOn {
-		return nil, false, fmt.Errorf("refusing to listen on non-loopback address %q without TLS", s.cfg.TCP.Address)
+		return nil, false, time.Time{}, fmt.Errorf("refusing to listen on non-loopback address %q without TLS", s.cfg.TCP.Address)
 	}
 
 	var tlsCfg *tls.Config
+	var expires time.Time
 	if tlsOn {
 		if err := checkKeyFilePermissions(s.cfg.TCP.KeyFile); err != nil {
-			return nil, false, err
+			return nil, false, time.Time{}, err
 		}
 		cert, err := tls.LoadX509KeyPair(s.cfg.TCP.CertFile, s.cfg.TCP.KeyFile)
 		if err != nil {
-			return nil, false, fmt.Errorf("load TLS certificate: %w", err)
+			return nil, false, time.Time{}, fmt.Errorf("load TLS certificate: %w", err)
 		}
 		tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
+		if leaf, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
+			expires = leaf.NotAfter.UTC()
+		}
 	}
 
 	l, err := net.Listen("tcp", s.cfg.TCP.Address)
 	if err != nil {
-		return nil, false, fmt.Errorf("listen on %s: %w", s.cfg.TCP.Address, err)
+		return nil, false, time.Time{}, fmt.Errorf("listen on %s: %w", s.cfg.TCP.Address, err)
 	}
 	if tlsCfg != nil {
 		l = tls.NewListener(l, tlsCfg)
@@ -162,7 +170,7 @@ func (s *Server) listenTCP() (net.Listener, bool, error) {
 		s.logger.Warn("API is listening on a non-loopback address; every request requires TLS and an API key",
 			"address", l.Addr().String())
 	}
-	return l, tlsOn, nil
+	return l, tlsOn, expires, nil
 }
 
 func (s *Server) newHTTPServer(h http.Handler) *http.Server {
@@ -205,10 +213,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	s.wg.Wait()
-	if s.sockPath != "" {
+	if s.sockPath != "" && !isPipe(s.sockPath) { // a named pipe disappears with its listener
 		if err := os.Remove(s.sockPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
+
+// isPipe reports a Windows named pipe path (D31).
+func isPipe(path string) bool { return strings.HasPrefix(path, `\\.\pipe\`) }

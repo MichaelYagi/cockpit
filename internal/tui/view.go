@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1304,12 +1305,18 @@ func (m *Model) netConfigLines(inner int) []string {
 	}
 	n := m.network
 	var out []string
+	withheld := false
 	if d := n.Interfaces.Data; d != nil {
 		for _, ni := range *d {
 			if len(ni.Addresses) > 0 {
 				out = append(out, sMuted.Render(pad(ni.Name, 12))+strings.Join(ni.Addresses, "  "))
 			}
+			withheld = withheld || slices.Contains(ni.Redacted, "addresses")
 		}
+	}
+	if withheld || n.Routes.Status == apiv1.PermissionDenied && strings.Contains(n.Routes.Reason, "network:read") {
+		// D27: the key lacks network:read; say so once instead of per item.
+		return append(out, sMuted.Render("Addresses, routes and DNS need a key with the network:read scope."))
 	}
 	if r := n.Routes.Data; r != nil {
 		for _, rt := range *r {

@@ -69,6 +69,8 @@ Commands:
   tui            Open the terminal UI (connects to a running agent)
   keys           Create, list, rotate and revoke API keys (local admin)
   report         Write a diagnostic report (Markdown or JSON)
+  tls            Create the agent's TLS certificate for remote access
+  fleet          Watch several machines from one console
   smart-helper   Read disk health as root for the agent (run by cockpit-smart.timer)
   config check   Validate configuration and print the effective settings
   version        Print version information
@@ -98,6 +100,10 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return runKeys(ctx, rest, env)
 	case "report":
 		return runReport(ctx, rest, env)
+	case "tls":
+		return runTLS(rest, env)
+	case "fleet":
+		return runFleet(ctx, rest, env)
 	case "smart-helper":
 		return runSMARTHelper(ctx, rest, env)
 	case "config":
@@ -265,7 +271,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 	mode := fs.String("mode", "", `"user" or "system" (selects the default socket)`)
 	cfgPath := fs.String("config", "", "configuration file")
 	socket := fs.String("socket", "", "agent Unix socket path (no embedded agent is started when set)")
-	apiURL := fs.String("url", "", "agent URL for TCP access, e.g. http://127.0.0.1:7878 (env COCKPIT_API_URL); the key is read from COCKPIT_API_KEY")
+	remote := newRemoteFlags(fs)
 	once := fs.Bool("once", false, "print a text summary and exit instead of starting the interactive UI")
 	refresh := fs.Duration("refresh", 0, "refresh interval (default from configuration, 1s)")
 	noEmbed := fs.Bool("no-embedded-agent", false, "fail instead of starting an embedded agent when none is running")
@@ -277,7 +283,11 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 		return ExitUsage
 	}
 
-	res, err := config.Load(config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home})
+	src := config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home}
+	if *socket != "" {
+		src.Flags.SocketPath = socket // validate the socket actually used, not the default
+	}
+	res, err := config.Load(src)
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
 		return ExitError
@@ -287,7 +297,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 		interval = *refresh
 	}
 
-	c, target, err := connect(env, *mode, *cfgPath, *socket, *apiURL)
+	c, target, err := connect(env, *mode, *cfgPath, *socket, remote)
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
 		return ExitError
@@ -297,7 +307,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 	// No agent on the default socket: run one in-process for this session
 	// (D2). Only the default socket qualifies; an explicit --socket or
 	// --url means the user expects that agent to exist.
-	if *socket == "" && *apiURL == "" && !hasEnv(env, config.EnvAPIURL) && !reachable(ctx, c) && !*noEmbed {
+	if *socket == "" && remote.url == "" && !hasEnv(env, config.EnvAPIURL) && !reachable(ctx, c) && !*noEmbed {
 		emb, err := startEmbedded(ctx, res, env)
 		if err != nil {
 			fmt.Fprintln(env.Stderr, "No agent is running and an embedded agent could not be started:", err)
@@ -335,21 +345,48 @@ func reachable(ctx context.Context, c *client.Client) bool {
 	return c.Livez(ctx) == nil
 }
 
+// remoteFlags select a TCP agent and how to trust its certificate (D29).
+type remoteFlags struct{ url, fingerprint, ca string }
+
+func newRemoteFlags(fs *flag.FlagSet) *remoteFlags {
+	r := &remoteFlags{}
+	fs.StringVar(&r.url, "url", "", "agent URL for TCP access, e.g. https://host:7878 (env COCKPIT_API_URL); the key is read from COCKPIT_API_KEY")
+	fs.StringVar(&r.fingerprint, "tls-fingerprint", "", "trust only the server certificate with this SHA-256 fingerprint (env COCKPIT_TLS_FINGERPRINT)")
+	fs.StringVar(&r.ca, "tls-ca", "", "trust certificates issued by this CA file, e.g. ca.pem from cockpit tls init (env COCKPIT_TLS_CA)")
+	return r
+}
+
 // connect chooses TCP when a URL is given, otherwise the Unix socket. API
 // keys are only ever read from the environment, never from flags, so they
 // do not appear in shell history or process listings.
-func connect(env Env, mode, cfgPath, socket, apiURL string) (*client.Client, string, error) {
+func connect(env Env, mode, cfgPath, socket string, r *remoteFlags) (*client.Client, string, error) {
+	apiURL, pin, caFile := r.url, r.fingerprint, r.ca
 	if apiURL == "" {
-		if v, ok := env.LookupEnv(config.EnvAPIURL); ok {
-			apiURL = v
-		}
+		apiURL, _ = env.LookupEnv(config.EnvAPIURL)
+	}
+	if pin == "" {
+		pin, _ = env.LookupEnv(config.EnvTLSPin)
+	}
+	if caFile == "" {
+		caFile, _ = env.LookupEnv(config.EnvTLSCA)
 	}
 	if apiURL != "" {
 		key, _ := env.LookupEnv(config.EnvAPIKey)
 		if key == "" {
 			return nil, "", fmt.Errorf("TCP access needs an API key in %s", config.EnvAPIKey)
 		}
-		c, err := client.NewTCP(apiURL, key)
+		var opts []client.Option
+		if pin != "" {
+			opts = append(opts, client.WithPinnedCertificate(pin))
+		}
+		if caFile != "" {
+			pem, err := os.ReadFile(caFile)
+			if err != nil {
+				return nil, "", fmt.Errorf("read CA file: %w", err)
+			}
+			opts = append(opts, client.WithCAPEM(pem))
+		}
+		c, err := client.NewTCP(apiURL, key, opts...)
 		return c, apiURL, err
 	}
 	return connectSocket(env, mode, cfgPath, socket)

@@ -7,11 +7,25 @@ Phase 3.
 
 ## Requirements
 
-- Linux (amd64 or arm64). Other platforms build and run, but report every
-  capability as `unsupported` until their collectors exist.
+- Linux (amd64 or arm64), with everything described here.
+- macOS and Windows: basic monitoring (D32) of identity, uptime, CPU,
+  memory, disks and network. macOS reports the load average but not CPU
+  usage; Windows reports CPU usage but has no load average. Sensors, disk
+  health, services, processes and history-specific sources are reported
+  `unsupported`. The admin connection is a Unix socket on macOS and a
+  named pipe on Windows.
 - Go 1.27.4 to build (pinned in `go.mod`; the `go` command downloads it if
   needed). No C compiler or database server is needed.
 - Optional: `smartctl` from smartmontools 7.0 or newer, for disk health.
+
+### macOS and Windows
+
+`cockpit` runs the same way: `cockpit` opens the TUI with an embedded
+agent, and `cockpit agent` runs one in the foreground. On macOS the admin
+socket is in the state directory, because there is no `XDG_RUNTIME_DIR`. On
+Windows it is a named pipe (`\\.\pipe\cockpit-monitor-<your SID>`, D31),
+which `--socket` also accepts. The system service, the SMART helper and
+`deploy/` are Linux only.
 
 ## Build
 
@@ -251,20 +265,78 @@ The full contract is served at `/api/v1/openapi.json` and lives in
 
 ## Remote access
 
-By default TCP binds to `127.0.0.1` only. Remote access requires TLS:
+By default TCP binds to `127.0.0.1` only. Remote access requires TLS.
+Cockpit can create its own certificate (D29):
+
+```sh
+cockpit tls init --host box.example --host 192.0.2.7   # system mode: sudo cockpit tls init --mode system ...
+# paste the printed api: block into the configuration file, restart the agent
+```
+
+`tls init` writes a private CA and a server certificate into
+`<config dir>/tls/`. Keys are `0600`; in system mode the server key goes to
+the `cockpit-monitor` user and the CA key stays root-only. It prints the
+certificate's SHA-256 fingerprint. On the client:
+
+```sh
+export COCKPIT_API_KEY="$(cat box.key)"
+cockpit tui --url https://box.example:7878 --tls-fingerprint <fingerprint>   # pin this certificate
+cockpit tui --url https://box.example:7878 --tls-ca ca.pem                    # or trust the CA
+```
+
+Both also work as `COCKPIT_TLS_FINGERPRINT` and `COCKPIT_TLS_CA`, and in
+the Go SDK as `client.WithPinnedCertificate` and `client.WithCAPEM`.
+`cockpit tls show` prints the fingerprint again. Server certificates last
+a year, and the agent warns in its log 30 days before expiry. `/status`
+shows `tls_expires_at` to the local admin. `cockpit tls renew` issues a new
+one from the same CA. Clients that trust the CA need no change; pinned
+clients need the new fingerprint.
+
+A certificate from your own CA or ACME works too; set the two paths:
 
 ```yaml
-# ~/.config/cockpit-monitor/config.yaml
 api:
   tcp:
     address: 0.0.0.0:7878
   tls:
-    cert_file: /home/you/.config/cockpit-monitor/tls/cert.pem
-    key_file: /home/you/.config/cockpit-monitor/tls/key.pem   # must be chmod 600
+    cert_file: /etc/cockpit-monitor/tls/server.pem
+    key_file: /etc/cockpit-monitor/tls/server-key.pem   # must be chmod 600
 ```
 
-Without both files, the agent refuses to start. Clients refuse to send a
-key over plain HTTP to a non-loopback host.
+Without both files, the agent refuses to start on a non-loopback
+address. Clients refuse to send a key over plain HTTP to a non-loopback
+host.
+
+## Watching several machines
+
+`cockpit fleet` is a console for many machines (D30). Nothing central is
+installed. Each machine keeps its own agent, and the console polls them
+with a key per machine.
+
+```sh
+# on each machine: enable TLS (see Remote access) and create a key
+sudo cockpit keys create --mode system --name fleet --scope system:read --scope metrics:read > web01.key
+# on the console machine
+chmod 600 web01.key
+cockpit fleet add web01 https://web01.example:7878 --key-file ./web01.key
+cockpit fleet                    # the console; Enter opens the full TUI for a machine
+cockpit fleet check              # one-line status per machine, for scripts
+cockpit fleet list               # remove with: cockpit fleet remove web01
+```
+
+`fleet add` shows the server certificate's fingerprint and pins it once
+you confirm. Compare it with `cockpit tls show` on that machine, or pass
+`--tls-fingerprint` (or `--tls-ca`) to skip the question. It also records
+the machine ID. If either changes, for example after a reinstall or an
+impersonation, the console marks the machine **REFUSED** and stops
+polling it until you run `fleet add NAME ... --replace`. The list is
+`~/.config/cockpit-monitor/fleet.yaml` (mode `0600`). It names key files
+but never contains keys. Keys can also come from an environment variable
+(`--key-env`).
+
+Give fleet keys `system:read` and `metrics:read`. Add `network:read` only
+if you want addresses on the console host. Protect the console host as
+well as the machines it watches, because it holds their keys.
 
 ## What you may see as "unavailable"
 

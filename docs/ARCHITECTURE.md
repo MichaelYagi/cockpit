@@ -250,9 +250,13 @@ tui:
 ## 9. Platform portability
 
 - Platform code lives in `internal/platform/<os>` behind build tags.
-- Non-Linux builds use `internal/platform/unsupported`, so the binary
-  always compiles and runs, reporting capabilities as `unsupported`. CI
-  cross-compiles for Linux, macOS, and Windows on every change.
+- macOS (`internal/platform/darwin`) and Windows
+  (`internal/platform/windows`) have collectors for identity, uptime, CPU,
+  memory, filesystems and network, without cgo (D32). Everything else is
+  reported `unsupported` with a reason (`unsupported.Rest`). Other systems
+  use `internal/platform/unsupported`, so the binary always runs.
+- The conformance suite (`internal/collector/conformance`) runs against
+  each platform's real collectors on Linux, macOS and Windows CI runners.
 - Local admin transport is behind a listener abstraction: Unix sockets on
   Linux/macOS, named pipes with ACLs on Windows later.
 - Linux sources: `/proc` and `/sys` (hand-written parsers, D13), `statfs`,

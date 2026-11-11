@@ -507,3 +507,147 @@ version numbers.
 
 **Why.** "Published SDK" needs a version people can pin, release notes,
 and binaries they can verify.
+
+## D27 — A `network:read` scope for network layout
+
+**Status:** Accepted (2026-11-11)
+
+**Decision.** Interface addresses, routes and DNS configuration need a new
+issuable scope, `network:read`. Interface names, state, counters, rates
+and errors stay under `metrics:read`, so throughput dashboards still work.
+Without `network:read`:
+
+- `addresses` in `/metrics` and `/network` interfaces is an empty list,
+  and `redacted` lists `addresses`;
+- the `routes` and `dns` sections of `/network` report `permission_denied`
+  with a reason naming the scope;
+- reports leave out the network part the same way.
+
+The socket principal holds every scope. A storage migration gives every
+existing key that has `metrics:read` the new scope as well, so no
+integration changes behavior on upgrade. Only new keys have to ask for it.
+
+**Why.** Resolves Q6. One metrics key per machine is harmless; a fleet
+console holding keys for many machines would otherwise hold a map of the
+whole network.
+
+## D28 — Process command lines are never exposed
+
+**Status:** Accepted (2026-11-11)
+
+**Decision.** Command lines are never read or returned, under any scope
+or configuration. This closes Q7. Process items gain an `executable` field,
+the resolved path of `/proc/<pid>/exe` under `processes:read`. It is null
+when the kernel does not allow reading it (other users' processes,
+without privileges), and `executable_reason` explains why.
+
+**Why.** Arguments routinely carry passwords, tokens and connection
+strings, and no redaction can recognize them reliably. The executable
+path identifies the program without its arguments.
+
+## D29 — TLS tooling and certificate pinning
+
+**Status:** Accepted (2026-11-11)
+
+**Decision.**
+
+- `cockpit tls init` creates a private CA and a server certificate (ECDSA
+  P-256, CA 10 years, server 1 year, SANs from `--host`, which may be
+  repeated). Keys are written `0600` into the configuration directory. It
+  prints the configuration lines to add and the certificate's SHA-256
+  fingerprint. `cockpit tls renew` issues a new server certificate from
+  the same CA. `cockpit tls show` prints the fingerprint and expiry.
+- Clients can pin a server instead of trusting a CA:
+  `client.WithPinnedCertificate(sha256)`, `--tls-fingerprint`, or
+  `COCKPIT_TLS_FINGERPRINT`. A pinned connection checks only the leaf
+  certificate's fingerprint, and expiry, and refuses everything else.
+  `--tls-ca FILE` trusts a private CA.
+- The agent logs a warning 30 days before its certificate expires, and
+  `/status` (admin part) reports `tls_expires_at`.
+- Bringing your own certificate (for example ACME) stays supported and
+  documented.
+
+**Why.** Remote access already requires TLS (D4). This makes it practical
+without a public CA, and pinning works without one.
+
+## D30 — Fleet model: a pull-only console with pinned identities
+
+**Status:** Accepted (2026-11-11)
+
+**Decision.** The fleet console is a client. It needs no agent changes, no
+new listeners and no central server.
+
+- `cockpit fleet add NAME URL` enrolls a machine. The key is read from a
+  file or an environment variable, and TLS pins its fingerprint by
+  default. Enrollment contacts the agent and records its `machine_id` and
+  certificate fingerprint. `fleet list`, `fleet remove NAME` and
+  `fleet check` manage the list.
+- The list lives in `fleet.yaml` in the user's configuration directory,
+  mode `0600` and refused otherwise. Keys are not stored in it; it refers
+  to key files, which must also be `0600`.
+- `cockpit fleet` (the console) polls each machine with its own key and
+  shows a table: health, CPU, memory, fullest filesystem, uptime and last
+  contact. Pressing Enter opens the normal TUI for one machine. Machines
+  are polled concurrently with per-machine timeouts. One slow or
+  unreachable machine never blocks the others.
+- **Identity.** A changed `machine_id` or certificate fingerprint makes
+  the console refuse that machine and say so, until the operator runs
+  `fleet add --replace`. A reinstalled or impersonated host cannot slip
+  in silently.
+- **Recommended keys.** `system:read` and `metrics:read`. `network:read`
+  only if the operator wants network detail (D27). The docs say a fleet
+  host holding many keys should be protected like those machines.
+- Plain-HTTP machines are allowed only on loopback, as for every client.
+
+**Why.** It meets the "fleet console" goal with the existing API, keeps
+every machine local-first, and avoids a server that would need its own
+availability, storage and trust model. Push-based enrollment can be
+designed later if pull stops scaling (hundreds of machines).
+
+## D31 — Windows admin transport: a named pipe with an explicit ACL
+
+**Status:** Accepted (2026-11-11)
+
+**Decision.** On Windows the admin listener is the named pipe
+`\\.\pipe\cockpit-monitor` (user mode: `cockpit-monitor-<user SID>`). Its
+security descriptor grants access only to SYSTEM, the Administrators
+group and the user running the agent. Remote pipe clients are rejected
+(`PIPE_REJECT_REMOTE_CLIENTS`). The listener and client use
+`github.com/Microsoft/go-winio`. This is a new dependency, maintained by
+Microsoft and widely used, because correct overlapped named-pipe I/O and
+security descriptors are not available in the standard library.
+
+*Clarification (5H):* there is no separate `--pipe` flag. `--socket`
+and `api.socket.path` accept a pipe name, and on Windows they default to
+the pipe. Clients also check the pipe's server: it must run as SYSTEM, an
+administrator or the current user. Otherwise a process that created the
+name first could impersonate the agent.
+
+**Why.** The Unix socket gives local admin access through file
+permissions (D3). A named pipe with an ACL is Windows' equivalent, and the
+roadmap asked for it.
+
+## D32 — macOS and Windows collectors without cgo
+
+**Status:** Accepted (2026-11-11)
+
+**Decision.** New `internal/platform/darwin` and `internal/platform/windows`
+packages use only `golang.org/x/sys` and the standard library, so builds
+stay `CGO_ENABLED=0`:
+
+- **macOS:** identity and uptime, load average, memory (`sysctl`),
+  filesystems (`getfsstat`), and interfaces with addresses. CPU usage,
+  sensors and network counters need Mach or IOKit calls that require cgo.
+  They are reported `unsupported` with that reason.
+- **Windows:** identity and version (`RtlGetVersion`), uptime, CPU usage
+  (`GetSystemTimes`), memory (`GlobalMemoryStatusEx`), fixed drives
+  (`GetDiskFreeSpaceExW`), and interfaces with addresses. Load average does
+  not exist on Windows and is reported `unsupported`.
+
+Anything not listed is reported `unsupported`, as today. CI runs the
+platform tests and the conformance suite on `macos-latest` and
+`windows-latest` runners, since these collectors cannot be exercised on
+Linux.
+
+**Why.** Basic monitoring on the two other common desktop systems, while
+keeping the single static binary and the "unsupported, not fatal" rule.
