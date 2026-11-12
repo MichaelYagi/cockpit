@@ -38,6 +38,7 @@ type fakeAPI struct {
 	created []apiv1.CreateAPIKeyRequest
 	revoked []string
 	removed []string
+	noTCP   bool // the agent has no TCP listener
 	rotated []string
 	procsOK bool
 	stream  []apiv1.Event
@@ -75,6 +76,9 @@ func (f *fakeAPI) Status(context.Context) (*apiv1.Status, error) {
 			Listeners:     []apiv1.Listener{{Transport: "unix", Address: "/run/user/1000/cockpit-monitor/agent.sock"}, {Transport: "tcp", Address: "127.0.0.1:7878"}},
 			Requests:      apiv1.RequestStats{Total: 42, Status2xx: 40, Status4xx: 2, AuthFailures: 1},
 			ActiveClients: 1,
+		}
+		if f.noTCP {
+			s.API.Listeners = s.API.Listeners[:1]
 		}
 	}
 	return s, nil
@@ -594,6 +598,38 @@ func TestCreateKeyNeedsAScope(t *testing.T) {
 }
 
 // d removes a revoked key after the ID is typed; an active key is refused.
+// With a TCP listener, the new-key dialog shows how to try the key.
+// Without one (the TUI's private agent), it says keys cannot be used yet.
+func TestKeyUsabilityHints(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrAccess))
+	if strings.Contains(screenText(m), "no network port") {
+		t.Errorf("warning shown although TCP is on:\n%s", screenText(m))
+	}
+	press(t, m, "n")
+	typeText(t, m, "x")
+	press(t, m, "enter", "enter")
+	if !strings.Contains(screenText(m), "http://127.0.0.1:7878/api/v1/health") {
+		t.Errorf("no curl hint:\n%s", screenText(m))
+	}
+
+	api = &fakeAPI{admin: true, noTCP: true}
+	m = New(api, Options{Target: "embedded agent (this session only)", Now: func() time.Time { return t0 }, Embedded: true})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	drive(t, m, m.refresh(true))
+	press(t, m, key(scrAccess))
+	if out := screenText(m); !strings.Contains(out, "private agent has no network port") || !strings.Contains(out, "cockpit agent") {
+		t.Errorf("no warning for the private agent:\n%s", out)
+	}
+	press(t, m, "n")
+	typeText(t, m, "x")
+	press(t, m, "enter", "enter")
+	if out := screenText(m); !strings.Contains(out, "no network port") || strings.Contains(out, "curl -H") {
+		t.Errorf("reveal dialog:\n%s", out)
+	}
+}
+
 func TestRemoveRevokedKey(t *testing.T) {
 	revokedAt := t0
 	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{

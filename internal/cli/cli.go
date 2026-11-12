@@ -304,6 +304,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 	}
 
 	c, target, err := connect(env, *mode, *cfgPath, *socket, remote)
+	embedded := false
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
 		return ExitError
@@ -321,7 +322,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 		}
 		defer emb.stop()
 		c.Close()
-		c, target = emb.client, "embedded agent (this session only)"
+		c, target, embedded = emb.client, "embedded agent (this session only)", true
 		defer c.Close()
 	}
 
@@ -332,7 +333,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 		}
 		return ExitOK
 	}
-	if err := tui.Run(ctx, c, tui.RunOptions{Options: tui.Options{Target: target, Refresh: interval, Theme: *theme, PrefsPath: tuiPrefsPath(env)}}); err != nil {
+	if err := tui.Run(ctx, c, tui.RunOptions{Options: tui.Options{Target: target, Refresh: interval, Embedded: embedded, Theme: *theme, PrefsPath: tuiPrefsPath(env)}}); err != nil {
 		fmt.Fprintln(env.Stderr, "error:", err)
 		return ExitError
 	}

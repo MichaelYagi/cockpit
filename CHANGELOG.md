@@ -35,6 +35,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
   from the list: `d` on the API Access screen, `cockpit keys remove ID`,
   or `POST /api/v1/keys/{id}/remove`. Active keys must be revoked first.
   Removal is recorded as a `key.removed` event.
+- **Key usability hints.** When the TUI runs its own private agent (no
+  agent was running), the API Access screen and the new-key dialog say
+  that this agent has no network port and that keys work once
+  `cockpit agent` runs. With a TCP listener, the new-key dialog shows a
+  ready `curl` command for `/api/v1/health`.
 - **Copying a new key.** In the TUI's new-key dialog, `c` copies the key
   to the clipboard (OSC 52; most modern terminals, including Windows
   Terminal). The mouse is released while the dialog is open, so the key
