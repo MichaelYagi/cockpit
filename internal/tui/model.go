@@ -117,6 +117,12 @@ type Options struct {
 	// Embedded is set when the TUI started its own private agent for this
 	// session (no agent was running). That agent has no network port.
 	Embedded bool
+	// Theme forces a theme by ID for this session; empty uses the saved
+	// one (or the default).
+	Theme string
+	// PrefsPath is the per-user preferences file (theme). Empty: nothing
+	// is read or saved.
+	PrefsPath string
 }
 
 // Model is the Bubble Tea model. It holds only API responses and
@@ -124,6 +130,7 @@ type Options struct {
 type Model struct {
 	api  API
 	opts Options
+	st   *styles // current theme
 
 	width, height int
 	screen        screen
@@ -211,7 +218,13 @@ func New(api API, opts Options) *Model {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [4]bool{false, true, false, false}, eventIDs: map[string]bool{}}
+	m := &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [4]bool{false, true, false, false}, eventIDs: map[string]bool{}}
+	t, err := startTheme(opts.Theme, opts.PrefsPath)
+	m.st = newStyles(t)
+	if err != nil {
+		m.flashMsg(lvWarn, "Could not read saved preferences; using the default theme.")
+	}
+	return m
 }
 
 type tickMsg time.Time
@@ -1082,6 +1095,26 @@ var settingFields = []settingField{
 	{"Confirm changes over", "evaluations", func(h *apiv1.HealthSettings) float64 { return float64(h.Confirm) }, func(h *apiv1.HealthSettings, v float64) { h.Confirm = int(v) }, true},
 }
 
+// themeIndex is the position of the current theme in themes.
+func (m *Model) themeIndex() int {
+	for i, t := range themes {
+		if t.id == m.st.c.id {
+			return i
+		}
+	}
+	return 0
+}
+
+// setTheme switches the theme now and saves it for next time.
+func (m *Model) setTheme(t theme) {
+	m.st = newStyles(t)
+	if err := savePrefs(m.opts.PrefsPath, prefs{Theme: t.id}); err != nil {
+		m.flashMsg(lvWarn, "Theme changed for this session; it could not be saved: "+err.Error())
+		return
+	}
+	m.flashMsg(lvOK, "Theme: "+t.name)
+}
+
 func (m *Model) settingsKey(s string) tea.Cmd {
 	// The refresh interval is a local, per-session setting: always allowed.
 	switch s {
@@ -1090,6 +1123,13 @@ func (m *Model) settingsKey(s string) tea.Cmd {
 		return nil
 	case "-":
 		m.opts.Refresh = max(500*time.Millisecond, m.opts.Refresh-500*time.Millisecond)
+		return nil
+	case "[", "]": // the theme is a per-user preference: always allowed
+		step := 1
+		if s == "[" {
+			step = len(themes) - 1
+		}
+		m.setTheme(themes[(m.themeIndex()+step)%len(themes)])
 		return nil
 	}
 	if !m.isAdmin() || m.settings == nil {

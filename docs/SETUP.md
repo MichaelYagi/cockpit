@@ -55,6 +55,17 @@ TCP listener is running; the API Access screen says so.
 
 `cockpit tui --once` prints a plain-text summary instead of opening the UI.
 
+### Themes
+
+The Settings screen (`S`) lists the color themes with a swatch of each.
+Single-color themes (Teal, Ocean, Violet, Rose, Graphite) come first, then
+mixed ones (Aurora, Lagoon, Orchid, Dusk). `[` and `]` switch theme at once
+and save it to `tui.json` in your configuration directory
+(`~/.config/cockpit-monitor/` on Linux, mode `0600`); the fleet console
+uses it too. Every theme keeps green, amber and red for health, and every
+status also has a symbol and a word. `cockpit tui --theme ocean` picks a
+theme for one session without saving it.
+
 ### TUI keys
 
 | Key | Action |
@@ -72,6 +83,7 @@ TCP listener is running; the API Access screen says so.
 | `f` (Services) | Failed services only / all |
 | `t` (Performance) | Chart range: 1h, 6h, 24h, 7d |
 | `v` / `m` (Events) | Minimum severity: all, warning, critical / load older events |
+| `[` / `]` (Settings) | Previous / next color theme (saved for you) |
 | `+` / `-` (Settings) | Change this session's refresh interval |
 | `↑`/`↓`, `enter`, `w`, `d`, `esc` (Settings) | Select / edit a health threshold / save / reset to the file / discard edits |
 

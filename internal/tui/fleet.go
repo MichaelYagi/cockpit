@@ -37,6 +37,9 @@ type FleetOptions struct {
 	Refresh time.Duration // default 5s
 	Timeout time.Duration // per machine and poll, default 5s
 	Now     func() time.Time
+	// Theme and PrefsPath as in Options; the console only reads them.
+	Theme     string
+	PrefsPath string
 }
 
 // fleetRow is the console's view of one machine.
@@ -55,6 +58,7 @@ type fleetRow struct {
 // concurrently with a timeout each, so one slow machine never blocks the
 // others.
 type FleetModel struct {
+	st            *styles
 	rows          []*fleetRow
 	opts          FleetOptions
 	width, height int
@@ -75,7 +79,8 @@ func NewFleet(machines []FleetMachine, opts FleetOptions) *FleetModel {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	f := &FleetModel{opts: opts}
+	t, _ := startTheme(opts.Theme, opts.PrefsPath) // a bad file falls back to the default
+	f := &FleetModel{opts: opts, st: newStyles(t)}
 	for _, m := range machines {
 		r := &fleetRow{m: m}
 		if m.API == nil {
@@ -197,7 +202,7 @@ func fleetErr(err error) string {
 func (f *FleetModel) View() tea.View {
 	v := tea.NewView(f.render())
 	v.AltScreen = true
-	v.BackgroundColor = colBackground
+	v.BackgroundColor = f.st.c.bg
 	v.WindowTitle = fmt.Sprintf("Cockpit fleet · %d machines", len(f.rows))
 	return v
 }
@@ -218,24 +223,24 @@ func (f *FleetModel) render() string {
 	}
 	if w < MinWidth || h < MinHeight {
 		msg := fmt.Sprintf("Cockpit needs a terminal of at least %d×%d.\nThis one is %d×%d.", MinWidth, MinHeight, w, h)
-		return clip(lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, sText.Render(msg)), w, h)
+		return clip(lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, f.st.text.Render(msg)), w, h)
 	}
 	counts := map[string]int{}
 	for _, r := range f.rows {
 		counts[f.state(r).word]++
 	}
-	head := sBold.Render("COCKPIT FLEET") + sMuted.Render(fmt.Sprintf("  %d machines", len(f.rows)))
+	head := f.st.bold.Render("COCKPIT FLEET") + f.st.muted.Render(fmt.Sprintf("  %d machines", len(f.rows)))
 	for _, s := range []string{"CRITICAL", "WARNING", "DOWN", "REFUSED"} {
 		if n := counts[s]; n > 0 {
-			head += "  " + sMuted.Render(fmt.Sprintf("%d %s", n, strings.ToLower(s)))
+			head += "  " + f.st.muted.Render(fmt.Sprintf("%d %s", n, strings.ToLower(s)))
 		}
 	}
 	inner := w - 4
 	msgW := max(10, inner-fcName-fcState-3*fcNum-fcUptime-fcSeen-2)
-	lines := []string{sMuted.Render(pad("MACHINE", fcName) + pad("STATE", fcState) + padLeft("CPU", fcNum) + padLeft("MEM", fcNum) +
+	lines := []string{f.st.muted.Render(pad("MACHINE", fcName) + pad("STATE", fcState) + padLeft("CPU", fcNum) + padLeft("MEM", fcNum) +
 		padLeft("DISK", fcNum) + padLeft("UPTIME", fcUptime) + padLeft("SEEN", fcSeen) + "  " + "DETAIL")}
 	if len(f.rows) == 0 {
-		lines = append(lines, sMuted.Render("No machines enrolled. Add one with: cockpit fleet add NAME URL --key-file FILE"))
+		lines = append(lines, f.st.muted.Render("No machines enrolled. Add one with: cockpit fleet add NAME URL --key-file FILE"))
 	}
 	for i, r := range f.rows {
 		st := f.state(r)
@@ -267,13 +272,13 @@ func (f *FleetModel) render() string {
 		detail := st.detail
 		name := pad(truncate(r.m.Name, fcName-1), fcName)
 		if i == f.selected {
-			name = sAccent.Render("▸ ") + pad(truncate(r.m.Name, fcName-3), fcName-2)
+			name = f.st.accent.Render("▸ ") + pad(truncate(r.m.Name, fcName-3), fcName-2)
 		}
-		lines = append(lines, name+pad(badge(st.level, st.word), fcState)+padLeft(cpu, fcNum)+padLeft(mem, fcNum)+padLeft(disk, fcNum)+
-			padLeft(up, fcUptime)+padLeft(seen, fcSeen)+"  "+sMuted.Render(truncate(detail, msgW)))
+		lines = append(lines, name+pad(badge(f.st, st.level, st.word), fcState)+padLeft(cpu, fcNum)+padLeft(mem, fcNum)+padLeft(disk, fcNum)+
+			padLeft(up, fcUptime)+padLeft(seen, fcSeen)+"  "+f.st.muted.Render(truncate(detail, msgW)))
 	}
-	body := panel("Machines", strings.Join(lines, "\n"), w, h-2, true)
-	footer := sMuted.Render(" ↑↓ select  enter open  r refresh  q quit")
+	body := panel(f.st, "Machines", strings.Join(lines, "\n"), w, h-2, true)
+	footer := f.st.muted.Render(" ↑↓ select  enter open  r refresh  q quit")
 	return clip(strings.Join([]string{head, fit(body, h-2), footer}, "\n"), w, h)
 }
 

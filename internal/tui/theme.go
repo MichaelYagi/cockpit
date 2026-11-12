@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"strings"
 	"time"
@@ -11,34 +12,111 @@ import (
 	"github.com/MichaelYagi/cockpit/pkg/apiv1"
 )
 
-// Palette: dark charcoal background, subtle borders, teal for neutral
-// information, green/amber/red for health. Color is never the only signal:
-// every status also has a symbol and a word.
-var (
-	colBackground = lipgloss.Color("#1d2025")
-	colBorder     = lipgloss.Color("#3a4049")
-	colBorderHi   = lipgloss.Color("#5c8a8a")
-	colText       = lipgloss.Color("#d0d6de")
-	colMuted      = lipgloss.Color("#8a939e")
-	colAccent     = lipgloss.Color("#4fc1b9") // teal: neutral information
-	colOK         = lipgloss.Color("#7ccf8a")
-	colWarn       = lipgloss.Color("#e9b85b")
-	colCrit       = lipgloss.Color("#f0716b")
-)
+// A theme is a set of colors. Every theme keeps a dark background, subtle
+// borders and green/amber/red for health; themes differ in their accents.
+// Color is never the only signal: every status also has a symbol and a
+// word.
+type theme struct {
+	id, name string
+	single   bool // one accent hue; listed first in Settings
+	bg       color.Color
+	border   color.Color
+	borderHi color.Color // focused panel border
+	text     color.Color
+	muted    color.Color
+	accent   color.Color // tabs, key hints, the main chart line
+	accent2  color.Color // panel titles
+	accent3  color.Color // second chart line (e.g. memory, network sent)
+	ok       color.Color
+	warn     color.Color
+	crit     color.Color
+}
 
-var (
-	sText    = lipgloss.NewStyle().Foreground(colText)
-	sMuted   = lipgloss.NewStyle().Foreground(colMuted)
-	sAccent  = lipgloss.NewStyle().Foreground(colAccent)
-	sBold    = lipgloss.NewStyle().Foreground(colText).Bold(true)
-	sTitle   = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
-	sOK      = lipgloss.NewStyle().Foreground(colOK)
-	sWarn    = lipgloss.NewStyle().Foreground(colWarn)
-	sCrit    = lipgloss.NewStyle().Foreground(colCrit)
-	sTabOn   = lipgloss.NewStyle().Foreground(colBackground).Background(colAccent).Bold(true).Padding(0, 1)
-	sTabOff  = lipgloss.NewStyle().Foreground(colMuted).Padding(0, 1)
-	sKeyHint = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
-)
+func hex(s string) color.Color { return lipgloss.Color(s) }
+
+// themes lists every theme: single-color ones first, then mixed. The first
+// is the default.
+var themes = []theme{
+	single("teal", "Teal", "#1d2025", "#3a4049", "#5c8a8a", "#4fc1b9", "#8fdcd5"),
+	single("ocean", "Ocean", "#1b2029", "#34405a", "#4f6f9a", "#5aa9f0", "#a3cdf6"),
+	single("violet", "Violet", "#1f1d27", "#3d3850", "#6f5f9a", "#a98bf0", "#d0bff8"),
+	single("rose", "Rose", "#231d21", "#483842", "#9a5f78", "#f08bb0", "#f7c3d6"),
+	single("graphite", "Graphite", "#1e1f21", "#3c3e42", "#6b6f76", "#c3c9d1", "#8f969f"),
+	mixed("aurora", "Aurora", "#1a1f26", "#36404d", "#6a5fa8", "#4fd1c5", "#b392f0", "#6cb6ff"),
+	mixed("lagoon", "Lagoon", "#1a2027", "#33404c", "#3f8f8a", "#6cb6ff", "#4fd1c5", "#f08bb0"),
+	mixed("orchid", "Orchid", "#211d25", "#433a4c", "#8a5f9a", "#f08bb0", "#b392f0", "#4fd1c5"),
+	mixed("dusk", "Dusk", "#201d27", "#3f3850", "#9a5f86", "#a98bf0", "#f08bb0", "#6cb6ff"),
+}
+
+func single(id, name, bg, border, borderHi, accent, light string) theme {
+	t := mixed(id, name, bg, border, borderHi, accent, accent, light)
+	t.single = true
+	return t
+}
+
+func mixed(id, name, bg, border, borderHi, accent, accent2, accent3 string) theme {
+	return theme{id: id, name: name, bg: hex(bg), border: hex(border), borderHi: hex(borderHi),
+		text: hex("#d0d6de"), muted: hex("#8a939e"), accent: hex(accent), accent2: hex(accent2), accent3: hex(accent3),
+		ok: hex("#7ccf8a"), warn: hex("#e9b85b"), crit: hex("#f0716b")}
+}
+
+// ThemeIDs lists the theme IDs, for flag validation and help.
+func ThemeIDs() []string {
+	ids := make([]string, len(themes))
+	for i, t := range themes {
+		ids[i] = t.id
+	}
+	return ids
+}
+
+// themeByID returns the theme with this ID, or the default.
+func themeByID(id string) theme {
+	for _, t := range themes {
+		if t.id == id {
+			return t
+		}
+	}
+	return themes[0]
+}
+
+// styles are the lipgloss styles of one theme. Models hold their own; the
+// helpers that draw take them as their first argument.
+type styles struct {
+	c                                    theme
+	text, muted, accent, accent3, bold   lipgloss.Style
+	title, ok, warn, crit, tabOn, tabOff lipgloss.Style
+	keyHint                              lipgloss.Style
+}
+
+func newStyles(t theme) *styles {
+	n := lipgloss.NewStyle
+	return &styles{
+		c:       t,
+		text:    n().Foreground(t.text),
+		muted:   n().Foreground(t.muted),
+		accent:  n().Foreground(t.accent),
+		accent3: n().Foreground(t.accent3),
+		bold:    n().Foreground(t.text).Bold(true),
+		title:   n().Foreground(t.accent2).Bold(true),
+		ok:      n().Foreground(t.ok),
+		warn:    n().Foreground(t.warn),
+		crit:    n().Foreground(t.crit),
+		tabOn:   n().Foreground(t.bg).Background(t.accent).Bold(true).Padding(0, 1),
+		tabOff:  n().Foreground(t.muted).Padding(0, 1),
+		keyHint: n().Foreground(t.accent).Bold(true),
+	}
+}
+
+// series is the style of the i-th line in a group of charts.
+func (st *styles) series(i int) lipgloss.Style {
+	switch i % 3 {
+	case 1:
+		return st.accent3
+	case 2:
+		return st.title.UnsetBold()
+	}
+	return st.accent
+}
 
 // level is a severity used for coloring and labels.
 type level int
@@ -51,24 +129,25 @@ const (
 	lvUnknown
 )
 
-func (l level) style() lipgloss.Style {
+// lv is the style for a level.
+func (st *styles) lv(l level) lipgloss.Style {
 	switch l {
 	case lvOK:
-		return sOK
+		return st.ok
 	case lvWarn:
-		return sWarn
+		return st.warn
 	case lvCrit:
-		return sCrit
+		return st.crit
 	case lvUnknown:
-		return sMuted
+		return st.muted
 	}
-	return sAccent
+	return st.accent
 }
 
 // badge renders a status as symbol + word, so it reads without color.
-func badge(l level, word string) string {
+func badge(st *styles, l level, word string) string {
 	sym := map[level]string{lvOK: "●", lvWarn: "▲", lvCrit: "✖", lvUnknown: "?", lvNeutral: "•"}[l]
-	return l.style().Render(sym + " " + word)
+	return st.lv(l).Render(sym + " " + word)
 }
 
 func healthLevel(status string) level {
@@ -83,8 +162,8 @@ func healthLevel(status string) level {
 	return lvUnknown
 }
 
-func healthBadge(status string) string {
-	return badge(healthLevel(status), strings.ToUpper(status))
+func healthBadge(st *styles, status string) string {
+	return badge(st, healthLevel(status), strings.ToUpper(status))
 }
 
 // availabilityText explains why a section has no data.
@@ -114,7 +193,7 @@ func percentLevel(p, warn, crit float64) level {
 }
 
 // bar draws a horizontal usage bar of the given width, e.g. ███████░░░.
-func bar(percent float64, width int, l level) string {
+func bar(st *styles, percent float64, width int, l level) string {
 	if width < 1 {
 		return ""
 	}
@@ -123,7 +202,7 @@ func bar(percent float64, width int, l level) string {
 	}
 	percent = math.Max(0, math.Min(100, percent))
 	filled := int(math.Round(percent / 100 * float64(width)))
-	return l.style().Render(strings.Repeat("█", filled)) + sMuted.Render(strings.Repeat("░", width-filled))
+	return st.lv(l).Render(strings.Repeat("█", filled)) + st.muted.Render(strings.Repeat("░", width-filled))
 }
 
 // sparkRunes draw one bar per value, e.g. per-core CPU.
@@ -131,18 +210,18 @@ var sparkRunes = []rune("▁▂▃▄▅▆▇█")
 
 // sparkline draws the last 2×width values as a one-row line chart, scaled
 // to max (or the data's own maximum when max <= 0).
-func sparkline(values []float64, width int, max float64) string {
+func sparkline(line lipgloss.Style, values []float64, width int, max float64) string {
 	if width < 1 {
 		return ""
 	}
-	return lineChart(values, width, 1, max)[0]
+	return lineChart(line, values, width, 1, max)[0]
 }
 
 // panel draws a bordered box with a title.
-func panel(title, body string, width, height int, focused bool) string {
-	border := colBorder
+func panel(st *styles, title, body string, width, height int, focused bool) string {
+	border := st.c.border
 	if focused {
-		border = colBorderHi
+		border = st.c.borderHi
 	}
 	inner := width - 4 // border + padding
 	if inner < 1 {
@@ -152,17 +231,17 @@ func panel(title, body string, width, height int, focused bool) string {
 	for i, l := range lines {
 		lines[i] = truncate(l, inner)
 	}
-	content := sTitle.Render(truncate(title, inner)) + "\n" + strings.Join(lines, "\n")
-	st := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1).Width(width)
+	content := st.title.Render(truncate(title, inner)) + "\n" + strings.Join(lines, "\n")
+	frame := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1).Width(width)
 	if height > 0 {
-		st = st.Height(height)
+		frame = frame.Height(height)
 		// Clip content that would overflow the panel.
 		maxLines := height - 2
 		if cl := strings.Split(content, "\n"); maxLines > 0 && len(cl) > maxLines {
 			content = strings.Join(cl[:maxLines], "\n")
 		}
 	}
-	return st.Render(content)
+	return frame.Render(content)
 }
 
 // truncate shortens a (possibly styled) line to width cells.

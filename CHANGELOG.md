@@ -23,6 +23,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Color themes.** Settings lists nine themes with a swatch each: five
+  single-color (Teal, the default, Ocean, Violet, Rose, Graphite) and four
+  mixed (Aurora, Lagoon, Orchid, Dusk). `[` and `]` switch live; the choice
+  is saved per user in `tui.json`. `cockpit tui --theme NAME` overrides it
+  for one session. Health colors stay green, amber and red in every theme.
 - **All read scopes at once.** In the TUI's new-key dialog, `a` selects
   every read scope (or clears them); `cockpit keys create --scope all`
   does the same. Keys still never get `admin`.

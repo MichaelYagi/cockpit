@@ -617,3 +617,21 @@ func shortTemp() string {
 	}
 	return ""
 }
+
+func TestTUIRejectsUnknownTheme(t *testing.T) {
+	code, _, errOut := run(t, "", "tui", "--once", "--theme", "neon")
+	if code != ExitUsage || !strings.Contains(errOut, "unknown theme") || !strings.Contains(errOut, "teal") {
+		t.Errorf("%d %s", code, errOut)
+	}
+}
+
+func TestTUIPrefsPath(t *testing.T) {
+	env, _, _ := testEnv("/h", nil)
+	if p := tuiPrefsPath(env); !filepath.IsAbs(p) || filepath.Base(p) != "tui.json" {
+		t.Errorf("path %q", p)
+	}
+	env.Home, env.LookupEnv = "", func(string) (string, bool) { return "", false }
+	if p := tuiPrefsPath(env); p != "" {
+		t.Errorf("relative path used: %q", p)
+	}
+}

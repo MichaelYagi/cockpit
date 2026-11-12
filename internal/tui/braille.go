@@ -3,6 +3,8 @@ package tui
 import (
 	"math"
 	"strings"
+
+	"charm.land/lipgloss/v2"
 )
 
 // Line charts are drawn with braille characters: each terminal cell holds
@@ -19,7 +21,7 @@ var brailleBits = [2][4]rune{{0x01, 0x02, 0x04, 0x40}, {0x08, 0x10, 0x20, 0x80}}
 // the last 2w values are drawn; fewer values are aligned right. A point
 // without data leaves a gap, and a measured zero still shows a dot on the
 // bottom row, so a gap is never mistaken for zero.
-func lineChart(values []float64, w, h int, top float64) []string {
+func lineChart(line lipgloss.Style, values []float64, w, h int, top float64) []string {
 	if w < 1 || h < 1 {
 		return nil
 	}
@@ -73,7 +75,7 @@ func lineChart(values []float64, w, h int, top float64) []string {
 				b.WriteRune(0x2800 + c)
 			}
 		}
-		out[r] = sAccent.Render(b.String())
+		out[r] = line.Render(b.String())
 	}
 	return out
 }

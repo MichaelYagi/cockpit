@@ -735,12 +735,12 @@ func TestNoOverlappingFetches(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	if got := ansi.Strip(bar(50, 10, lvOK)); got != "█████░░░░░" {
+	if got := ansi.Strip(bar(testSt, 50, 10, lvOK)); got != "█████░░░░░" {
 		t.Errorf("bar %q", got)
 	}
 	// Two points per cell, aligned right: 0 and 100 are joined by a
 	// vertical run in the right-hand column.
-	if got := ansi.Strip(sparkline([]float64{0, 100}, 3, 100)); got != "  ⡸" {
+	if got := ansi.Strip(sparkline(testSt.accent, []float64{0, 100}, 3, 100)); got != "  ⡸" {
 		t.Errorf("sparkline %q", got)
 	}
 	if bytes(1536) != "1.5 KiB" || bytes(5<<30) != "5.0 GiB" || bytes(12) != "12 B" {
@@ -779,7 +779,7 @@ func TestKeyTableFitsNarrowTerminal(t *testing.T) {
 
 func TestColumnDropsWholeBoxes(t *testing.T) {
 	boxes := []box{{title: "A", lines: []string{"1", "2", "3"}}, {title: "B", lines: []string{"1", "2", "3"}}, {title: "C", lines: []string{"1"}}}
-	out := ansi.Strip(column(boxes, 40, 8))
+	out := ansi.Strip(column(testSt, boxes, 40, 8))
 	if strings.Count(out, "╭") != strings.Count(out, "╰") || !strings.Contains(out, "Not shown at this size: B, C") {
 		t.Errorf("column:\n%s", out)
 	}
@@ -1018,7 +1018,7 @@ func TestChartGapsAndScaling(t *testing.T) {
 	// 20 dot columns over 10 minutes: 100 at the start, 0 at 9 minutes,
 	// nothing in between.
 	pts := []apiv1.HistoryPoint{{Time: from, Avg: 100}, {Time: from.Add(9 * time.Minute), Avg: 0}}
-	rows := chart(pts, 10, 2, 100, from, from.Add(10*time.Minute))
+	rows := chart(testSt.accent, pts, 10, 2, 100, from, from.Add(10*time.Minute))
 	top, bottom := []rune(ansi.Strip(rows[0])), []rune(ansi.Strip(rows[1]))
 	if top[0] != '⠁' || bottom[0] != ' ' {
 		t.Errorf("100%% is the top-left dot: %q / %q", string(top), string(bottom))
@@ -1037,13 +1037,13 @@ func TestChartGapsAndScaling(t *testing.T) {
 func TestLineChartJoinsPoints(t *testing.T) {
 	// A rise from the bottom to the top of one row fills the column
 	// between the two points, so the line is continuous.
-	got := ansi.Strip(lineChart([]float64{0, 0, 100, 100}, 2, 1, 100)[0])
+	got := ansi.Strip(lineChart(testSt.accent, []float64{0, 0, 100, 100}, 2, 1, 100)[0])
 	// Cell 1: both points on the bottom. Cell 2: the rise (left column)
 	// and the top point (right column).
 	if got != "⣀⠏" {
 		t.Errorf("line %q", got)
 	}
-	if got := lineChart([]float64{math.NaN(), 50}, 1, 1, 0); len(got) != 1 {
+	if got := lineChart(testSt.accent, []float64{math.NaN(), 50}, 1, 1, 0); len(got) != 1 {
 		t.Errorf("rows %d", len(got))
 	}
 }
