@@ -2123,6 +2123,7 @@ components:
                 - invalid_parameter
                 - invalid_cursor
                 - invalid_host
+                - origin_not_allowed
                 - authentication_required
                 - invalid_credentials
                 - insufficient_scope

@@ -668,3 +668,25 @@ no longer exists; it stays a plain ID.
 
 **Why.** Revoked keys stayed in the list for good and cluttered it. Their
 history is kept by the `key.revoked` and `key.removed` events and the logs.
+
+## D34 — Opt-in browser access (CORS) to the TCP listener
+
+**Status:** Proposed (2026-11-12)
+
+**Decision.** A new setting, `api.cors.allowed_origins`, lists exact web
+origins (`scheme://host[:port]`, lower case, http or https; no wildcards,
+paths or `null`; at most 32) that may call the TCP listener from a
+browser. It is empty by default, which keeps today's behavior. For a
+listed origin the agent answers preflights with `204`, allowing `GET` and
+the `Authorization`, `Accept` and `Last-Event-ID` headers (cached 10
+minutes), and adds `Access-Control-Allow-Origin` (with `Vary: Origin`) to
+every response, errors included, so pages can read them. Credentials are
+never allowed: the page must send an API key, and auth, scopes, rate
+limits and the `Host` check apply as before. A preflight from an unlisted
+origin gets `403 origin_not_allowed`. The Unix socket never answers
+browsers. The setting is in the configuration file only.
+
+**Why.** Browser-based API tools and small web dashboards could not call
+the agent: the preflight got `405` and the browser never sent the request.
+An exact allowlist enables them without letting arbitrary sites read the
+API.

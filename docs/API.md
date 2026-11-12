@@ -29,6 +29,11 @@ disagree, the spec wins and this document must be fixed.
 
 Keys are never accepted in URLs or query strings.
 
+**Browsers.** Web pages can call the TCP listener only from origins listed
+in `api.cors.allowed_origins` (D34), for `GET` requests with an
+`Authorization` header. A preflight from any other origin gets `403
+origin_not_allowed`. Desktop tools and scripts are not affected.
+
 ## 3. Scopes
 
 | Scope | Routes |
@@ -197,6 +202,7 @@ way: `"addresses": [], "redacted": ["mac_address", "addresses"]`.
 | HTTP | `code` examples |
 |---|---|
 | 400 | `invalid_request`, `invalid_parameter`, `invalid_host` (loopback listener received a non-loopback `Host` header) |
+| 403 | `origin_not_allowed` (browser preflight from an origin not in `api.cors.allowed_origins`, D34) |
 | 401 | `authentication_required`, `invalid_credentials` (missing, malformed, unknown, revoked, and expired keys are indistinguishable to the client) |
 | 403 | `insufficient_scope` |
 | 404 | `not_found` |

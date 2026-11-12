@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -81,6 +82,7 @@ func validate(c *Config, p *Paths, v *validator) {
 	if c.API.TCP.Enabled {
 		validateTCP(v, c.API)
 	}
+	validateCORS(v, c.API.CORS)
 	if c.API.TLS.Enabled() {
 		if c.API.TLS.CertFile == "" || c.API.TLS.KeyFile == "" {
 			v.add("api.tls", "cert_file and key_file must both be set")
@@ -163,6 +165,38 @@ func validateTCP(v *validator, api API) {
 	if !loopback && (api.TLS.CertFile == "" || api.TLS.KeyFile == "") {
 		v.add("api.tcp.address", "%q is not a loopback address; remote access requires api.tls.cert_file and api.tls.key_file", api.TCP.Address)
 	}
+}
+
+// validateCORS requires exact origins: scheme://host[:port], http or
+// https, with nothing else (D34).
+func validateCORS(v *validator, c CORS) {
+	if len(c.AllowedOrigins) > MaxCORSOrigins {
+		v.add("api.cors.allowed_origins", "at most %d origins are allowed (got %d)", MaxCORSOrigins, len(c.AllowedOrigins))
+		return
+	}
+	for _, o := range c.AllowedOrigins {
+		if msg := originProblem(o); msg != "" {
+			v.add("api.cors.allowed_origins", "%q %s", o, msg)
+		}
+	}
+}
+
+func originProblem(o string) string {
+	if o == "*" || strings.Contains(o, "*") {
+		return "is a wildcard; list each origin exactly"
+	}
+	u, err := url.Parse(o)
+	switch {
+	case err != nil || u.Host == "":
+		return "is not an origin like https://example.com"
+	case u.Scheme != "http" && u.Scheme != "https":
+		return "must use http or https"
+	case u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "":
+		return "must be only scheme://host[:port], with no path, query or user"
+	case o != strings.ToLower(o) || strings.HasSuffix(o, "/"):
+		return "must be lower case with no trailing slash, as browsers send it"
+	}
+	return ""
 }
 
 func inRange(v *validator, field string, d, lo, hi time.Duration) {
