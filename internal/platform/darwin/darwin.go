@@ -1,9 +1,10 @@
 //go:build darwin
 
-// Package darwin collects macOS metrics without cgo (D32): sysctl,
-// getfsstat and the routing socket's interface statistics. CPU usage,
-// sensors and disk health need Mach or IOKit calls that require cgo, so
-// they are reported unsupported.
+// Package darwin collects macOS metrics without cgo (D32, D36): sysctl,
+// getfsstat and the routing socket's interface statistics, plus Mach,
+// libproc, CoreFoundation and IOKit calls made through purego for CPU
+// usage, processes, power sources and temperatures. Disk health and fans
+// are reported unsupported.
 package darwin
 
 import (
@@ -33,6 +34,7 @@ const version = "1.0.0"
 var implemented = []core.Capability{
 	core.CapSystemIdentity, core.CapSystemUptime, core.CapCPUUsage, core.CapCPULoad, core.CapMemoryUsage,
 	core.CapStorageFilesystems, core.CapNetworkInterfaces, core.CapNetworkThroughput,
+	core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapPowerSupplies, core.CapSensorsThermal,
 }
 
 // Collectors returns the macOS collector set.
@@ -41,13 +43,28 @@ func Collectors(env collector.Env) []collector.Collector {
 	if now == nil {
 		now = time.Now
 	}
+	// System libraries, loaded once per collector set. A library that
+	// fails to load makes only its capabilities unavailable.
+	sys, sysErr := loadSys()
+	cf, ioErr := loadCF()
+	var iok *ioKitLib
+	if ioErr == nil {
+		iok, ioErr = loadIOKit(cf)
+	}
 	return []collector.Collector{
 		sampler("darwin.system", "sysctl", time.Minute, now, []core.Capability{core.CapSystemIdentity, core.CapSystemUptime}, system),
-		sampler("darwin.cpu", "sysctl", 0, now, []core.Capability{core.CapCPUUsage, core.CapCPULoad}, cpu),
+		sampler("darwin.cpu", "host_processor_info, sysctl", 0, now, []core.Capability{core.CapCPUUsage, core.CapCPULoad},
+			func(r *collector.Result) { cpu(r, sys, sysErr) }),
 		sampler("darwin.memory", "sysctl", 0, now, []core.Capability{core.CapMemoryUsage}, memory),
 		sampler("darwin.filesystems", "getfsstat", 10*time.Second, now, []core.Capability{core.CapStorageFilesystems},
 			func(r *collector.Result) { filesystems(r, env.Filesystems) }),
 		sampler("darwin.network", "sysctl net.route", 0, now, []core.Capability{core.CapNetworkInterfaces, core.CapNetworkThroughput}, network),
+		newProcesses(sys, sysErr, now),
+		inventory("darwin.hardware", "sysctl", now, []core.Capability{core.CapHardwareCPU, core.CapHardwareBoard}, hardware),
+		withInterval(sampler("darwin.power", "IOKit power sources", 0, now, []core.Capability{core.CapPowerSupplies},
+			func(r *collector.Result) { power(r, iok, ioErr) }), 10*time.Second),
+		withInterval(sampler("darwin.thermal", "IOKit HID", 0, now, []core.Capability{core.CapSensorsThermal},
+			func(r *collector.Result) { thermal(r, iok, ioErr) }), 5*time.Second),
 		unsupported.Rest("darwin.unsupported", implemented, "Not collected on macOS yet."),
 	}
 }
@@ -74,6 +91,23 @@ func sampler(id, source string, interval time.Duration, now func() time.Time, ca
 	}
 }
 
+// inventory is a collector for data that rarely changes.
+func inventory(id, source string, now func() time.Time, caps []core.Capability, fill func(*collector.Result)) collector.Collector {
+	c := sampler(id, source, 5*time.Minute, now, caps, fill).(portable.Func)
+	c.Desc.Class = collector.Inventory
+	c.Desc.DefaultTimeout = 3 * time.Second
+	return c
+}
+
+// withInterval sets a sampler's interval and its minimum to the same
+// value: power sources and sensors change slowly, and reading them more
+// often only costs time.
+func withInterval(c collector.Collector, d time.Duration) collector.Collector {
+	f := c.(portable.Func)
+	f.Desc.DefaultInterval, f.Desc.MinInterval = d, d
+	return f
+}
+
 func system(r *collector.Result) {
 	info := &core.SystemInfo{OSID: "macos", OSName: "macOS", Architecture: runtime.GOARCH}
 	info.Hostname, _ = os.Hostname()
@@ -97,9 +131,31 @@ func system(r *collector.Result) {
 	r.Records = append(r.Records, info)
 }
 
-// cpu reports the load average; per-CPU tick counters need Mach calls.
-func cpu(r *collector.Result) {
-	r.Status[core.CapCPUUsage] = portable.Unavailable(core.Unsupported, "CPU usage needs Mach calls, which this build (without cgo) cannot make. The load average is shown instead.")
+// cpu reports per-CPU tick counters (the engine derives usage) and the
+// load average.
+func cpu(r *collector.Result, sys *sysLib, sysErr error) {
+	rec := &core.CPUCounters{LogicalCores: runtime.NumCPU()}
+	defer func() { // a record only when something in it was read
+		if r.Status[core.CapCPUUsage].Availability == core.Available || r.Status[core.CapCPULoad].Availability == core.Available {
+			r.Records = append(r.Records, rec)
+		}
+	}()
+	switch {
+	case sysErr != nil:
+		r.Status[core.CapCPUUsage] = portable.Unavailable(core.Unsupported, "CPU usage needs the Mach system library, which could not be loaded: "+sysErr.Error())
+	default:
+		ticks, cpus, err := sys.cpuTicks()
+		if err != nil {
+			r.Status[core.CapCPUUsage] = portable.Status(err, "CPU tick counters")
+			break
+		}
+		rec.Total, rec.PerCore = cpuTimes(ticks, cpus)
+		rec.LogicalCores = len(rec.PerCore)
+		r.Status[core.CapCPUUsage] = portable.Available()
+	}
+	if s, err := unix.Sysctl("machdep.cpu.brand_string"); err == nil {
+		rec.ModelName = s
+	}
 	b, err := unix.SysctlRaw("vm.loadavg")
 	if err != nil || len(b) < 24 {
 		r.Status[core.CapCPULoad] = portable.Status(errOr(err), "the load average")
@@ -113,7 +169,7 @@ func cpu(r *collector.Result) {
 	}
 	l := func(i int) float64 { return float64(binary.LittleEndian.Uint32(b[4*i:])) / scale }
 	r.Status[core.CapCPULoad] = portable.Available()
-	r.Records = append(r.Records, &core.CPUCounters{LogicalCores: runtime.NumCPU(), Load: &core.LoadAverage{One: l(0), Five: l(1), Fifteen: l(2)}})
+	rec.Load = &core.LoadAverage{One: l(0), Five: l(1), Fifteen: l(2)}
 }
 
 // reclaimable page counters; not every macOS version has every one.

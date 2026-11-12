@@ -173,10 +173,14 @@ filesystems are always skipped.
 | ID | Capabilities | Sources |
 |---|---|---|
 | `darwin.system` | `system.identity`, `system.uptime` | `sysctl` (`kern.osproductversion`, `kern.boottime`) |
-| `darwin.cpu` | `cpu.load` (`cpu.usage` unsupported: needs Mach) | `vm.loadavg` |
+| `darwin.cpu` | `cpu.usage`, `cpu.load` | `host_processor_info` (purego, D36), `vm.loadavg` |
 | `darwin.memory` | `memory.usage` | `hw.memsize`; free, speculative, purgeable and file-backed pages; `vm.swapusage` |
 | `darwin.filesystems` | `storage.filesystems` | `getfsstat`; APFS system volumes (`MNT_DONTBROWSE`) and network filesystems skipped |
 | `darwin.network` | `network.interfaces`, `network.throughput` | `net.Interfaces`; counters from `NET_RT_IFLIST2` |
+| `darwin.processes` | `processes.list` (on demand) | `sysctl kern.proc.all`; `proc_pidinfo`, `proc_pidpath`, `proc_name`, `getpwuid_r` (purego) |
+| `darwin.hardware` | `hardware.cpu`, `hardware.board` | `sysctl` (`machdep.cpu.brand_string`, `hw.physicalcpu`, cache sizes, `hw.model`) |
+| `darwin.power` | `power.supplies` | IOKit power sources (purego) |
+| `darwin.thermal` | `sensors.thermal` (Apple Silicon) | IOKit HID temperature sensors (purego); not marked as CPU sensors |
 | `windows.system` | `system.identity`, `system.uptime` | `RtlGetVersion`, registry product name, `GetTickCount64` |
 | `windows.cpu` | `cpu.usage` (`cpu.load` unsupported: none on Windows) | `GetSystemTimes` |
 | `windows.memory` | `memory.usage` | `GlobalMemoryStatusEx` |
@@ -202,7 +206,8 @@ configuration cannot schedule them more often than the tool tolerates.
 
 ### On-demand collectors
 
-`linux.processes` implements `collector.ProcessLister` and is never
+`linux.processes` and `darwin.processes` implement
+`collector.ProcessLister` and are never
 scheduled. The engine samples it only when a client asks, caches the
 result for 2 seconds, takes two samples 0.5 seconds apart when no recent
 one exists (CPU usage needs a delta), and keeps a few recent views so
