@@ -857,3 +857,50 @@ func TestNetworkScope(t *testing.T) {
 		t.Error("socket must see DNS")
 	}
 }
+
+// Browser access is opt-in per exact origin (D34).
+func TestCORS(t *testing.T) {
+	e := newEnv(t, io.Discard)
+	tcp := router(t, e.d, Options{Listener: ListenerTCP, CheckLoopbackHost: true, CORSOrigins: []string{"https://app.example"}})
+	sock := router(t, e.d, Options{Listener: ListenerSocket})
+	origin := func(o string) reqOpt { return func(r *http.Request) { r.Header.Set("Origin", o) } }
+	preflight := func(r *http.Request) {
+		r.Header.Set("Access-Control-Request-Method", "GET")
+		r.Header.Set("Access-Control-Request-Headers", "authorization")
+	}
+
+	r := do(t, tcp, "OPTIONS", "/api/v1/health", origin("https://app.example"), preflight)
+	if r.status != 204 || r.header.Get("Access-Control-Allow-Origin") != "https://app.example" ||
+		r.header.Get("Access-Control-Allow-Methods") != "GET" || !strings.Contains(r.header.Get("Access-Control-Allow-Headers"), "Authorization") {
+		t.Errorf("allowed preflight: %d %v", r.status, r.header)
+	}
+	if r.header.Get("Access-Control-Allow-Credentials") != "" {
+		t.Error("credentials must never be allowed")
+	}
+
+	r = do(t, tcp, "OPTIONS", "/api/v1/health", origin("https://evil.example"), preflight)
+	if r.status != 403 || errorCode(t, r.body) != apiv1.CodeOriginNotAllowed || r.header.Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("other origin preflight: %d %s", r.status, r.body)
+	}
+
+	// Real requests still need a key; the CORS headers let the page read
+	// the answer, including errors.
+	r = do(t, tcp, "GET", "/api/v1/health", origin("https://app.example"))
+	if r.status != 401 || r.header.Get("Access-Control-Allow-Origin") != "https://app.example" || !strings.Contains(r.header.Get("Vary"), "Origin") {
+		t.Errorf("allowed origin without key: %d %v", r.status, r.header)
+	}
+	r = do(t, tcp, "GET", "/api/v1/status", origin("https://app.example"), bearer(systemKey))
+	if r.status != 200 || r.header.Get("Access-Control-Allow-Origin") != "https://app.example" || !strings.Contains(r.header.Get("Access-Control-Expose-Headers"), "X-Request-ID") {
+		t.Errorf("allowed origin with key: %d %v", r.status, r.header)
+	}
+	r = do(t, tcp, "GET", "/api/v1/status", origin("https://evil.example"), bearer(systemKey))
+	if r.header.Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("headers sent to an unlisted origin: %v", r.header)
+	}
+
+	// The admin socket never answers browsers, even for a listed origin.
+	r = do(t, sock, "OPTIONS", "/api/v1/health", origin("https://app.example"), preflight)
+	if r.header.Get("Access-Control-Allow-Origin") != "" || r.status == 204 {
+		t.Errorf("socket answered a preflight: %d %v", r.status, r.header)
+	}
+}

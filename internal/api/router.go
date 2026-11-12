@@ -83,6 +83,9 @@ type Options struct {
 	CheckLoopbackHost bool
 	// Limits enables rate limiting (TCP only). Nil disables it.
 	Limits *middleware.Limits
+	// CORSOrigins are the web origins allowed to call this listener from
+	// a browser (TCP only, D34).
+	CORSOrigins []string
 }
 
 // Routes returns the route table.
@@ -170,6 +173,10 @@ func newRouter(d Deps, o Options, routes []Route) (http.Handler, error) {
 	}
 	if o.CheckLoopbackHost {
 		r.Use(middleware.HostCheck)
+	}
+	if o.Listener == ListenerTCP {
+		// Before rate limiting, so a browser can read 429 responses too.
+		r.Use(middleware.CORS(o.CORSOrigins))
 	}
 	if o.Limits != nil && o.Listener == ListenerTCP {
 		r.Use(middleware.GlobalRateLimit(o.Limits, d.Stats))

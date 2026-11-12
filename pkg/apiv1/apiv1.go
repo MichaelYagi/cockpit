@@ -85,6 +85,7 @@ const (
 	CodeInvalidCursor          = "invalid_cursor"
 	CodeRateLimited            = "rate_limited"
 	CodeInvalidHost            = "invalid_host"
+	CodeOriginNotAllowed       = "origin_not_allowed"
 	CodeAuthenticationRequired = "authentication_required"
 	CodeInvalidCredentials     = "invalid_credentials"
 	CodeInsufficientScope      = "insufficient_scope"

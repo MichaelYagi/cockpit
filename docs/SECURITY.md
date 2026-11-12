@@ -25,7 +25,7 @@ Threats:
 | Listener | Default | Protection |
 |---|---|---|
 | Unix socket | on | Filesystem permissions (D3) |
-| TCP loopback `127.0.0.1:7878` | on | API key always (D4), `Host` check, no CORS |
+| TCP loopback `127.0.0.1:7878` | on | API key always (D4), `Host` check, CORS only for listed origins (D34) |
 | TCP remote | off | Explicit configuration + TLS + API key |
 
 - Never bind to `0.0.0.0` or `::` unless explicitly configured.
@@ -34,6 +34,14 @@ Threats:
 - Log a prominent warning at startup whenever a remote listener is active.
 - Do not assume a private LAN is trusted. Client IP allowlists are a
   candidate future feature.
+- **Browsers (D34).** By default no web page can read API responses: the
+  agent answers no CORS preflight. `api.cors.allowed_origins` lists exact
+  origins (scheme, host and port; no wildcards, no `null`) that may call
+  the TCP listener from a browser, with `GET` only. Credentials (cookies)
+  are never allowed; the page must send an API key, so a listed origin
+  gets no more than the key it is given. Preflights from unlisted origins
+  get `403 origin_not_allowed`. The Unix socket never answers browsers.
+  Only list sites you trust with a key: the page's code sees the key.
 
 ## 3. Local administration (Unix socket)
 

@@ -228,7 +228,7 @@ func Run(ctx context.Context, o Options) (err error) {
 		}
 	}
 	if cfg.API.TCP.Enabled {
-		if tcpH, err = api.NewRouter(deps, api.Options{Listener: api.ListenerTCP, CheckLoopbackHost: isLoopback(cfg.API.TCP.Address), Limits: limits}); err != nil {
+		if tcpH, err = api.NewRouter(deps, api.Options{Listener: api.ListenerTCP, CheckLoopbackHost: isLoopback(cfg.API.TCP.Address), Limits: limits, CORSOrigins: cfg.API.CORS.AllowedOrigins}); err != nil {
 			return err
 		}
 	}

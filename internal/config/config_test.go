@@ -348,3 +348,24 @@ collection:
 		}
 	}
 }
+
+func TestCORSOrigins(t *testing.T) {
+	good := []string{"https://hoppscotch.io", "http://localhost:3000", "http://127.0.0.1:8080"}
+	for _, o := range good {
+		if p := originProblem(o); p != "" {
+			t.Errorf("%s rejected: %s", o, p)
+		}
+	}
+	bad := []string{"*", "https://*.example.com", "null", "hoppscotch.io", "ftp://x.example", "https://x.example/path",
+		"https://x.example/", "https://X.example", "https://user@x.example", "https://x.example?q=1"}
+	for _, o := range bad {
+		if originProblem(o) == "" {
+			t.Errorf("%s accepted", o)
+		}
+	}
+	var v validator
+	validateCORS(&v, CORS{AllowedOrigins: make([]string, MaxCORSOrigins+1)})
+	if v.err() == nil {
+		t.Error("too many origins accepted")
+	}
+}

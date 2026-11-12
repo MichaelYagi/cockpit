@@ -23,6 +23,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Browser access (D34).** `api.cors.allowed_origins` lists exact web
+  origins that may call the TCP listener from a browser (GET only, API key
+  still required). Off by default. Preflights from other origins get
+  `403 origin_not_allowed`.
+
 - **Color themes.** Settings lists nine themes with a swatch each: five
   single-color (Teal, the default, Ocean, Violet, Rose, Graphite) and four
   mixed (Aurora, Lagoon, Orchid, Dusk). `[` and `]` switch live; the choice

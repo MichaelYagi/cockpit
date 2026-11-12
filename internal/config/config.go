@@ -42,7 +42,19 @@ type API struct {
 	TCP       TCP       `yaml:"tcp"`
 	TLS       TLS       `yaml:"tls"`
 	RateLimit RateLimit `yaml:"rate_limit"`
+	CORS      CORS      `yaml:"cors"`
 }
+
+// CORS lets listed web origins call the TCP listener from a browser
+// (D34). Empty (the default) allows none.
+type CORS struct {
+	// AllowedOrigins are exact origins, e.g. "https://hoppscotch.io" or
+	// "http://localhost:3000". No wildcards.
+	AllowedOrigins []string `yaml:"allowed_origins"`
+}
+
+// MaxCORSOrigins bounds api.cors.allowed_origins.
+const MaxCORSOrigins = 32
 
 // Socket is the local administrative Unix socket (D3).
 type Socket struct {

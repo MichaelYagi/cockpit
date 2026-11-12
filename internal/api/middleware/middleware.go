@@ -111,6 +111,46 @@ func HostCheck(next http.Handler) http.Handler {
 	})
 }
 
+// CORS lets the listed web origins call the API from a browser (D34).
+// Only GET is offered, the only method the TCP listener serves. A
+// preflight from any other origin gets 403 origin_not_allowed; other
+// requests from it are served without CORS headers, so the browser keeps
+// the response from the page. No credentials (cookies) are involved:
+// pages send the API key in the Authorization header.
+func CORS(origins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]bool, len(origins))
+	for _, o := range origins {
+		allowed[o] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			preflight := r.Method == http.MethodOptions && origin != "" && r.Header.Get("Access-Control-Request-Method") != ""
+			if origin == "" || !allowed[origin] {
+				if preflight {
+					httpx.WriteError(w, r, http.StatusForbidden, apiv1.CodeOriginNotAllowed,
+						"Browser access from this origin is not allowed. Add it to api.cors.allowed_origins in the agent configuration.")
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+			h := w.Header()
+			h.Add("Vary", "Origin")
+			h.Set("Access-Control-Allow-Origin", origin)
+			h.Set("Access-Control-Expose-Headers", "X-Request-ID, Retry-After")
+			if preflight {
+				h.Set("Access-Control-Allow-Methods", "GET")
+				h.Set("Access-Control-Allow-Headers", "Authorization, Accept, Last-Event-ID")
+				h.Set("Access-Control-Max-Age", "600")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // BodyLimit rejects request bodies larger than limit.
 func BodyLimit(limit int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

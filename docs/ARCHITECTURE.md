@@ -217,6 +217,8 @@ api:
     per_key_burst: 40
     global_rps: 200
     global_burst: 400
+  cors:                        # browser access to TCP, off by default (D34)
+    allowed_origins: []        # exact origins, e.g. ["https://hoppscotch.io"]
 collection:
   defaults: { interval: 2s, timeout: 1s }   # samplers; inventory collectors keep their own
   collectors:                  # per-collector overrides, e.g.
