@@ -6,7 +6,7 @@ release may change `pkg/client`, `pkg/apiv1` or `pkg/collectorsdk`, and
 every such change is listed here under **Breaking**. The REST API keeps
 its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
-## v0.5.0 — unreleased
+## v0.5.0 — 2026-11-11
 
 ### Changed
 
