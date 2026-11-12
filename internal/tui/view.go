@@ -931,7 +931,7 @@ func (m *Model) modalView(w int) string {
 		}
 		title = verb + " key " + m.pendingID
 		lines = append(lines, wrapText(effect, inner)...)
-		lines = append(lines, "", "Type the key ID to confirm:", sAccent.Render("› ")+m.input+sAccent.Render("█"), "", sMuted.Render("enter confirm · esc cancel"))
+		lines = append(lines, "", fmt.Sprintf("Type the first %d characters of the key ID to confirm:", confirmChars), sAccent.Render("› ")+m.input+sAccent.Render("█"), "", sMuted.Render("enter confirm · esc cancel"))
 	case modalEditSetting:
 		f := settingFields[m.setField]
 		title = "Edit threshold"

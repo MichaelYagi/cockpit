@@ -606,10 +606,10 @@ func TestRemoveRevokedKey(t *testing.T) {
 		t.Fatalf("active key offered for removal:\n%s", screenText(m))
 	}
 	press(t, m, "down", "d")
-	if !strings.Contains(screenText(m), "Remove key k3p9x2m7q4tb") {
+	if !strings.Contains(screenText(m), "Remove key k3p9x2m7q4tb") || !strings.Contains(screenText(m), "first 4 characters") {
 		t.Fatalf("no confirmation:\n%s", screenText(m))
 	}
-	typeText(t, m, "k3p9x2m7q4tb")
+	typeText(t, m, "k3p9x2m7q4tb") // the whole ID also works
 	press(t, m, "enter")
 	if len(api.removed) != 1 || api.removed[0] != "k3p9x2m7q4tb" || !strings.Contains(screenText(m), "Removed k3p9x2m7q4tb") {
 		t.Fatalf("removed %v:\n%s", api.removed, screenText(m))
@@ -638,8 +638,14 @@ func TestRevokeRequiresTypedID(t *testing.T) {
 		t.Fatalf("revoked with wrong ID: %v", api.revoked)
 	}
 	press(t, m, "x")
-	typeText(t, m, "k3p9x2m7q4tb")
-	press(t, m, "backspace", "a", "enter")
+	typeText(t, m, "k3p") // too short
+	press(t, m, "enter")
+	if len(api.revoked) != 0 {
+		t.Fatalf("revoked after 3 characters: %v", api.revoked)
+	}
+	press(t, m, "x")
+	typeText(t, m, "k3p9") // the first 4 characters are enough
+	press(t, m, "enter")
 	if len(api.revoked) != 1 || api.revoked[0] != "k3p9x2m7q4ta" {
 		t.Fatalf("revoked %v", api.revoked)
 	}

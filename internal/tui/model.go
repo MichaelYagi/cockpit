@@ -843,7 +843,7 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 			typed := strings.TrimSpace(m.input)
 			action, id := m.pendingAction, m.pendingID
 			m.modal, m.input = modalNone, ""
-			if typed != id {
+			if !idConfirmed(id, typed) {
 				m.flashMsg(lvWarn, "The ID did not match; nothing was changed.")
 				return nil
 			}
@@ -867,6 +867,16 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// confirmChars is how many leading characters of a key ID confirm a
+// revoke, rotate or remove.
+const confirmChars = 4
+
+// idConfirmed reports whether typed is the start of id, at least
+// confirmChars long (the whole ID also works).
+func idConfirmed(id, typed string) bool {
+	return len(typed) >= confirmChars && strings.HasPrefix(id, typed)
 }
 
 func (m *Model) typeText(k tea.KeyPressMsg, limit int) {

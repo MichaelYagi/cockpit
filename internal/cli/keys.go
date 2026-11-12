@@ -191,7 +191,7 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 	}
 }
 
-// confirm asks the user to retype the key ID.
+// confirm asks the user to type the start of the key ID.
 func confirm(env Env, action, id string) bool {
 	if env.Stdin == nil {
 		fmt.Fprintf(env.Stderr, "Refusing to %s without confirmation; pass --yes to proceed non-interactively.\n", action)
@@ -204,14 +204,19 @@ func confirm(env Env, action, id string) bool {
 	case "remove":
 		what = "Removing deletes the revoked key's record from the list. This cannot be undone."
 	}
-	fmt.Fprintf(env.Stderr, "%s\nType the key ID (%s) to confirm: ", what, id)
+	fmt.Fprintf(env.Stderr, "%s\nType the first %d characters of the key ID (%s) to confirm: ", what, confirmChars, id)
 	line, err := bufio.NewReader(env.Stdin).ReadString('\n')
 	if err != nil && line == "" {
 		fmt.Fprintln(env.Stderr)
 		return false
 	}
-	return strings.TrimSpace(line) == id
+	typed := strings.TrimSpace(line)
+	return len(typed) >= confirmChars && strings.HasPrefix(id, typed)
 }
+
+// confirmChars is how many leading characters of a key ID confirm a
+// revoke, rotate or remove (the whole ID also works).
+const confirmChars = 4
 
 func showCreated(env Env, c *apiv1.CreatedAPIKey, verb string) {
 	k := c.APIKey
