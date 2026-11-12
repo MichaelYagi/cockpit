@@ -6,6 +6,31 @@ release may change `pkg/client`, `pkg/apiv1` or `pkg/collectorsdk`, and
 every such change is listed here under **Breaking**. The REST API keeps
 its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
+## Unreleased
+
+### Changed
+
+- **Line charts.** Performance charts and Overview sparklines are drawn
+  as connected lines in braille characters (2 points across and 4 levels
+  up per character) instead of block bars. Gaps in history still show.
+- **Storage shows used / total.** Filesystem rows on the Overview and
+  Storage screens show used and total space; they showed free space.
+
+### Added
+
+- **All read scopes at once.** In the TUI's new-key dialog, `a` selects
+  every read scope (or clears them); `cockpit keys create --scope all`
+  does the same. Keys still never get `admin`.
+- **Copying a new key.** In the TUI's new-key dialog, `c` copies the key
+  to the clipboard (OSC 52; most modern terminals, including Windows
+  Terminal). The mouse is released while the dialog is open, so the key
+  can also be selected and copied with the terminal's own selection.
+
+### Fixed
+
+- The TUI's new-key dialog was missing `network:read`, so keys created
+  there could not read interface addresses, routes or DNS.
+
 ## v0.5.0 — 2026-11-11
 
 ### Changed

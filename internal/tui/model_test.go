@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -119,7 +120,7 @@ func (f *fakeAPI) Metrics(context.Context, ...string) (*apiv1.MetricsResponse, e
 		{Name: "a-very-long-interface-name0", OperState: "down"},
 	}
 	fss := []apiv1.Filesystem{
-		{MountPoint: "/", Type: "ext4", UsedPercent: 91.2, AvailableBytes: 8 << 30, TotalBytes: 100 << 30},
+		{MountPoint: "/", Type: "ext4", UsedPercent: 91.2, UsedBytes: 92 << 30, AvailableBytes: 8 << 30, TotalBytes: 100 << 30},
 		{MountPoint: "/home/someone/with/a/very/long/mount/point/path", Type: "ext4", UsedPercent: 40, AvailableBytes: 300 << 30},
 	}
 	for i := 0; i < 12; i++ {
@@ -456,7 +457,7 @@ func TestScreensShowUnavailableReasons(t *testing.T) {
 	}
 	press(t, m, key(scrStorage))
 	out = screenText(m)
-	for _, want := range []string{"Test SSD", "nvme", "not configured", "smartctl (smartmontools 7.0 or newer) is not installed."} {
+	for _, want := range []string{"92.0 GiB / 100.0 GiB", "Test SSD", "nvme", "not configured", "smartctl (smartmontools 7.0 or newer) is not installed."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("storage missing %q:\n%s", want, out)
 		}
@@ -533,6 +534,41 @@ func TestCreateKeyRevealsOnce(t *testing.T) {
 	}
 	if !strings.Contains(screenText(m), "grafana") {
 		t.Error("new key not listed")
+	}
+}
+
+// "a" selects every read scope; the new key can be copied (OSC 52) and
+// the mouse is released so the terminal can select it.
+func TestCreateKeyAllScopesAndCopy(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrAccess), "n")
+	typeText(t, m, "everything")
+	press(t, m, "enter", "a", "enter")
+	if len(api.created) != 1 || strings.Join(api.created[0].Scopes, ",") != "system:read,metrics:read,network:read,processes:read" {
+		t.Fatalf("created %+v", api.created)
+	}
+	if m.View().MouseMode != tea.MouseModeNone {
+		t.Error("mouse still captured while the key is shown")
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	if cmd == nil || fmt.Sprint(cmd()) != revealedKey {
+		t.Fatal("c did not copy the key to the clipboard")
+	}
+	if !strings.Contains(screenText(m), "Sent to the clipboard") {
+		t.Errorf("no copy confirmation:\n%s", screenText(m))
+	}
+	press(t, m, "enter")
+	if m.View().MouseMode != tea.MouseModeCellMotion {
+		t.Error("mouse not restored after the key was hidden")
+	}
+
+	// The dialog remembers the last selection (all on); a clears it.
+	press(t, m, "n")
+	typeText(t, m, "x")
+	press(t, m, "enter", "a", "enter")
+	if len(api.created) != 1 || !strings.Contains(screenText(m), "at least one scope") {
+		t.Errorf("a did not toggle back to none: %+v", api.created)
 	}
 }
 
@@ -619,7 +655,9 @@ func TestHelpers(t *testing.T) {
 	if got := ansi.Strip(bar(50, 10, lvOK)); got != "█████░░░░░" {
 		t.Errorf("bar %q", got)
 	}
-	if got := ansi.Strip(sparkline([]float64{0, 50, 100}, 5, 100)); got != "  ▁▅█" {
+	// Two points per cell, aligned right: 0 and 100 are joined by a
+	// vertical run in the right-hand column.
+	if got := ansi.Strip(sparkline([]float64{0, 100}, 3, 100)); got != "  ⡸" {
 		t.Errorf("sparkline %q", got)
 	}
 	if bytes(1536) != "1.5 KiB" || bytes(5<<30) != "5.0 GiB" || bytes(12) != "12 B" {
@@ -859,10 +897,13 @@ func TestPerformanceScreen(t *testing.T) {
 	m := setup(t, api, 140, 45)
 	press(t, m, key(scrPerformance))
 	out := screenText(m)
-	for _, want := range []string{"Last 1h", "CPU usage · avg", "Memory used", "Network received (all interfaces)", "Network sent", "100.0%", "█"} {
+	for _, want := range []string{"Last 1h", "CPU usage · avg", "Memory used", "Network received (all interfaces)", "Network sent", "100.0%"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("performance missing %q:\n%s", want, out)
 		}
+	}
+	if !strings.ContainsFunc(out, func(r rune) bool { return r > 0x2800 && r <= 0x28FF }) {
+		t.Errorf("performance charts are not drawn as braille lines:\n%s", out)
 	}
 	press(t, m, "t")
 	q := api.histQueries[len(api.histQueries)-1]
@@ -891,17 +932,36 @@ func TestSparklinesSeededFromHistory(t *testing.T) {
 
 func TestChartGapsAndScaling(t *testing.T) {
 	from := t0
-	pts := []apiv1.HistoryPoint{{Time: from, Avg: 100}, {Time: from.Add(9 * time.Minute), Avg: 50}}
+	// 20 dot columns over 10 minutes: 100 at the start, 0 at 9 minutes,
+	// nothing in between.
+	pts := []apiv1.HistoryPoint{{Time: from, Avg: 100}, {Time: from.Add(9 * time.Minute), Avg: 0}}
 	rows := chart(pts, 10, 2, 100, from, from.Add(10*time.Minute))
-	top, bottom := ansi.Strip(rows[0]), ansi.Strip(rows[1])
-	if []rune(top)[0] != '█' || []rune(bottom)[0] != '█' {
-		t.Errorf("full column: %q / %q", top, bottom)
+	top, bottom := []rune(ansi.Strip(rows[0])), []rune(ansi.Strip(rows[1]))
+	if top[0] != '⠁' || bottom[0] != ' ' {
+		t.Errorf("100%% is the top-left dot: %q / %q", string(top), string(bottom))
 	}
-	if []rune(top)[9] != ' ' || []rune(bottom)[9] != '█' {
-		t.Errorf("half column: %q / %q", top, bottom)
+	if top[9] != ' ' || bottom[9] != '⡀' {
+		t.Errorf("a measured zero is a dot on the bottom row: %q / %q", string(top), string(bottom))
 	}
-	if []rune(bottom)[5] != ' ' {
-		t.Errorf("a column without data must stay empty: %q", bottom)
+	for c := 1; c < 9; c++ {
+		if top[c] != ' ' || bottom[c] != ' ' {
+			t.Errorf("a span without data must stay empty: %q / %q", string(top), string(bottom))
+			break
+		}
+	}
+}
+
+func TestLineChartJoinsPoints(t *testing.T) {
+	// A rise from the bottom to the top of one row fills the column
+	// between the two points, so the line is continuous.
+	got := ansi.Strip(lineChart([]float64{0, 0, 100, 100}, 2, 1, 100)[0])
+	// Cell 1: both points on the bottom. Cell 2: the rise (left column)
+	// and the top point (right column).
+	if got != "⣀⠏" {
+		t.Errorf("line %q", got)
+	}
+	if got := lineChart([]float64{math.NaN(), 50}, 1, 1, 0); len(got) != 1 {
+		t.Errorf("rows %d", len(got))
 	}
 }
 

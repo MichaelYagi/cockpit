@@ -126,32 +126,16 @@ func bar(percent float64, width int, l level) string {
 	return l.style().Render(strings.Repeat("█", filled)) + sMuted.Render(strings.Repeat("░", width-filled))
 }
 
+// sparkRunes draw one bar per value, e.g. per-core CPU.
 var sparkRunes = []rune("▁▂▃▄▅▆▇█")
 
-// sparkline draws the last width values scaled to max (or the data's own
-// maximum when max <= 0).
+// sparkline draws the last 2×width values as a one-row line chart, scaled
+// to max (or the data's own maximum when max <= 0).
 func sparkline(values []float64, width int, max float64) string {
 	if width < 1 {
 		return ""
 	}
-	if len(values) > width {
-		values = values[len(values)-width:]
-	}
-	if max <= 0 {
-		for _, v := range values {
-			max = math.Max(max, v)
-		}
-	}
-	var b strings.Builder
-	b.WriteString(strings.Repeat(" ", width-len(values)))
-	for _, v := range values {
-		i := 0
-		if max > 0 {
-			i = int(math.Round(math.Max(0, math.Min(1, v/max)) * float64(len(sparkRunes)-1)))
-		}
-		b.WriteRune(sparkRunes[i])
-	}
-	return sAccent.Render(b.String())
+	return lineChart(values, width, 1, max)[0]
 }
 
 // panel draws a bordered box with a title.

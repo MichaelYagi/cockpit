@@ -260,6 +260,10 @@ A newly created key is printed once: on stdout by `cockpit keys create`
 (so it can be redirected to a file), or in a dialog in the TUI. The TUI
 uses the alternate screen, so the key does not remain in terminal
 scrollback, and the key is erased from memory when the dialog closes.
+`c` in the dialog sends the key to the terminal's clipboard with OSC 52; it
+is never written to a file or log. The terminal decides whether to accept
+the request (and over SSH, the clipboard is the one on the machine running
+the terminal).
 
 ## 13. Extensions
 

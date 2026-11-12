@@ -262,6 +262,12 @@ func TestKeysCommandEndToEnd(t *testing.T) {
 		t.Errorf("admin scope: %d %s", code, errOut)
 	}
 
+	// --scope all grants every read scope, never admin.
+	code, _, errOut = run(t, "", "keys", "create", "--socket", sock, "--name", "everything", "--scope", "all")
+	if code != ExitOK || !strings.Contains(errOut, "with scopes metrics:read, network:read, processes:read, system:read.") {
+		t.Errorf("all scopes: %d %s", code, errOut)
+	}
+
 	// Revocation needs the ID retyped; a wrong answer changes nothing.
 	code, _, errOut = run(t, "wrong\n", "keys", "revoke", id, "--socket", sock)
 	if code != ExitError || !strings.Contains(errOut, "Cancelled") {

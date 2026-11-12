@@ -63,6 +63,8 @@ programs, run the agent separately:
 | `q`, `Ctrl-C` | Quit |
 | `↑`/`↓` (API Access) | Select a key |
 | `n` / `o` / `x` (API Access) | Create / rotate / revoke a key |
+| `space` / `a` (new key dialog) | Toggle a scope / select every read scope |
+| `c` (new key shown) | Copy the key to the clipboard |
 | `s` / `/` / `k` (Processes) | Change sort / search / show kernel threads |
 | `c` (Processes) | Switch between processes and containers |
 | `f` (Services) | Failed services only / all |
@@ -78,6 +80,10 @@ changes and asks for confirmation; the override persists in the database
 until reset.
 
 Rotation and revocation ask you to type the key ID. A new key is shown once.
+Press `c` to copy it (the terminal must allow clipboard access through
+OSC 52, as Windows Terminal, iTerm2, kitty, WezTerm and recent xterm do), or
+select it with the mouse: the TUI releases the mouse while the key is
+shown. `cockpit keys create --scope all` grants every read scope.
 It is erased from the screen when you press Enter and cannot be shown again.
 
 ## Files and permissions (user mode)

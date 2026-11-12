@@ -14,6 +14,33 @@ import (
 	"github.com/MichaelYagi/cockpit/pkg/client"
 )
 
+// readScopes are every scope a key can hold, for --scope all. admin is
+// never issued to keys (D3, D8); the server enforces this too.
+var readScopes = []string{"system:read", "metrics:read", "network:read", "processes:read"}
+
+// expandScopes replaces "all" with every read scope, keeping order and
+// dropping duplicates.
+func expandScopes(in []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, s := range in {
+		if s == "all" {
+			for _, r := range readScopes {
+				add(r)
+			}
+			continue
+		}
+		add(s)
+	}
+	return out
+}
+
 const keysUsage = `Manage API keys through the local admin socket.
 
 Usage:
@@ -22,7 +49,8 @@ Usage:
   cockpit keys rotate ID [--yes]
   cockpit keys revoke ID [--yes]
 
-Scopes: system:read, metrics:read, network:read, processes:read
+Scopes: system:read, metrics:read, network:read, processes:read, or "all"
+for every read scope. Keys never get admin.
 --expires accepts a duration (e.g. 720h) or an RFC 3339 time.
 
 "create" and "rotate" print the new key alone on standard output so it can
@@ -110,7 +138,7 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 			fmt.Fprintln(env.Stderr, "usage: cockpit keys create --name NAME --scope SCOPE [--scope SCOPE] [--expires DURATION|TIME]")
 			return ExitUsage
 		}
-		req := apiv1.CreateAPIKeyRequest{Name: name, Scopes: scopes}
+		req := apiv1.CreateAPIKeyRequest{Name: name, Scopes: expandScopes(scopes)}
 		if expires != "" {
 			t, err := parseExpiry(expires, time.Now())
 			if err != nil {

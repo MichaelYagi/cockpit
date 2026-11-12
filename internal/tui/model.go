@@ -99,9 +99,11 @@ const (
 )
 
 // issuableScopes are the scopes a key can be created with (D8).
-var issuableScopes = []string{"system:read", "metrics:read", "processes:read"}
+var issuableScopes = []string{"system:read", "metrics:read", "network:read", "processes:read"}
 
-const historyLen = 120
+// historyLen bounds each sparkline history: two samples per character, for
+// sparklines up to 200 characters wide.
+const historyLen = 400
 
 // Options configure the TUI.
 type Options struct {
@@ -185,8 +187,9 @@ type Model struct {
 	modal         modal
 	input         string
 	scopeCursor   int
-	scopeOn       [3]bool
-	pendingAction string // "revoke" | "rotate"
+	copied        bool    // the revealed key was sent to the clipboard
+	scopeOn       [4]bool // one per issuableScopes entry
+	pendingAction string  // "revoke" | "rotate"
 	pendingID     string
 	revealed      *apiv1.CreatedAPIKey
 	flash         string
@@ -201,7 +204,7 @@ func New(api API, opts Options) *Model {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [3]bool{false, true, false}, eventIDs: map[string]bool{}}
+	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [4]bool{false, true, false, false}, eventIDs: map[string]bool{}}
 }
 
 type tickMsg time.Time
@@ -757,9 +760,16 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	switch m.modal {
 	case modalReveal:
-		if s == "enter" {
+		switch s {
+		case "enter":
 			m.revealed, m.modal = nil, modalNone
 			m.flashMsg(lvOK, "Key hidden. It cannot be shown again.")
+		case "c":
+			// OSC 52: the terminal puts the key on the system clipboard.
+			// Terminals that do not support it ignore the request, so the
+			// key also stays selectable with the mouse.
+			m.copied = true
+			return tea.SetClipboard(m.revealed.Key)
 		}
 	case modalCreateName:
 		switch s {
@@ -780,6 +790,14 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 			m.scopeCursor = min(len(issuableScopes)-1, m.scopeCursor+1)
 		case "space":
 			m.scopeOn[m.scopeCursor] = !m.scopeOn[m.scopeCursor]
+		case "a": // every read scope, or none if all are already on
+			all := true
+			for _, on := range m.scopeOn {
+				all = all && on
+			}
+			for i := range m.scopeOn {
+				m.scopeOn[i] = !all
+			}
 		case "enter":
 			var scopes []string
 			for i, on := range m.scopeOn {
@@ -852,7 +870,7 @@ func (m *Model) applyAction(a actionMsg) tea.Cmd {
 	sanitize(a.revoked)
 	switch a.action {
 	case "create", "rotate":
-		m.revealed, m.modal = a.created, modalReveal
+		m.revealed, m.modal, m.copied = a.created, modalReveal, false
 	case "revoke":
 		m.flashMsg(lvOK, "Revoked "+a.revoked.ID+" ("+a.revoked.Name+"). It stops working immediately.")
 	}
