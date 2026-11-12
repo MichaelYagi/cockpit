@@ -29,6 +29,12 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
   Services, Events (live) and Hardware. Sign in with an API key, which is
   kept in that browser tab only. No third-party code; strict Content
   Security Policy. On by default; `api.web.enabled: false` turns it off.
+- **More on macOS (D36).** CPU usage (total and per core), processes with
+  CPU, memory, threads and executable path, the processor and Mac model,
+  batteries and the power adapter, and temperatures on Apple Silicon.
+  System libraries are called through `github.com/ebitengine/purego`
+  (Apache-2.0, macOS builds only), so builds stay without cgo and macOS
+  binaries can still be built on Linux.
 - **Browser access (D34).** `api.cors.allowed_origins` lists exact web
   origins that may call the TCP listener from a browser (GET only, API key
   still required). Off by default. Preflights from other origins get

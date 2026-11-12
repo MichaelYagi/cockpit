@@ -91,8 +91,9 @@ API like any other client.
 10. API Access: server status, keys, scopes, clients, request statistics.
 11. Settings: refresh rate and health thresholds (local admin).
 
-Runs on Linux (full), and on macOS and Windows (identity, CPU, memory,
-disks, network). Also: a fleet console for many machines, TLS tooling,
+Runs on Linux (full), on macOS (CPU, memory, disks, network, processes,
+batteries, Apple Silicon temperatures) and on Windows (identity, CPU,
+memory, disks, network). A read-only web dashboard is built in. Also: a fleet console for many machines, TLS tooling,
 batteries and UPS (Network UPS Tools), diagnostic reports, metric
 history, and extension collectors compiled in through a public SDK
 (`docs/PLUGINS.md`).
