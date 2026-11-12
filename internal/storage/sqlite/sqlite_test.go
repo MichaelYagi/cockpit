@@ -131,6 +131,25 @@ func TestKeyStoreRoundTrip(t *testing.T) {
 	if len(keys) != 2 {
 		t.Errorf("list %d", len(keys))
 	}
+
+	// Only inactive keys can be deleted (D33).
+	active := next
+	active.ID, active.RevokedAt, active.Hash = "dddddddddddd", nil, append([]byte("x"), next.Hash[1:]...)
+	if err := db.InsertKey(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteKey(ctx, active.ID, later); !errors.Is(err, auth.ErrNotFound) {
+		t.Errorf("deleted an active key: %v", err)
+	}
+	if err := db.DeleteKey(ctx, next.ID, later); err != nil {
+		t.Fatalf("delete revoked: %v", err)
+	}
+	if err := db.DeleteKey(ctx, next.ID, later); !errors.Is(err, auth.ErrNotFound) {
+		t.Errorf("delete twice: %v", err)
+	}
+	if keys, _ := db.ListKeys(ctx); len(keys) != 2 {
+		t.Errorf("after delete: %d keys", len(keys))
+	}
 }
 
 // End to end with the real service: the database file never contains the

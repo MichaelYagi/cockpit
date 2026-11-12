@@ -16,7 +16,7 @@ One binary, `cockpit`, with subcommands (D2):
 |---|---|
 | `cockpit agent` | Monitoring engine + API server. Runs in the foreground; systemd unit `cockpit-agent.service` in system mode. |
 | `cockpit tui` | Terminal UI. An API client only. |
-| `cockpit keys create\|list\|rotate\|revoke` | Key management through the admin socket. |
+| `cockpit keys create\|list\|rotate\|revoke\|remove` | Key management through the admin socket. |
 | `cockpit config check` | Validate configuration and print the effective settings (secrets omitted). |
 | `cockpit version` | Build and API version. |
 

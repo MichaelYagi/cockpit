@@ -44,7 +44,9 @@ Without a terminal (in a script or pipe), plain `cockpit` prints the help
 text instead; `cockpit help` always does. If no agent is running, the TUI starts an embedded one for the session.
 It listens only on a private socket and stops when you quit. To keep
 monitoring when the TUI is closed, and to allow API access from other
-programs, run the agent separately:
+programs, run the agent separately. Keys created while the TUI runs its own
+agent are saved, but nothing can use them until a separate agent with a
+TCP listener is running; the API Access screen says so.
 
 ```sh
 ./bin/cockpit agent        # terminal 1: foreground; Ctrl-C stops it
@@ -57,12 +59,14 @@ programs, run the agent separately:
 
 | Key | Action |
 |---|---|
-| `1`–`9`, `0`, `,`, `tab`, `←`/`→`, click a tab | Switch screen (1 Overview, 2 Hardware, 3 Performance, 4 Health, 5 Storage, 6 Network, 7 Processes, 8 Services, 9 Events, 0 API Access, `,` Settings) |
+| `1`–`9`, `0`, `S`, `tab`, `←`/`→`, click a tab | Switch screen (1 Overview, 2 Hardware, 3 Performance, 4 Health, 5 Storage, 6 Network, 7 Processes, 8 Services, 9 Events, 0 API Access, `S` (Shift+S) Settings; `,` also still opens Settings) |
 | `r` | Refresh now |
 | `?` | Help |
 | `q`, `Ctrl-C` | Quit |
 | `↑`/`↓` (API Access) | Select a key |
-| `n` / `o` / `x` (API Access) | Create / rotate / revoke a key |
+| `n` / `o` / `x` / `d` (API Access) | Create / rotate / revoke a key / remove a revoked or expired key |
+| `space` / `a` (new key dialog) | Toggle a scope / select every read scope |
+| `c` (new key shown) | Copy the key to the clipboard |
 | `s` / `/` / `k` (Processes) | Change sort / search / show kernel threads |
 | `c` (Processes) | Switch between processes and containers |
 | `f` (Services) | Failed services only / all |
@@ -77,7 +81,12 @@ thresholds can be changed only over the local socket. A save shows the
 changes and asks for confirmation; the override persists in the database
 until reset.
 
-Rotation and revocation ask you to type the key ID. A new key is shown once.
+Rotating, revoking and removing a key ask you to type the first 4
+characters of its ID (the whole ID also works). A new key is shown once.
+Press `c` to copy it (the terminal must allow clipboard access through
+OSC 52, as Windows Terminal, iTerm2, kitty, WezTerm and recent xterm do), or
+select it with the mouse: the TUI releases the mouse while the key is
+shown. `cockpit keys create --scope all` grants every read scope.
 It is erased from the screen when you press Enter and cannot be shown again.
 
 ## Files and permissions (user mode)

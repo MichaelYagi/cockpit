@@ -231,6 +231,19 @@ func (d *DB) RevokeKey(ctx context.Context, id string, at time.Time) error {
 	return nil
 }
 
+// DeleteKey deletes a key that is revoked or expired at now.
+func (d *DB) DeleteKey(ctx context.Context, id string, now time.Time) error {
+	res, err := d.db.ExecContext(ctx,
+		"DELETE FROM api_keys WHERE id = ? AND (revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at <= ?))", id, ms(now))
+	if err != nil {
+		return fmt.Errorf("delete key: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return auth.ErrNotFound
+	}
+	return nil
+}
+
 // RotateKey revokes oldID and inserts next in one transaction.
 func (d *DB) RotateKey(ctx context.Context, oldID string, at time.Time, next auth.StoredKey) error {
 	tx, err := d.db.BeginTx(ctx, nil)

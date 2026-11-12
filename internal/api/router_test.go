@@ -340,9 +340,13 @@ func TestContract(t *testing.T) {
 		{"rotate key", sock, "POST", "/api/v1/keys/" + created.Meta.ID + "/rotate", nil, 201, ""},
 		{"rotate unknown key", sock, "POST", "/api/v1/keys/aaaaaaaaaaaa/rotate", nil, 404, apiv1.CodeNotFound},
 		{"rotate revoked key", sock, "POST", "/api/v1/keys/" + created.Meta.ID + "/rotate", nil, 400, apiv1.CodeInvalidRequest},
+		{"remove active key refused", sock, "POST", "/api/v1/keys/" + revokable.Meta.ID + "/remove", nil, 400, apiv1.CodeInvalidRequest},
 		{"revoke key", sock, "DELETE", "/api/v1/keys/" + revokable.Meta.ID, nil, 200, ""},
 		{"revoke key again", sock, "DELETE", "/api/v1/keys/" + revokable.Meta.ID, nil, 200, ""},
 		{"revoke unknown key", sock, "DELETE", "/api/v1/keys/aaaaaaaaaaaa", nil, 404, apiv1.CodeNotFound},
+		{"remove revoked key", sock, "POST", "/api/v1/keys/" + revokable.Meta.ID + "/remove", nil, 204, ""},
+		{"remove removed key", sock, "POST", "/api/v1/keys/" + revokable.Meta.ID + "/remove", nil, 404, apiv1.CodeNotFound},
+		{"remove over TCP", tcp, "POST", "/api/v1/keys/" + created.Meta.ID + "/remove", []reqOpt{bearer(systemKey)}, 404, apiv1.CodeNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

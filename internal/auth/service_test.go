@@ -58,6 +58,16 @@ func (m *memStore) RevokeKey(_ context.Context, id string, at time.Time) error {
 	m.keys[id] = k
 	return nil
 }
+func (m *memStore) DeleteKey(_ context.Context, id string, now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k, ok := m.keys[id]
+	if !ok || k.Active(now) {
+		return ErrNotFound
+	}
+	delete(m.keys, id)
+	return nil
+}
 func (m *memStore) RotateKey(ctx context.Context, oldID string, at time.Time, next StoredKey) error {
 	_ = m.RevokeKey(ctx, oldID, at)
 	return m.InsertKey(ctx, next)
@@ -167,9 +177,29 @@ func TestKeyLifecycle(t *testing.T) {
 		t.Errorf("unknown revoke: %v", err)
 	}
 
+	// Removal (D33): only inactive keys, and the record is gone after.
+	live, err := svc.Create(ctx, CreateRequest{Name: "live", Scopes: []Scope{ScopeSystemRead}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ire *InvalidRequestError
+	if err := svc.Remove(ctx, live.Meta.ID); !errors.As(err, &ire) {
+		t.Errorf("removed an active key: %v", err)
+	}
+	if err := svc.Remove(ctx, r.Meta.ID); err != nil {
+		t.Fatalf("remove revoked: %v", err)
+	}
+	if _, err := svc.Get(ctx, r.Meta.ID); !errors.Is(err, ErrNotFound) {
+		t.Error("removed key still listed")
+	}
+	if err := svc.Remove(ctx, r.Meta.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("remove twice: %v", err)
+	}
+
 	// Lifecycle events and logs never contain key material.
-	if len(*events) != 3 {
-		t.Errorf("events %d", len(*events))
+	// created, rotated, revoked, created (live), removed
+	if len(*events) != 5 || (*events)[4].Type != core.EventKeyRemoved {
+		t.Errorf("events %d %+v", len(*events), *events)
 	}
 	all := logs.String() + fmt.Sprint(*events)
 	for _, k := range []string{c.Key, r.Key, c.Key[len(KeyPrefix)+keyIDLen+1:]} {

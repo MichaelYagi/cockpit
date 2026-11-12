@@ -262,6 +262,12 @@ func TestKeysCommandEndToEnd(t *testing.T) {
 		t.Errorf("admin scope: %d %s", code, errOut)
 	}
 
+	// --scope all grants every read scope, never admin.
+	code, _, errOut = run(t, "", "keys", "create", "--socket", sock, "--name", "everything", "--scope", "all")
+	if code != ExitOK || !strings.Contains(errOut, "with scopes metrics:read, network:read, processes:read, system:read.") {
+		t.Errorf("all scopes: %d %s", code, errOut)
+	}
+
 	// Revocation needs the ID retyped; a wrong answer changes nothing.
 	code, _, errOut = run(t, "wrong\n", "keys", "revoke", id, "--socket", sock)
 	if code != ExitError || !strings.Contains(errOut, "Cancelled") {
@@ -274,7 +280,11 @@ func TestKeysCommandEndToEnd(t *testing.T) {
 	if code != ExitError || !strings.Contains(errOut, "--yes") {
 		t.Errorf("non-interactive revoke: %d %s", code, errOut)
 	}
-	code, _, errOut = run(t, id+"\n", "keys", "revoke", id, "--socket", sock)
+	code, _, errOut = run(t, id[:3]+"\n", "keys", "revoke", id, "--socket", sock)
+	if code != ExitError || !strings.Contains(errOut, "Cancelled") {
+		t.Errorf("3 characters accepted: %d %s", code, errOut)
+	}
+	code, _, errOut = run(t, id[:4]+"\n", "keys", "revoke", id, "--socket", sock)
 	if code != ExitOK || !strings.Contains(errOut, "Revoked") {
 		t.Fatalf("revoke: %d %s", code, errOut)
 	}
@@ -284,6 +294,15 @@ func TestKeysCommandEndToEnd(t *testing.T) {
 	code, _, errOut = run(t, "", "keys", "rotate", id, "--yes", "--socket", sock)
 	if code != ExitError || !strings.Contains(errOut, "active") {
 		t.Errorf("rotate revoked: %d %s", code, errOut)
+	}
+
+	// A revoked key can be removed from the list (D33).
+	code, _, errOut = run(t, id+"\n", "keys", "remove", id, "--socket", sock)
+	if code != ExitOK || !strings.Contains(errOut, "Removed key "+id) {
+		t.Fatalf("remove: %d %s", code, errOut)
+	}
+	if _, out, _ := run(t, "", "keys", "list", "--socket", sock); strings.Contains(out, id) {
+		t.Errorf("removed key still listed:\n%s", out)
 	}
 }
 

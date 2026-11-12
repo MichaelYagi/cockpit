@@ -74,6 +74,7 @@ need `metrics:read`. It does not open a route by itself.
 | GET | `/keys` | `admin` (socket) | Key metadata. Never the key or its hash |
 | POST | `/keys` | `admin` (socket) | Create. Response includes the full key once |
 | POST | `/keys/{id}/rotate` | `admin` (socket) | Issue a replacement key (same name/scopes), revoke the old one immediately. Full key shown once |
+| POST | `/keys/{id}/remove` | `admin` (socket) | Delete a revoked or expired key from the list (D33); `400` if the key is still active. `204` on success |
 | DELETE | `/keys/{id}` | `admin` (socket) | Revoke. Idempotent |
 
 ### Phase 3

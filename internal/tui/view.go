@@ -20,6 +20,10 @@ func (m *Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	if m.modal == modalReveal {
+		// Release the mouse so the terminal can select the new key.
+		v.MouseMode = tea.MouseModeNone
+	}
 	v.BackgroundColor = colBackground
 	v.WindowTitle = "Cockpit"
 	if m.system != nil && m.system.System.Data != nil {
@@ -119,10 +123,10 @@ func (m *Model) tabs(w int) string {
 }
 
 func (m *Model) footer(w int) string {
-	hints := []string{"0-9 , screens", "tab next", "r refresh", "? help", "q quit"}
+	hints := []string{"0-9 S screens", "tab next", "r refresh", "? help", "q quit"}
 	switch m.screen {
 	case scrAccess:
-		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "? help", "q quit"}
+		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "d remove", "? help", "q quit"}
 	case scrProcesses:
 		hints = []string{"s sort:" + processSorts[m.procSort], "/ search", "k kernel threads", "c containers", "q quit"}
 		if m.procContainers {
@@ -491,14 +495,15 @@ func (m *Model) filesystemLines(inner, limit int) []string {
 	fss := append([]apiv1.Filesystem(nil), (*s.Data)...)
 	sort.SliceStable(fss, func(i, j int) bool { return fss[i].UsedPercent > fss[j].UsedPercent })
 	nameW := min(18, max(8, inner/4))
-	barW := max(6, inner-nameW-20)
+	barW := max(6, inner-nameW-34) // name, bar, percent, "used / total"
 	var out []string
 	for i, f := range fss {
 		if limit > 0 && i == limit {
 			out = append(out, sMuted.Render(fmt.Sprintf("… %d more on the Storage screen", len(fss)-limit)))
 			break
 		}
-		out = append(out, pad(f.MountPoint, nameW)+" "+bar(f.UsedPercent, barW, percentLevel(f.UsedPercent, 85, 95))+" "+pct(f.UsedPercent)+" "+sMuted.Render(padLeft(bytes(f.AvailableBytes), 9)))
+		size := bytes(f.UsedBytes) + " / " + bytes(f.TotalBytes)
+		out = append(out, pad(f.MountPoint, nameW)+" "+bar(f.UsedPercent, barW, percentLevel(f.UsedPercent, 85, 95))+" "+pct(f.UsedPercent)+" "+sMuted.Render(padLeft(size, 23)))
 	}
 	if len(out) == 0 {
 		out = append(out, sMuted.Render("no filesystems"))
@@ -839,6 +844,16 @@ func (m *Model) accessScreen(w, h int) string {
 		r := a.Requests
 		srv = append(srv, kv("reqs", fmt.Sprintf("%d total", r.Total)+sMuted.Render(fmt.Sprintf("  2xx %d · 4xx %d · 5xx %d · auth failures %d · rate limited %d", r.Status2xx, r.Status4xx, r.Status5xx, r.AuthFailures, r.RateLimited))))
 		srv = append(srv, kv("clients", fmt.Sprintf("%d active", a.ActiveClients)+sMuted.Render(" (keys used in the last 5 minutes)")))
+		if note := m.noNetworkNote(); note != "" {
+			srv = append(srv, "")
+			for i, l := range wrapText(note, w-6) {
+				prefix := "  "
+				if i == 0 {
+					prefix = sWarn.Render("▲ ")
+				}
+				srv = append(srv, prefix+sWarn.Render(l))
+			}
+		}
 	}
 
 	var keyLines []string
@@ -901,8 +916,8 @@ func (m *Model) modalView(w int) string {
 		lines = []string{"Name for the key (e.g. grafana, backup-script):", "", sAccent.Render("› ") + m.input + sAccent.Render("█"), "", sMuted.Render("enter next · esc cancel")}
 	case modalCreateScopes:
 		title = "New API key · scopes"
-		lines = []string{"Select what the key may read (space toggles):", ""}
-		desc := []string{"system identity and hardware inventory", "metrics, storage, network, sensors, health, events", "process list (users and resource use)"}
+		lines = []string{"Select what the key may read (space toggles, a selects all):", ""}
+		desc := []string{"system identity and hardware inventory", "metrics, storage, network rates, sensors, health, events", "interface addresses, routes and DNS", "process list (users and resource use)"}
 		for i, s := range issuableScopes {
 			box := "[ ]"
 			if m.scopeOn[i] {
@@ -918,12 +933,15 @@ func (m *Model) modalView(w int) string {
 	case modalConfirm:
 		verb := "Revoke"
 		effect := "The key stops working immediately. This cannot be undone."
-		if m.pendingAction == "rotate" {
+		switch m.pendingAction {
+		case "rotate":
 			verb, effect = "Rotate", "A new key is issued and the old key stops working immediately."
+		case "remove":
+			verb, effect = "Remove", "The revoked key is deleted from the list. This cannot be undone."
 		}
 		title = verb + " key " + m.pendingID
 		lines = append(lines, wrapText(effect, inner)...)
-		lines = append(lines, "", "Type the key ID to confirm:", sAccent.Render("› ")+m.input+sAccent.Render("█"), "", sMuted.Render("enter confirm · esc cancel"))
+		lines = append(lines, "", fmt.Sprintf("Type the first %d characters of the key ID to confirm:", confirmChars), sAccent.Render("› ")+m.input+sAccent.Render("█"), "", sMuted.Render("enter confirm · esc cancel"))
 	case modalEditSetting:
 		f := settingFields[m.setField]
 		title = "Edit threshold"
@@ -949,8 +967,19 @@ func (m *Model) modalView(w int) string {
 			sWarn.Render(k.Key),
 			"",
 		}
-		lines = append(lines, wrapText("Copy this key now. When you press enter it is erased from this screen and can never be shown again. Send it as: Authorization: Bearer <key>", inner)...)
-		lines = append(lines, "", sMuted.Render("enter done"))
+		lines = append(lines, wrapText("Copy this key now: press c, or select it with the mouse. When you press enter it is erased from this screen and can never be shown again. Send it as: Authorization: Bearer <key>", inner)...)
+		if addr := m.tcpAddress(); addr != "" {
+			lines = append(lines, "", sMuted.Render("Try it: ")+"curl -H \"Authorization: Bearer <key>\" \\", "           http://"+addr+"/api/v1/health")
+		} else if note := m.noNetworkNote(); note != "" {
+			lines = append(lines, "")
+			for _, l := range wrapText(note, inner) {
+				lines = append(lines, sWarn.Render(l))
+			}
+		}
+		if m.copied {
+			lines = append(lines, "", sOK.Render("Sent to the clipboard.")+sMuted.Render(" If paste does not work, your terminal blocks clipboard access; select the key instead."))
+		}
+		lines = append(lines, "", sMuted.Render("c copy · enter done"))
 	}
 	return panel(title, strings.Join(lines, "\n"), w, 0, true)
 }
@@ -958,7 +987,7 @@ func (m *Model) modalView(w int) string {
 func (m *Model) helpView(w, h int) string {
 	lines := []string{
 		sBold.Render("Navigation"),
-		kv("0-9 ,", "switch screen") + "    " + kv("tab", "next screen"),
+		kv("0-9 S", "switch screen") + "    " + kv("tab", "next screen"),
 		kv("←/→", "previous / next") + "    " + kv("click", "tab bar"),
 		kv("r", "refresh now") + "        " + kv("?", "toggle help"),
 		kv("q", "quit"),
@@ -1364,60 +1393,33 @@ func rangeLabel(d time.Duration) string {
 	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
-var chartRunes = []rune(" ▁▂▃▄▅▆▇█")
-
-// chart draws points as a block chart w columns by h rows over [from, to].
-// Columns without data stay empty (gaps are visible, not zero).
+// chart draws points as a line chart w columns by h rows over [from, to].
+// Time spans without data stay empty (gaps are visible, not zero).
 func chart(points []apiv1.HistoryPoint, w, h int, top float64, from, to time.Time) []string {
 	if w < 1 || h < 1 {
 		return nil
 	}
-	sum := make([]float64, w)
-	n := make([]int, w)
+	cols := 2 * w
+	sum := make([]float64, cols)
+	n := make([]int, cols)
 	span := to.Sub(from)
 	for _, p := range points {
 		if p.Time.Before(from) || p.Time.After(to) || span <= 0 {
 			continue
 		}
-		c := int(float64(p.Time.Sub(from)) / float64(span) * float64(w))
-		c = min(max(c, 0), w-1)
+		c := int(float64(p.Time.Sub(from)) / float64(span) * float64(cols))
+		c = min(max(c, 0), cols-1)
 		sum[c] += p.Avg
 		n[c]++
 	}
-	if top <= 0 {
-		for c := range sum {
-			if n[c] > 0 {
-				top = math.Max(top, sum[c]/float64(n[c]))
-			}
+	values := make([]float64, cols)
+	for c := range values {
+		values[c] = math.NaN()
+		if n[c] > 0 {
+			values[c] = sum[c] / float64(n[c])
 		}
 	}
-	rows := make([][]rune, h)
-	for r := range rows {
-		rows[r] = []rune(strings.Repeat(" ", w))
-	}
-	for c := 0; c < w; c++ {
-		if n[c] == 0 || top <= 0 {
-			continue
-		}
-		eighths := int(math.Round(math.Min(1, math.Max(0, sum[c]/float64(n[c])/top)) * float64(h*8)))
-		if eighths == 0 {
-			eighths = 1 // a measured value is never drawn as a gap
-		}
-		for level := 0; level < h; level++ {
-			fill := eighths - level*8
-			switch {
-			case fill >= 8:
-				rows[h-1-level][c] = '█'
-			case fill > 0:
-				rows[h-1-level][c] = chartRunes[fill]
-			}
-		}
-	}
-	out := make([]string, h)
-	for r := range rows {
-		out[r] = sAccent.Render(string(rows[r]))
-	}
-	return out
+	return lineChart(values, w, h, top)
 }
 
 // sumSeries adds series point-by-point (same timestamps).
@@ -1514,7 +1516,7 @@ func (m *Model) performanceScreen(w, h int) string {
 	if twoCols {
 		cw = w / 2
 	}
-	chartW := max(10, cw-4-9)
+	chartW := max(10, cw-4-11) // after a scale label of up to 10 characters
 	const rows = 4
 	var boxes []box
 	for _, p := range plots {
@@ -1539,10 +1541,10 @@ func (m *Model) performanceScreen(w, h int) string {
 			case rows - 1:
 				label = fmtValue(0, p.unit)
 			}
-			lines[i] = sMuted.Render(padLeft(label, 8)) + " " + lines[i]
+			lines[i] = sMuted.Render(padLeft(label, 10)) + " " + lines[i]
 		}
 		axis := pad(d.From.Local().Format("Jan 02 15:04"), chartW/2) + padLeft(d.To.Local().Format("15:04"), chartW-chartW/2)
-		lines = append(lines, strings.Repeat(" ", 9)+sMuted.Render(axis))
+		lines = append(lines, strings.Repeat(" ", 11)+sMuted.Render(axis))
 		title := fmt.Sprintf("%s · avg %s · min %s · max %s", p.title, fmtValue(avg, p.unit), fmtValue(lo, p.unit), fmtValue(hi, p.unit))
 		boxes = append(boxes, box{title: title, lines: lines})
 	}

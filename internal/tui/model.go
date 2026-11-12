@@ -29,6 +29,7 @@ type API interface {
 	CreateKey(ctx context.Context, req apiv1.CreateAPIKeyRequest) (*apiv1.CreatedAPIKey, error)
 	RotateKey(ctx context.Context, id string) (*apiv1.CreatedAPIKey, error)
 	RevokeKey(ctx context.Context, id string) (*apiv1.APIKey, error)
+	RemoveKey(ctx context.Context, id string) error
 	Processes(ctx context.Context, q client.ProcessesQuery) (*apiv1.ProcessesResponse, error)
 	Services(ctx context.Context, state string) (*apiv1.ServicesResponse, error)
 	Network(ctx context.Context) (*apiv1.NetworkResponse, error)
@@ -72,7 +73,10 @@ var mediumNames = [numScreens]string{"Overview", "HW", "Perf", "Health", "Storag
 var shortNames = [numScreens]string{"Ovw", "HW", "Perf", "Hlth", "Disk", "Net", "Proc", "Svc", "Evt", "API", "Set"}
 
 // screenKeys are the keys that select each screen.
-var screenKeys = [numScreens]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", ","}
+var screenKeys = [numScreens]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "S"}
+
+// settingsAlias is the earlier Settings key, still accepted but not shown.
+const settingsAlias = ","
 
 // historyRanges cycle with "t" on the Performance screen.
 var historyRanges = []time.Duration{time.Hour, 6 * time.Hour, 24 * time.Hour, 7 * 24 * time.Hour}
@@ -99,15 +103,20 @@ const (
 )
 
 // issuableScopes are the scopes a key can be created with (D8).
-var issuableScopes = []string{"system:read", "metrics:read", "processes:read"}
+var issuableScopes = []string{"system:read", "metrics:read", "network:read", "processes:read"}
 
-const historyLen = 120
+// historyLen bounds each sparkline history: two samples per character, for
+// sparklines up to 200 characters wide.
+const historyLen = 400
 
 // Options configure the TUI.
 type Options struct {
 	Target  string        // shown in the footer, e.g. the socket path
 	Refresh time.Duration // polling interval
 	Now     func() time.Time
+	// Embedded is set when the TUI started its own private agent for this
+	// session (no agent was running). That agent has no network port.
+	Embedded bool
 }
 
 // Model is the Bubble Tea model. It holds only API responses and
@@ -185,8 +194,9 @@ type Model struct {
 	modal         modal
 	input         string
 	scopeCursor   int
-	scopeOn       [3]bool
-	pendingAction string // "revoke" | "rotate"
+	copied        bool    // the revealed key was sent to the clipboard
+	scopeOn       [4]bool // one per issuableScopes entry
+	pendingAction string  // "revoke" | "rotate"
 	pendingID     string
 	revealed      *apiv1.CreatedAPIKey
 	flash         string
@@ -201,7 +211,7 @@ func New(api API, opts Options) *Model {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [3]bool{false, true, false}, eventIDs: map[string]bool{}}
+	return &Model{api: api, opts: opts, inflight: map[string]bool{}, scopeOn: [4]bool{false, true, false, false}, eventIDs: map[string]bool{}}
 }
 
 type tickMsg time.Time
@@ -214,6 +224,7 @@ type resultMsg struct {
 
 type actionMsg struct {
 	action  string
+	id      string // the key acted on, for remove
 	created *apiv1.CreatedAPIKey
 	revoked *apiv1.APIKey
 	err     error
@@ -298,6 +309,33 @@ func (m *Model) refresh(all bool) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// tcpAddress is the agent's TCP listener address, or "" when the agent has
+// no network port (or the connection is not the admin socket).
+func (m *Model) tcpAddress() string {
+	if m.status == nil || m.status.API == nil {
+		return ""
+	}
+	for _, l := range m.status.API.Listeners {
+		if l.Transport == "tcp" {
+			return l.Address
+		}
+	}
+	return ""
+}
+
+// noNetworkNote explains, on the admin socket, that keys cannot be used
+// yet because the agent has no network port. Empty when it has one.
+func (m *Model) noNetworkNote() string {
+	if !m.isAdmin() || m.tcpAddress() != "" {
+		return ""
+	}
+	if m.opts.Embedded {
+		return "This session's private agent has no network port, so other programs cannot use API keys yet. " +
+			"Keys you create are saved and will work once you run the agent on its own: quit, run cockpit agent, then open cockpit in another terminal."
+	}
+	return "This agent has no network port (api.tcp.enabled is false), so other programs cannot use API keys until TCP is enabled."
 }
 
 // isAdmin reports whether the connection is the local admin socket (the
@@ -612,6 +650,9 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 			return m.setScreen(screen(i))
 		}
 	}
+	if s == settingsAlias {
+		return m.setScreen(scrSettings)
+	}
 	switch m.screen {
 	case scrAccess:
 		return m.accessKey(s)
@@ -730,6 +771,17 @@ func (m *Model) accessKey(s string) tea.Cmd {
 		}
 		m.pendingAction, m.pendingID = map[string]string{"x": "revoke", "o": "rotate"}[s], k.ID
 		m.modal, m.input, m.flash = modalConfirm, "", ""
+	case "d":
+		if !m.isAdmin() || len(m.keys) == 0 {
+			return nil
+		}
+		k := m.keys[m.selected]
+		if k.Active {
+			m.flashMsg(lvWarn, "Only revoked or expired keys can be removed. Press x to revoke it first.")
+			return nil
+		}
+		m.pendingAction, m.pendingID = "remove", k.ID
+		m.modal, m.input, m.flash = modalConfirm, "", ""
 	}
 	return nil
 }
@@ -757,9 +809,16 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	switch m.modal {
 	case modalReveal:
-		if s == "enter" {
+		switch s {
+		case "enter":
 			m.revealed, m.modal = nil, modalNone
 			m.flashMsg(lvOK, "Key hidden. It cannot be shown again.")
+		case "c":
+			// OSC 52: the terminal puts the key on the system clipboard.
+			// Terminals that do not support it ignore the request, so the
+			// key also stays selectable with the mouse.
+			m.copied = true
+			return tea.SetClipboard(m.revealed.Key)
 		}
 	case modalCreateName:
 		switch s {
@@ -780,6 +839,14 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 			m.scopeCursor = min(len(issuableScopes)-1, m.scopeCursor+1)
 		case "space":
 			m.scopeOn[m.scopeCursor] = !m.scopeOn[m.scopeCursor]
+		case "a": // every read scope, or none if all are already on
+			all := true
+			for _, on := range m.scopeOn {
+				all = all && on
+			}
+			for i := range m.scopeOn {
+				m.scopeOn[i] = !all
+			}
 		case "enter":
 			var scopes []string
 			for i, on := range m.scopeOn {
@@ -806,16 +873,19 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 			typed := strings.TrimSpace(m.input)
 			action, id := m.pendingAction, m.pendingID
 			m.modal, m.input = modalNone, ""
-			if typed != id {
+			if !idConfirmed(id, typed) {
 				m.flashMsg(lvWarn, "The ID did not match; nothing was changed.")
 				return nil
 			}
 			return func() tea.Msg {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				if action == "revoke" {
+				switch action {
+				case "revoke":
 					k, err := m.api.RevokeKey(ctx, id)
 					return actionMsg{action: action, revoked: k, err: err}
+				case "remove":
+					return actionMsg{action: action, id: id, err: m.api.RemoveKey(ctx, id)}
 				}
 				c, err := m.api.RotateKey(ctx, id)
 				return actionMsg{action: action, created: c, err: err}
@@ -827,6 +897,16 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// confirmChars is how many leading characters of a key ID confirm a
+// revoke, rotate or remove.
+const confirmChars = 4
+
+// idConfirmed reports whether typed is the start of id, at least
+// confirmChars long (the whole ID also works).
+func idConfirmed(id, typed string) bool {
+	return len(typed) >= confirmChars && strings.HasPrefix(id, typed)
 }
 
 func (m *Model) typeText(k tea.KeyPressMsg, limit int) {
@@ -852,9 +932,11 @@ func (m *Model) applyAction(a actionMsg) tea.Cmd {
 	sanitize(a.revoked)
 	switch a.action {
 	case "create", "rotate":
-		m.revealed, m.modal = a.created, modalReveal
+		m.revealed, m.modal, m.copied = a.created, modalReveal, false
 	case "revoke":
-		m.flashMsg(lvOK, "Revoked "+a.revoked.ID+" ("+a.revoked.Name+"). It stops working immediately.")
+		m.flashMsg(lvOK, "Revoked "+a.revoked.ID+" ("+a.revoked.Name+"). It stops working immediately. Press d to remove it from the list.")
+	case "remove":
+		m.flashMsg(lvOK, "Removed "+a.id+" from the list.")
 	}
 	return m.fetch("keys", wrap(m.api.ListKeys))
 }

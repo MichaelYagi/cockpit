@@ -14,6 +14,33 @@ import (
 	"github.com/MichaelYagi/cockpit/pkg/client"
 )
 
+// readScopes are every scope a key can hold, for --scope all. admin is
+// never issued to keys (D3, D8); the server enforces this too.
+var readScopes = []string{"system:read", "metrics:read", "network:read", "processes:read"}
+
+// expandScopes replaces "all" with every read scope, keeping order and
+// dropping duplicates.
+func expandScopes(in []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, s := range in {
+		if s == "all" {
+			for _, r := range readScopes {
+				add(r)
+			}
+			continue
+		}
+		add(s)
+	}
+	return out
+}
+
 const keysUsage = `Manage API keys through the local admin socket.
 
 Usage:
@@ -21,12 +48,15 @@ Usage:
   cockpit keys create --name NAME --scope SCOPE [--scope SCOPE] [--expires DURATION|TIME]
   cockpit keys rotate ID [--yes]
   cockpit keys revoke ID [--yes]
+  cockpit keys remove ID [--yes]
 
-Scopes: system:read, metrics:read, network:read, processes:read
+Scopes: system:read, metrics:read, network:read, processes:read, or "all"
+for every read scope. Keys never get admin.
 --expires accepts a duration (e.g. 720h) or an RFC 3339 time.
 
 "create" and "rotate" print the new key alone on standard output so it can
 be piped to a file or secret store. It is shown only once.
+"remove" deletes a revoked or expired key from the list; revoke it first.
 `
 
 type stringList []string
@@ -58,7 +88,7 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 		fs.StringVar(&name, "name", "", "key name (1-64 characters)")
 		fs.Var(&scopes, "scope", "scope to grant; repeat for several")
 		fs.StringVar(&expires, "expires", "", "expiry as a duration (720h) or RFC 3339 time; default: never")
-	case "rotate", "revoke":
+	case "rotate", "revoke", "remove":
 		fs.BoolVar(&yes, "yes", false, "do not ask for confirmation")
 	default:
 		fmt.Fprintf(env.Stderr, "unknown keys command %q\n\n%s", sub, keysUsage)
@@ -110,7 +140,7 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 			fmt.Fprintln(env.Stderr, "usage: cockpit keys create --name NAME --scope SCOPE [--scope SCOPE] [--expires DURATION|TIME]")
 			return ExitUsage
 		}
-		req := apiv1.CreateAPIKeyRequest{Name: name, Scopes: scopes}
+		req := apiv1.CreateAPIKeyRequest{Name: name, Scopes: expandScopes(scopes)}
 		if expires != "" {
 			t, err := parseExpiry(expires, time.Now())
 			if err != nil {
@@ -126,7 +156,7 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 		showCreated(env, created, "Created")
 		return ExitOK
 
-	default: // rotate, revoke
+	default: // rotate, revoke, remove
 		if len(positional) != 1 {
 			fmt.Fprintf(env.Stderr, "usage: cockpit keys %s ID [--yes]\n", sub)
 			return ExitUsage
@@ -135,6 +165,13 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 		if !yes && !confirm(env, sub, id) {
 			fmt.Fprintln(env.Stderr, "Cancelled; nothing was changed.")
 			return ExitError
+		}
+		if sub == "remove" {
+			if err := c.RemoveKey(ctx, id); err != nil {
+				return fail(err)
+			}
+			fmt.Fprintf(env.Stderr, "Removed key %s from the list.\n", id)
+			return ExitOK
 		}
 		if sub == "revoke" {
 			k, err := c.RevokeKey(ctx, id)
@@ -154,24 +191,32 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 	}
 }
 
-// confirm asks the user to retype the key ID.
+// confirm asks the user to type the start of the key ID.
 func confirm(env Env, action, id string) bool {
 	if env.Stdin == nil {
 		fmt.Fprintf(env.Stderr, "Refusing to %s without confirmation; pass --yes to proceed non-interactively.\n", action)
 		return false
 	}
 	what := "Revoking a key makes it stop working immediately."
-	if action == "rotate" {
+	switch action {
+	case "rotate":
 		what = "Rotating issues a new key and makes the old one stop working immediately."
+	case "remove":
+		what = "Removing deletes the revoked key's record from the list. This cannot be undone."
 	}
-	fmt.Fprintf(env.Stderr, "%s\nType the key ID (%s) to confirm: ", what, id)
+	fmt.Fprintf(env.Stderr, "%s\nType the first %d characters of the key ID (%s) to confirm: ", what, confirmChars, id)
 	line, err := bufio.NewReader(env.Stdin).ReadString('\n')
 	if err != nil && line == "" {
 		fmt.Fprintln(env.Stderr)
 		return false
 	}
-	return strings.TrimSpace(line) == id
+	typed := strings.TrimSpace(line)
+	return len(typed) >= confirmChars && strings.HasPrefix(id, typed)
 }
+
+// confirmChars is how many leading characters of a key ID confirm a
+// revoke, rotate or remove (the whole ID also works).
+const confirmChars = 4
 
 func showCreated(env Env, c *apiv1.CreatedAPIKey, verb string) {
 	k := c.APIKey

@@ -89,7 +89,7 @@ func Events(src EventSource, machineID core.MachineID, now func() time.Time) htt
 		f := events.Filter{Since: since, Until: until}
 		switch typ := core.EventType(r.URL.Query().Get("type")); typ {
 		case "", core.EventFindingRaised, core.EventFindingResolved, core.EventCollectorDegraded, core.EventCollectorRecovered,
-			core.EventKeyCreated, core.EventKeyRotated, core.EventKeyRevoked, core.EventSettingsChanged:
+			core.EventKeyCreated, core.EventKeyRotated, core.EventKeyRevoked, core.EventKeyRemoved, core.EventSettingsChanged:
 			f.Type = typ
 		default:
 			badParam(w, r, "type", "is not a known event type")
@@ -144,6 +144,7 @@ type KeyService interface {
 	List(ctx context.Context) ([]auth.KeyMeta, error)
 	Rotate(ctx context.Context, id string) (auth.Created, error)
 	Revoke(ctx context.Context, id string) (auth.KeyMeta, error)
+	Remove(ctx context.Context, id string) error
 }
 
 // Keys serves the key management routes.
@@ -245,6 +246,20 @@ func (h *Keys) id(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 // Rotate serves POST /keys/{id}/rotate.
+// Remove serves POST /keys/{id}/remove: deletes a revoked or expired
+// key's record (D33).
+func (h *Keys) Remove(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.id(w, r)
+	if !ok || !allowParams(w, r) {
+		return
+	}
+	if err := h.Service.Remove(r.Context(), id); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Keys) Rotate(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.id(w, r)
 	if !ok || !allowParams(w, r) {

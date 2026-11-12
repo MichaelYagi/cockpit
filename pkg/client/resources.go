@@ -134,6 +134,12 @@ func (c *Client) RevokeKey(ctx context.Context, id string) (*apiv1.APIKey, error
 	return &out.APIKey, nil
 }
 
+// RemoveKey deletes the record of a revoked or expired key. An active key
+// must be revoked first; removing one is an invalid_request error.
+func (c *Client) RemoveKey(ctx context.Context, id string) error {
+	return c.do(ctx, "POST", "/keys/"+url.PathEscape(id)+"/remove", nil, nil)
+}
+
 // ProcessesQuery selects, sorts and pages processes. Zero values use the
 // server defaults (sort by CPU, kernel threads hidden, 50 per page).
 type ProcessesQuery struct {

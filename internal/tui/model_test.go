@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,8 @@ type fakeAPI struct {
 	keys    []apiv1.APIKey
 	created []apiv1.CreateAPIKeyRequest
 	revoked []string
+	removed []string
+	noTCP   bool // the agent has no TCP listener
 	rotated []string
 	procsOK bool
 	stream  []apiv1.Event
@@ -73,6 +76,9 @@ func (f *fakeAPI) Status(context.Context) (*apiv1.Status, error) {
 			Listeners:     []apiv1.Listener{{Transport: "unix", Address: "/run/user/1000/cockpit-monitor/agent.sock"}, {Transport: "tcp", Address: "127.0.0.1:7878"}},
 			Requests:      apiv1.RequestStats{Total: 42, Status2xx: 40, Status4xx: 2, AuthFailures: 1},
 			ActiveClients: 1,
+		}
+		if f.noTCP {
+			s.API.Listeners = s.API.Listeners[:1]
 		}
 	}
 	return s, nil
@@ -119,7 +125,7 @@ func (f *fakeAPI) Metrics(context.Context, ...string) (*apiv1.MetricsResponse, e
 		{Name: "a-very-long-interface-name0", OperState: "down"},
 	}
 	fss := []apiv1.Filesystem{
-		{MountPoint: "/", Type: "ext4", UsedPercent: 91.2, AvailableBytes: 8 << 30, TotalBytes: 100 << 30},
+		{MountPoint: "/", Type: "ext4", UsedPercent: 91.2, UsedBytes: 92 << 30, AvailableBytes: 8 << 30, TotalBytes: 100 << 30},
 		{MountPoint: "/home/someone/with/a/very/long/mount/point/path", Type: "ext4", UsedPercent: 40, AvailableBytes: 300 << 30},
 	}
 	for i := 0; i < 12; i++ {
@@ -191,6 +197,11 @@ func (f *fakeAPI) CreateKey(_ context.Context, req apiv1.CreateAPIKeyRequest) (*
 func (f *fakeAPI) RotateKey(_ context.Context, id string) (*apiv1.CreatedAPIKey, error) {
 	f.rotated = append(f.rotated, id)
 	return &apiv1.CreatedAPIKey{Key: revealedKey, APIKey: apiv1.APIKey{ID: "newkeynewkey", Name: "rotated", Scopes: []string{"metrics:read"}}}, nil
+}
+
+func (f *fakeAPI) RemoveKey(_ context.Context, id string) error {
+	f.removed = append(f.removed, id)
+	return nil
 }
 
 func (f *fakeAPI) RevokeKey(_ context.Context, id string) (*apiv1.APIKey, error) {
@@ -426,7 +437,7 @@ func TestOverviewContent(t *testing.T) {
 	out := screenText(m)
 	for _, want := range []string{
 		"COCKPIT", "testbox", "Ubuntu 24.04 LTS", "up 1d 1h 1m", "▲ WARNING", // header with health (symbol + word)
-		"1 Overview", "0 API", ", Settings", "GPU", "RTX 3060", "vram",
+		"1 Overview", "0 API", "S Settings", "GPU", "RTX 3060", "vram",
 		"Test CPU @ 3.0GHz · 8 threads", "37.5%", "1.50  1.25  0.75",
 		"62.5%", "6.0 GiB of 16.0 GiB", "stall  unsupported",
 		"91.2%", "1.4 MiB/s", "eth0",
@@ -456,7 +467,7 @@ func TestScreensShowUnavailableReasons(t *testing.T) {
 	}
 	press(t, m, key(scrStorage))
 	out = screenText(m)
-	for _, want := range []string{"Test SSD", "nvme", "not configured", "smartctl (smartmontools 7.0 or newer) is not installed."} {
+	for _, want := range []string{"92.0 GiB / 100.0 GiB", "Test SSD", "nvme", "not configured", "smartctl (smartmontools 7.0 or newer) is not installed."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("storage missing %q:\n%s", want, out)
 		}
@@ -536,6 +547,41 @@ func TestCreateKeyRevealsOnce(t *testing.T) {
 	}
 }
 
+// "a" selects every read scope; the new key can be copied (OSC 52) and
+// the mouse is released so the terminal can select it.
+func TestCreateKeyAllScopesAndCopy(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrAccess), "n")
+	typeText(t, m, "everything")
+	press(t, m, "enter", "a", "enter")
+	if len(api.created) != 1 || strings.Join(api.created[0].Scopes, ",") != "system:read,metrics:read,network:read,processes:read" {
+		t.Fatalf("created %+v", api.created)
+	}
+	if m.View().MouseMode != tea.MouseModeNone {
+		t.Error("mouse still captured while the key is shown")
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	if cmd == nil || fmt.Sprint(cmd()) != revealedKey {
+		t.Fatal("c did not copy the key to the clipboard")
+	}
+	if !strings.Contains(screenText(m), "Sent to the clipboard") {
+		t.Errorf("no copy confirmation:\n%s", screenText(m))
+	}
+	press(t, m, "enter")
+	if m.View().MouseMode != tea.MouseModeCellMotion {
+		t.Error("mouse not restored after the key was hidden")
+	}
+
+	// The dialog remembers the last selection (all on); a clears it.
+	press(t, m, "n")
+	typeText(t, m, "x")
+	press(t, m, "enter", "a", "enter")
+	if len(api.created) != 1 || !strings.Contains(screenText(m), "at least one scope") {
+		t.Errorf("a did not toggle back to none: %+v", api.created)
+	}
+}
+
 func TestCreateKeyNeedsAScope(t *testing.T) {
 	api := &fakeAPI{admin: true}
 	m := setup(t, api, 120, 40)
@@ -551,6 +597,73 @@ func TestCreateKeyNeedsAScope(t *testing.T) {
 	}
 }
 
+// d removes a revoked key after the ID is typed; an active key is refused.
+// With a TCP listener, the new-key dialog shows how to try the key.
+// Without one (the TUI's private agent), it says keys cannot be used yet.
+func TestKeyUsabilityHints(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrAccess))
+	if strings.Contains(screenText(m), "no network port") {
+		t.Errorf("warning shown although TCP is on:\n%s", screenText(m))
+	}
+	press(t, m, "n")
+	typeText(t, m, "x")
+	press(t, m, "enter", "enter")
+	if !strings.Contains(screenText(m), "http://127.0.0.1:7878/api/v1/health") {
+		t.Errorf("no curl hint:\n%s", screenText(m))
+	}
+
+	api = &fakeAPI{admin: true, noTCP: true}
+	m = New(api, Options{Target: "embedded agent (this session only)", Now: func() time.Time { return t0 }, Embedded: true})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	drive(t, m, m.refresh(true))
+	press(t, m, key(scrAccess))
+	if out := screenText(m); !strings.Contains(out, "private agent has no network port") || !strings.Contains(out, "cockpit agent") {
+		t.Errorf("no warning for the private agent:\n%s", out)
+	}
+	press(t, m, "n")
+	typeText(t, m, "x")
+	press(t, m, "enter", "enter")
+	if out := screenText(m); !strings.Contains(out, "no network port") || strings.Contains(out, "curl -H") {
+		t.Errorf("reveal dialog:\n%s", out)
+	}
+}
+
+func TestRemoveRevokedKey(t *testing.T) {
+	revokedAt := t0
+	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{
+		{ID: "k3p9x2m7q4ta", Name: "live", Active: true},
+		{ID: "k3p9x2m7q4tb", Name: "old", RevokedAt: &revokedAt},
+	}}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrAccess), "d")
+	if m.modal != modalNone || !strings.Contains(screenText(m), "revoke it first") {
+		t.Fatalf("active key offered for removal:\n%s", screenText(m))
+	}
+	press(t, m, "down", "d")
+	if !strings.Contains(screenText(m), "Remove key k3p9x2m7q4tb") || !strings.Contains(screenText(m), "first 4 characters") {
+		t.Fatalf("no confirmation:\n%s", screenText(m))
+	}
+	typeText(t, m, "k3p9x2m7q4tb") // the whole ID also works
+	press(t, m, "enter")
+	if len(api.removed) != 1 || api.removed[0] != "k3p9x2m7q4tb" || !strings.Contains(screenText(m), "Removed k3p9x2m7q4tb") {
+		t.Fatalf("removed %v:\n%s", api.removed, screenText(m))
+	}
+}
+
+func TestSettingsKey(t *testing.T) {
+	m := setup(t, &fakeAPI{admin: true}, 120, 40)
+	press(t, m, "S")
+	if m.screen != scrSettings {
+		t.Errorf("S opened %v", m.screen)
+	}
+	press(t, m, "1", ",")
+	if m.screen != scrSettings {
+		t.Errorf(", no longer opens Settings: %v", m.screen)
+	}
+}
+
 func TestRevokeRequiresTypedID(t *testing.T) {
 	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{{ID: "k3p9x2m7q4ta", Name: "victim", Active: true}}}
 	m := setup(t, api, 120, 40)
@@ -561,8 +674,14 @@ func TestRevokeRequiresTypedID(t *testing.T) {
 		t.Fatalf("revoked with wrong ID: %v", api.revoked)
 	}
 	press(t, m, "x")
-	typeText(t, m, "k3p9x2m7q4tb")
-	press(t, m, "backspace", "a", "enter")
+	typeText(t, m, "k3p") // too short
+	press(t, m, "enter")
+	if len(api.revoked) != 0 {
+		t.Fatalf("revoked after 3 characters: %v", api.revoked)
+	}
+	press(t, m, "x")
+	typeText(t, m, "k3p9") // the first 4 characters are enough
+	press(t, m, "enter")
 	if len(api.revoked) != 1 || api.revoked[0] != "k3p9x2m7q4ta" {
 		t.Fatalf("revoked %v", api.revoked)
 	}
@@ -619,7 +738,9 @@ func TestHelpers(t *testing.T) {
 	if got := ansi.Strip(bar(50, 10, lvOK)); got != "█████░░░░░" {
 		t.Errorf("bar %q", got)
 	}
-	if got := ansi.Strip(sparkline([]float64{0, 50, 100}, 5, 100)); got != "  ▁▅█" {
+	// Two points per cell, aligned right: 0 and 100 are joined by a
+	// vertical run in the right-hand column.
+	if got := ansi.Strip(sparkline([]float64{0, 100}, 3, 100)); got != "  ⡸" {
 		t.Errorf("sparkline %q", got)
 	}
 	if bytes(1536) != "1.5 KiB" || bytes(5<<30) != "5.0 GiB" || bytes(12) != "12 B" {
@@ -787,7 +908,7 @@ func TestEventListIsBounded(t *testing.T) {
 func TestCompactTabsFitAndClick(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 80, 24)
 	tabs := ansi.Strip(m.tabs(80))
-	if lipgloss.Width(tabs) > 80 || !strings.Contains(tabs, "0 API") || !strings.Contains(tabs, "7 Proc") || !strings.Contains(tabs, ", Set") {
+	if lipgloss.Width(tabs) > 80 || !strings.Contains(tabs, "0 API") || !strings.Contains(tabs, "7 Proc") || !strings.Contains(tabs, "S Set") {
 		t.Errorf("compact tabs %q (%d wide)", tabs, lipgloss.Width(tabs))
 	}
 	span := tabSpans(80)[scrAccess]
@@ -859,10 +980,13 @@ func TestPerformanceScreen(t *testing.T) {
 	m := setup(t, api, 140, 45)
 	press(t, m, key(scrPerformance))
 	out := screenText(m)
-	for _, want := range []string{"Last 1h", "CPU usage · avg", "Memory used", "Network received (all interfaces)", "Network sent", "100.0%", "█"} {
+	for _, want := range []string{"Last 1h", "CPU usage · avg", "Memory used", "Network received (all interfaces)", "Network sent", "100.0%"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("performance missing %q:\n%s", want, out)
 		}
+	}
+	if !strings.ContainsFunc(out, func(r rune) bool { return r > 0x2800 && r <= 0x28FF }) {
+		t.Errorf("performance charts are not drawn as braille lines:\n%s", out)
 	}
 	press(t, m, "t")
 	q := api.histQueries[len(api.histQueries)-1]
@@ -891,17 +1015,36 @@ func TestSparklinesSeededFromHistory(t *testing.T) {
 
 func TestChartGapsAndScaling(t *testing.T) {
 	from := t0
-	pts := []apiv1.HistoryPoint{{Time: from, Avg: 100}, {Time: from.Add(9 * time.Minute), Avg: 50}}
+	// 20 dot columns over 10 minutes: 100 at the start, 0 at 9 minutes,
+	// nothing in between.
+	pts := []apiv1.HistoryPoint{{Time: from, Avg: 100}, {Time: from.Add(9 * time.Minute), Avg: 0}}
 	rows := chart(pts, 10, 2, 100, from, from.Add(10*time.Minute))
-	top, bottom := ansi.Strip(rows[0]), ansi.Strip(rows[1])
-	if []rune(top)[0] != '█' || []rune(bottom)[0] != '█' {
-		t.Errorf("full column: %q / %q", top, bottom)
+	top, bottom := []rune(ansi.Strip(rows[0])), []rune(ansi.Strip(rows[1]))
+	if top[0] != '⠁' || bottom[0] != ' ' {
+		t.Errorf("100%% is the top-left dot: %q / %q", string(top), string(bottom))
 	}
-	if []rune(top)[9] != ' ' || []rune(bottom)[9] != '█' {
-		t.Errorf("half column: %q / %q", top, bottom)
+	if top[9] != ' ' || bottom[9] != '⡀' {
+		t.Errorf("a measured zero is a dot on the bottom row: %q / %q", string(top), string(bottom))
 	}
-	if []rune(bottom)[5] != ' ' {
-		t.Errorf("a column without data must stay empty: %q", bottom)
+	for c := 1; c < 9; c++ {
+		if top[c] != ' ' || bottom[c] != ' ' {
+			t.Errorf("a span without data must stay empty: %q / %q", string(top), string(bottom))
+			break
+		}
+	}
+}
+
+func TestLineChartJoinsPoints(t *testing.T) {
+	// A rise from the bottom to the top of one row fills the column
+	// between the two points, so the line is continuous.
+	got := ansi.Strip(lineChart([]float64{0, 0, 100, 100}, 2, 1, 100)[0])
+	// Cell 1: both points on the bottom. Cell 2: the rise (left column)
+	// and the top point (right column).
+	if got != "⣀⠏" {
+		t.Errorf("line %q", got)
+	}
+	if got := lineChart([]float64{math.NaN(), 50}, 1, 1, 0); len(got) != 1 {
+		t.Errorf("rows %d", len(got))
 	}
 }
 

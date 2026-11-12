@@ -410,7 +410,7 @@ paths:
         - name: type
           in: query
           required: false
-          schema: { type: string, enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked, settings.changed] }
+          schema: { type: string, enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked, key.removed, settings.changed] }
       responses:
         "200":
           description: OK
@@ -615,6 +615,24 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CreatedAPIKey" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/keys/{id}/remove:
+    parameters:
+      - { $ref: "#/components/parameters/KeyID" }
+    post:
+      operationId: removeKey
+      tags: [keys]
+      summary: Remove a revoked or expired API key
+      description: Deletes the key's record so it no longer appears in the list (D33). Only revoked or expired keys can be removed; revoke an active key first. Removal is published as a key.removed event. Unix socket only.
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "204":
+          description: Removed.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -1771,7 +1789,7 @@ components:
         time: { $ref: "#/components/schemas/Timestamp" }
         type:
           type: string
-          enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked, settings.changed]
+          enum: [finding.raised, finding.resolved, collector.degraded, collector.recovered, key.created, key.rotated, key.revoked, key.removed, settings.changed]
         severity: { type: string, enum: [info, warning, critical] }
         subject: { type: string }
         message: { type: string }

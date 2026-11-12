@@ -73,6 +73,7 @@ const (
 	EventKeyCreated         EventType = "key.created"
 	EventKeyRotated         EventType = "key.rotated"
 	EventKeyRevoked         EventType = "key.revoked"
+	EventKeyRemoved         EventType = "key.removed"
 	EventSettingsChanged    EventType = "settings.changed"
 )
 
