@@ -280,7 +280,11 @@ func TestKeysCommandEndToEnd(t *testing.T) {
 	if code != ExitError || !strings.Contains(errOut, "--yes") {
 		t.Errorf("non-interactive revoke: %d %s", code, errOut)
 	}
-	code, _, errOut = run(t, id+"\n", "keys", "revoke", id, "--socket", sock)
+	code, _, errOut = run(t, id[:3]+"\n", "keys", "revoke", id, "--socket", sock)
+	if code != ExitError || !strings.Contains(errOut, "Cancelled") {
+		t.Errorf("3 characters accepted: %d %s", code, errOut)
+	}
+	code, _, errOut = run(t, id[:4]+"\n", "keys", "revoke", id, "--socket", sock)
 	if code != ExitOK || !strings.Contains(errOut, "Revoked") {
 		t.Fatalf("revoke: %d %s", code, errOut)
 	}

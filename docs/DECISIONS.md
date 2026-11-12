@@ -662,8 +662,8 @@ works is refused with `invalid_request`; it must be revoked first, so
 removal never cuts off a client. `DELETE /keys/{id}` keeps meaning
 "revoke" (the `/api/v1` promise). Each removal is logged and published as
 a `key.removed` event. The TUI removes the selected key with `d`, and the
-CLI with `cockpit keys remove ID`, both after the key ID is typed, like
-revoke and rotate. A newer key's `rotated_from` may then name a key that
+CLI with `cockpit keys remove ID`, both after the first 4 characters of the key
+ID are typed, like revoke and rotate. A newer key's `rotated_from` may then name a key that
 no longer exists; it stays a plain ID.
 
 **Why.** Revoked keys stayed in the list for good and cluttered it. Their

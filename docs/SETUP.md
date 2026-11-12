@@ -91,7 +91,8 @@ thresholds can be changed only over the local socket. A save shows the
 changes and asks for confirmation; the override persists in the database
 until reset.
 
-Rotation and revocation ask you to type the key ID. A new key is shown once.
+Rotating, revoking and removing a key ask you to type the first 4
+characters of its ID (the whole ID also works). A new key is shown once.
 Press `c` to copy it (the terminal must allow clipboard access through
 OSC 52, as Windows Terminal, iTerm2, kitty, WezTerm and recent xterm do), or
 select it with the mouse: the TUI releases the mouse while the key is

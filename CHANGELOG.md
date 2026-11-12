@@ -10,6 +10,9 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Shorter key confirmations.** Rotating, revoking and removing a key
+  (TUI and CLI) need only the first 4 characters of the key ID; the whole
+  ID still works.
 - **Settings is on `S` (Shift+S).** The tab used to show `, Settings`,
   which read like a stray comma. `,` still works.
 - **Line charts.** Performance charts and Overview sparklines are drawn
