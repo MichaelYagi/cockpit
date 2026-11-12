@@ -24,7 +24,7 @@ type embedded struct {
 	client *client.Client
 	cancel context.CancelFunc
 	done   chan error
-	logs   *os.File
+	logs   *cappedLog
 }
 
 func startEmbedded(parent context.Context, res *config.Result, env Env) (*embedded, error) {
@@ -41,7 +41,7 @@ func startEmbedded(parent context.Context, res *config.Result, env Env) (*embedd
 	}
 	// Agent logs would corrupt the screen; write them to a file instead.
 	logPath := filepath.Join(paths.StateDir, "embedded-agent.log")
-	logs, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logs, err := openCappedLog(logPath, maxEmbeddedLog)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", logPath, err)
 	}

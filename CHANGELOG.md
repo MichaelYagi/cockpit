@@ -47,6 +47,12 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Fixed
 
+- **Embedded agent log is capped.** When the TUI runs its own agent, its
+  log (`embedded-agent.log`) grew by every API request and was never
+  trimmed (about 2 MB an hour). It is now capped at 10 MiB, with one older
+  copy kept as `embedded-agent.log.1`, so it never uses more than about
+  20 MiB. An existing oversized log is rotated at the next start.
+
 - The TUI's new-key dialog was missing `network:read`, so keys created
   there could not read interface addresses, routes or DNS.
 

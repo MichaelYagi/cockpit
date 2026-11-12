@@ -248,7 +248,7 @@ if any key material appears.
 | State directory | `0700` | Refused if more permissive or owned by another user |
 | `cockpit.db` (+ WAL) | `0600` | Key SHA-256 hashes and metadata only |
 | `machine-id`, `agent.lock` | `0600` | Not secret |
-| `embedded-agent.log` | `0600` | Same redaction as agent logs |
+| `embedded-agent.log` (+ `.1`) | `0600` | Same redaction as agent logs; capped at 10 MiB, one older copy kept |
 | Runtime directory | `0700` user / `0750` system | Holds the socket |
 | `agent.sock` | `0600` user / `0660` system | Access = local admin |
 | `smart/` (system mode) | `0750` `root:cockpit-monitor` | Written by the SMART helper only; refused if not root-owned |
