@@ -43,7 +43,8 @@ One binary, `cockpit`, with subcommands (D2):
 
 **Embedded agent.** If `cockpit tui` cannot reach an agent on the default
 socket (and no `--socket` or `--url` was given), it starts an agent
-in-process. Its logs go to `<state dir>/embedded-agent.log`, its socket is
+in-process. Its logs go to `<state dir>/embedded-agent.log` (capped at 10 MiB; one
+older copy is kept as `.1`), its socket is
 `<runtime dir>/tui-<pid>.sock`, and it stops when the TUI exits. That agent listens only on a private Unix socket
 (no TCP), and the TUI connects through `pkg/client` exactly as it would to
 a separate agent. Only `internal/cli` contains the code that starts it.
