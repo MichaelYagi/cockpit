@@ -57,12 +57,12 @@ programs, run the agent separately:
 
 | Key | Action |
 |---|---|
-| `1`–`9`, `0`, `,`, `tab`, `←`/`→`, click a tab | Switch screen (1 Overview, 2 Hardware, 3 Performance, 4 Health, 5 Storage, 6 Network, 7 Processes, 8 Services, 9 Events, 0 API Access, `,` Settings) |
+| `1`–`9`, `0`, `S`, `tab`, `←`/`→`, click a tab | Switch screen (1 Overview, 2 Hardware, 3 Performance, 4 Health, 5 Storage, 6 Network, 7 Processes, 8 Services, 9 Events, 0 API Access, `S` (Shift+S) Settings; `,` also still opens Settings) |
 | `r` | Refresh now |
 | `?` | Help |
 | `q`, `Ctrl-C` | Quit |
 | `↑`/`↓` (API Access) | Select a key |
-| `n` / `o` / `x` (API Access) | Create / rotate / revoke a key |
+| `n` / `o` / `x` / `d` (API Access) | Create / rotate / revoke a key / remove a revoked or expired key |
 | `space` / `a` (new key dialog) | Toggle a scope / select every read scope |
 | `c` (new key shown) | Copy the key to the clipboard |
 | `s` / `/` / `k` (Processes) | Change sort / search / show kernel threads |

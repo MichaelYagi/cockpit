@@ -48,6 +48,9 @@ type KeyStore interface {
 	RevokeKey(ctx context.Context, id string, at time.Time) error
 	// RotateKey revokes oldID and inserts next atomically.
 	RotateKey(ctx context.Context, oldID string, at time.Time, next StoredKey) error
+	// DeleteKey deletes a key that is revoked or expired at now. It
+	// returns ErrNotFound if no such inactive key exists.
+	DeleteKey(ctx context.Context, id string, now time.Time) error
 	UpdateLastUsed(ctx context.Context, used map[string]time.Time) error
 	CountActiveKeys(ctx context.Context, now time.Time) (int, error)
 }
@@ -267,6 +270,26 @@ func (s *Service) Revoke(ctx context.Context, id string) (KeyMeta, error) {
 		s.event(core.EventKeyRevoked, k.KeyMeta, "API key revoked")
 	}
 	return k.KeyMeta, nil
+}
+
+// Remove deletes the record of a revoked or expired key (D33). A key
+// that still works must be revoked first, so removal never cuts off a
+// client. The removal is logged and published as an event.
+func (s *Service) Remove(ctx context.Context, id string) error {
+	now := s.opts.Now().UTC()
+	k, err := s.store.GetKey(ctx, id)
+	if err != nil {
+		return err
+	}
+	if k.Active(now) {
+		return invalid("only revoked or expired keys can be removed; revoke the key first")
+	}
+	if err := s.store.DeleteKey(ctx, id, now); err != nil {
+		return err
+	}
+	s.opts.Logger.Info("api key removed", "key_id", id, "name", k.Name)
+	s.event(core.EventKeyRemoved, k.KeyMeta, "API key removed")
+	return nil
 }
 
 // IsActive reports whether the key with this ID can still authenticate.

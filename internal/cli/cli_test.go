@@ -291,6 +291,15 @@ func TestKeysCommandEndToEnd(t *testing.T) {
 	if code != ExitError || !strings.Contains(errOut, "active") {
 		t.Errorf("rotate revoked: %d %s", code, errOut)
 	}
+
+	// A revoked key can be removed from the list (D33).
+	code, _, errOut = run(t, id+"\n", "keys", "remove", id, "--socket", sock)
+	if code != ExitOK || !strings.Contains(errOut, "Removed key "+id) {
+		t.Fatalf("remove: %d %s", code, errOut)
+	}
+	if _, out, _ := run(t, "", "keys", "list", "--socket", sock); strings.Contains(out, id) {
+		t.Errorf("removed key still listed:\n%s", out)
+	}
 }
 
 func TestParseExpiry(t *testing.T) {

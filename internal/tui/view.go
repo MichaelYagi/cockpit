@@ -123,10 +123,10 @@ func (m *Model) tabs(w int) string {
 }
 
 func (m *Model) footer(w int) string {
-	hints := []string{"0-9 , screens", "tab next", "r refresh", "? help", "q quit"}
+	hints := []string{"0-9 S screens", "tab next", "r refresh", "? help", "q quit"}
 	switch m.screen {
 	case scrAccess:
-		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "? help", "q quit"}
+		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "d remove", "? help", "q quit"}
 	case scrProcesses:
 		hints = []string{"s sort:" + processSorts[m.procSort], "/ search", "k kernel threads", "c containers", "q quit"}
 		if m.procContainers {
@@ -923,8 +923,11 @@ func (m *Model) modalView(w int) string {
 	case modalConfirm:
 		verb := "Revoke"
 		effect := "The key stops working immediately. This cannot be undone."
-		if m.pendingAction == "rotate" {
+		switch m.pendingAction {
+		case "rotate":
 			verb, effect = "Rotate", "A new key is issued and the old key stops working immediately."
+		case "remove":
+			verb, effect = "Remove", "The revoked key is deleted from the list. This cannot be undone."
 		}
 		title = verb + " key " + m.pendingID
 		lines = append(lines, wrapText(effect, inner)...)
@@ -966,7 +969,7 @@ func (m *Model) modalView(w int) string {
 func (m *Model) helpView(w, h int) string {
 	lines := []string{
 		sBold.Render("Navigation"),
-		kv("0-9 ,", "switch screen") + "    " + kv("tab", "next screen"),
+		kv("0-9 S", "switch screen") + "    " + kv("tab", "next screen"),
 		kv("←/→", "previous / next") + "    " + kv("click", "tab bar"),
 		kv("r", "refresh now") + "        " + kv("?", "toggle help"),
 		kv("q", "quit"),

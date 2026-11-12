@@ -48,6 +48,7 @@ Usage:
   cockpit keys create --name NAME --scope SCOPE [--scope SCOPE] [--expires DURATION|TIME]
   cockpit keys rotate ID [--yes]
   cockpit keys revoke ID [--yes]
+  cockpit keys remove ID [--yes]
 
 Scopes: system:read, metrics:read, network:read, processes:read, or "all"
 for every read scope. Keys never get admin.
@@ -55,6 +56,7 @@ for every read scope. Keys never get admin.
 
 "create" and "rotate" print the new key alone on standard output so it can
 be piped to a file or secret store. It is shown only once.
+"remove" deletes a revoked or expired key from the list; revoke it first.
 `
 
 type stringList []string
@@ -86,7 +88,7 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 		fs.StringVar(&name, "name", "", "key name (1-64 characters)")
 		fs.Var(&scopes, "scope", "scope to grant; repeat for several")
 		fs.StringVar(&expires, "expires", "", "expiry as a duration (720h) or RFC 3339 time; default: never")
-	case "rotate", "revoke":
+	case "rotate", "revoke", "remove":
 		fs.BoolVar(&yes, "yes", false, "do not ask for confirmation")
 	default:
 		fmt.Fprintf(env.Stderr, "unknown keys command %q\n\n%s", sub, keysUsage)
@@ -154,7 +156,7 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 		showCreated(env, created, "Created")
 		return ExitOK
 
-	default: // rotate, revoke
+	default: // rotate, revoke, remove
 		if len(positional) != 1 {
 			fmt.Fprintf(env.Stderr, "usage: cockpit keys %s ID [--yes]\n", sub)
 			return ExitUsage
@@ -163,6 +165,13 @@ func runKeys(ctx context.Context, args []string, env Env) int {
 		if !yes && !confirm(env, sub, id) {
 			fmt.Fprintln(env.Stderr, "Cancelled; nothing was changed.")
 			return ExitError
+		}
+		if sub == "remove" {
+			if err := c.RemoveKey(ctx, id); err != nil {
+				return fail(err)
+			}
+			fmt.Fprintf(env.Stderr, "Removed key %s from the list.\n", id)
+			return ExitOK
 		}
 		if sub == "revoke" {
 			k, err := c.RevokeKey(ctx, id)
@@ -189,8 +198,11 @@ func confirm(env Env, action, id string) bool {
 		return false
 	}
 	what := "Revoking a key makes it stop working immediately."
-	if action == "rotate" {
+	switch action {
+	case "rotate":
 		what = "Rotating issues a new key and makes the old one stop working immediately."
+	case "remove":
+		what = "Removing deletes the revoked key's record from the list. This cannot be undone."
 	}
 	fmt.Fprintf(env.Stderr, "%s\nType the key ID (%s) to confirm: ", what, id)
 	line, err := bufio.NewReader(env.Stdin).ReadString('\n')

@@ -10,6 +10,8 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Settings is on `S` (Shift+S).** The tab used to show `, Settings`,
+  which read like a stray comma. `,` still works.
 - **Line charts.** Performance charts and Overview sparklines are drawn
   as connected lines in braille characters (2 points across and 4 levels
   up per character) instead of block bars. Gaps in history still show.
@@ -21,6 +23,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 - **All read scopes at once.** In the TUI's new-key dialog, `a` selects
   every read scope (or clears them); `cockpit keys create --scope all`
   does the same. Keys still never get `admin`.
+- **Removing old keys (D33).** Revoked and expired keys can be deleted
+  from the list: `d` on the API Access screen, `cockpit keys remove ID`,
+  or `POST /api/v1/keys/{id}/remove`. Active keys must be revoked first.
+  Removal is recorded as a `key.removed` event.
 - **Copying a new key.** In the TUI's new-key dialog, `c` copies the key
   to the clipboard (OSC 52; most modern terminals, including Windows
   Terminal). The mouse is released while the dialog is open, so the key

@@ -37,6 +37,7 @@ type fakeAPI struct {
 	keys    []apiv1.APIKey
 	created []apiv1.CreateAPIKeyRequest
 	revoked []string
+	removed []string
 	rotated []string
 	procsOK bool
 	stream  []apiv1.Event
@@ -192,6 +193,11 @@ func (f *fakeAPI) CreateKey(_ context.Context, req apiv1.CreateAPIKeyRequest) (*
 func (f *fakeAPI) RotateKey(_ context.Context, id string) (*apiv1.CreatedAPIKey, error) {
 	f.rotated = append(f.rotated, id)
 	return &apiv1.CreatedAPIKey{Key: revealedKey, APIKey: apiv1.APIKey{ID: "newkeynewkey", Name: "rotated", Scopes: []string{"metrics:read"}}}, nil
+}
+
+func (f *fakeAPI) RemoveKey(_ context.Context, id string) error {
+	f.removed = append(f.removed, id)
+	return nil
 }
 
 func (f *fakeAPI) RevokeKey(_ context.Context, id string) (*apiv1.APIKey, error) {
@@ -427,7 +433,7 @@ func TestOverviewContent(t *testing.T) {
 	out := screenText(m)
 	for _, want := range []string{
 		"COCKPIT", "testbox", "Ubuntu 24.04 LTS", "up 1d 1h 1m", "▲ WARNING", // header with health (symbol + word)
-		"1 Overview", "0 API", ", Settings", "GPU", "RTX 3060", "vram",
+		"1 Overview", "0 API", "S Settings", "GPU", "RTX 3060", "vram",
 		"Test CPU @ 3.0GHz · 8 threads", "37.5%", "1.50  1.25  0.75",
 		"62.5%", "6.0 GiB of 16.0 GiB", "stall  unsupported",
 		"91.2%", "1.4 MiB/s", "eth0",
@@ -584,6 +590,41 @@ func TestCreateKeyNeedsAScope(t *testing.T) {
 	press(t, m, "esc")
 	if m.modal != modalNone {
 		t.Error("esc did not close the dialog")
+	}
+}
+
+// d removes a revoked key after the ID is typed; an active key is refused.
+func TestRemoveRevokedKey(t *testing.T) {
+	revokedAt := t0
+	api := &fakeAPI{admin: true, keys: []apiv1.APIKey{
+		{ID: "k3p9x2m7q4ta", Name: "live", Active: true},
+		{ID: "k3p9x2m7q4tb", Name: "old", RevokedAt: &revokedAt},
+	}}
+	m := setup(t, api, 120, 40)
+	press(t, m, key(scrAccess), "d")
+	if m.modal != modalNone || !strings.Contains(screenText(m), "revoke it first") {
+		t.Fatalf("active key offered for removal:\n%s", screenText(m))
+	}
+	press(t, m, "down", "d")
+	if !strings.Contains(screenText(m), "Remove key k3p9x2m7q4tb") {
+		t.Fatalf("no confirmation:\n%s", screenText(m))
+	}
+	typeText(t, m, "k3p9x2m7q4tb")
+	press(t, m, "enter")
+	if len(api.removed) != 1 || api.removed[0] != "k3p9x2m7q4tb" || !strings.Contains(screenText(m), "Removed k3p9x2m7q4tb") {
+		t.Fatalf("removed %v:\n%s", api.removed, screenText(m))
+	}
+}
+
+func TestSettingsKey(t *testing.T) {
+	m := setup(t, &fakeAPI{admin: true}, 120, 40)
+	press(t, m, "S")
+	if m.screen != scrSettings {
+		t.Errorf("S opened %v", m.screen)
+	}
+	press(t, m, "1", ",")
+	if m.screen != scrSettings {
+		t.Errorf(", no longer opens Settings: %v", m.screen)
 	}
 }
 
@@ -825,7 +866,7 @@ func TestEventListIsBounded(t *testing.T) {
 func TestCompactTabsFitAndClick(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 80, 24)
 	tabs := ansi.Strip(m.tabs(80))
-	if lipgloss.Width(tabs) > 80 || !strings.Contains(tabs, "0 API") || !strings.Contains(tabs, "7 Proc") || !strings.Contains(tabs, ", Set") {
+	if lipgloss.Width(tabs) > 80 || !strings.Contains(tabs, "0 API") || !strings.Contains(tabs, "7 Proc") || !strings.Contains(tabs, "S Set") {
 		t.Errorf("compact tabs %q (%d wide)", tabs, lipgloss.Width(tabs))
 	}
 	span := tabSpans(80)[scrAccess]

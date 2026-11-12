@@ -29,6 +29,7 @@ type API interface {
 	CreateKey(ctx context.Context, req apiv1.CreateAPIKeyRequest) (*apiv1.CreatedAPIKey, error)
 	RotateKey(ctx context.Context, id string) (*apiv1.CreatedAPIKey, error)
 	RevokeKey(ctx context.Context, id string) (*apiv1.APIKey, error)
+	RemoveKey(ctx context.Context, id string) error
 	Processes(ctx context.Context, q client.ProcessesQuery) (*apiv1.ProcessesResponse, error)
 	Services(ctx context.Context, state string) (*apiv1.ServicesResponse, error)
 	Network(ctx context.Context) (*apiv1.NetworkResponse, error)
@@ -72,7 +73,10 @@ var mediumNames = [numScreens]string{"Overview", "HW", "Perf", "Health", "Storag
 var shortNames = [numScreens]string{"Ovw", "HW", "Perf", "Hlth", "Disk", "Net", "Proc", "Svc", "Evt", "API", "Set"}
 
 // screenKeys are the keys that select each screen.
-var screenKeys = [numScreens]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", ","}
+var screenKeys = [numScreens]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "S"}
+
+// settingsAlias is the earlier Settings key, still accepted but not shown.
+const settingsAlias = ","
 
 // historyRanges cycle with "t" on the Performance screen.
 var historyRanges = []time.Duration{time.Hour, 6 * time.Hour, 24 * time.Hour, 7 * 24 * time.Hour}
@@ -217,6 +221,7 @@ type resultMsg struct {
 
 type actionMsg struct {
 	action  string
+	id      string // the key acted on, for remove
 	created *apiv1.CreatedAPIKey
 	revoked *apiv1.APIKey
 	err     error
@@ -615,6 +620,9 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 			return m.setScreen(screen(i))
 		}
 	}
+	if s == settingsAlias {
+		return m.setScreen(scrSettings)
+	}
 	switch m.screen {
 	case scrAccess:
 		return m.accessKey(s)
@@ -733,6 +741,17 @@ func (m *Model) accessKey(s string) tea.Cmd {
 		}
 		m.pendingAction, m.pendingID = map[string]string{"x": "revoke", "o": "rotate"}[s], k.ID
 		m.modal, m.input, m.flash = modalConfirm, "", ""
+	case "d":
+		if !m.isAdmin() || len(m.keys) == 0 {
+			return nil
+		}
+		k := m.keys[m.selected]
+		if k.Active {
+			m.flashMsg(lvWarn, "Only revoked or expired keys can be removed. Press x to revoke it first.")
+			return nil
+		}
+		m.pendingAction, m.pendingID = "remove", k.ID
+		m.modal, m.input, m.flash = modalConfirm, "", ""
 	}
 	return nil
 }
@@ -831,9 +850,12 @@ func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 			return func() tea.Msg {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				if action == "revoke" {
+				switch action {
+				case "revoke":
 					k, err := m.api.RevokeKey(ctx, id)
 					return actionMsg{action: action, revoked: k, err: err}
+				case "remove":
+					return actionMsg{action: action, id: id, err: m.api.RemoveKey(ctx, id)}
 				}
 				c, err := m.api.RotateKey(ctx, id)
 				return actionMsg{action: action, created: c, err: err}
@@ -872,7 +894,9 @@ func (m *Model) applyAction(a actionMsg) tea.Cmd {
 	case "create", "rotate":
 		m.revealed, m.modal, m.copied = a.created, modalReveal, false
 	case "revoke":
-		m.flashMsg(lvOK, "Revoked "+a.revoked.ID+" ("+a.revoked.Name+"). It stops working immediately.")
+		m.flashMsg(lvOK, "Revoked "+a.revoked.ID+" ("+a.revoked.Name+"). It stops working immediately. Press d to remove it from the list.")
+	case "remove":
+		m.flashMsg(lvOK, "Removed "+a.id+" from the list.")
 	}
 	return m.fetch("keys", wrap(m.api.ListKeys))
 }

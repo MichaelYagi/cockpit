@@ -651,3 +651,20 @@ Linux.
 
 **Why.** Basic monitoring on the two other common desktop systems, while
 keeping the single static binary and the "unsupported, not fatal" rule.
+
+## D33 — Removing revoked and expired API keys
+
+**Status:** Proposed (2026-11-12)
+
+**Decision.** `POST /api/v1/keys/{id}/remove` (admin, local socket only)
+deletes the record of a key that is revoked or expired. A key that still
+works is refused with `invalid_request`; it must be revoked first, so
+removal never cuts off a client. `DELETE /keys/{id}` keeps meaning
+"revoke" (the `/api/v1` promise). Each removal is logged and published as
+a `key.removed` event. The TUI removes the selected key with `d`, and the
+CLI with `cockpit keys remove ID`, both after the key ID is typed, like
+revoke and rotate. A newer key's `rotated_from` may then name a key that
+no longer exists; it stays a plain ID.
+
+**Why.** Revoked keys stayed in the list for good and cluttered it. Their
+history is kept by the `key.revoked` and `key.removed` events and the logs.

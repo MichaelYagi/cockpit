@@ -142,6 +142,7 @@ func Routes(d Deps) []Route {
 		{Method: post, Path: "/keys", Scope: adm, SocketOnly: true, Handler: keys.Create},
 		{Method: del, Path: "/keys/{id}", Scope: adm, SocketOnly: true, Handler: keys.Revoke},
 		{Method: post, Path: "/keys/{id}/rotate", Scope: adm, SocketOnly: true, Handler: keys.Rotate},
+		{Method: post, Path: "/keys/{id}/remove", Scope: adm, SocketOnly: true, Handler: keys.Remove},
 		{Method: get, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Get},
 		{Method: http.MethodPut, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Put},
 		{Method: del, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Delete},
