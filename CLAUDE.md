@@ -215,7 +215,8 @@ Propose changes before changing a public contract.
 
 Visual language:
 
-- Dark charcoal background, not pure black.
+- Dark charcoal background, not pure black. Accents come from the
+  selected theme (`theme.go`); status colors are the same in every theme.
 - Fine, subtle panel borders.
 - Cyan/teal for neutral information; green healthy; amber warning; red
   critical.

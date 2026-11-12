@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -274,6 +275,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 	remote := newRemoteFlags(fs)
 	once := fs.Bool("once", false, "print a text summary and exit instead of starting the interactive UI")
 	refresh := fs.Duration("refresh", 0, "refresh interval (default from configuration, 1s)")
+	theme := fs.String("theme", "", "color theme for this session: "+strings.Join(tui.ThemeIDs(), ", ")+" (default: the one chosen in Settings)")
 	noEmbed := fs.Bool("no-embedded-agent", false, "fail instead of starting an embedded agent when none is running")
 	if ok, code := parse(fs, args); !ok {
 		return code
@@ -291,6 +293,10 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
 		return ExitError
+	}
+	if *theme != "" && !slices.Contains(tui.ThemeIDs(), *theme) {
+		fmt.Fprintf(env.Stderr, "unknown theme %q; choose one of: %s\n", *theme, strings.Join(tui.ThemeIDs(), ", "))
+		return ExitUsage
 	}
 	interval := res.Config.TUI.Refresh
 	if *refresh > 0 {
@@ -326,7 +332,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 		}
 		return ExitOK
 	}
-	if err := tui.Run(ctx, c, tui.RunOptions{Options: tui.Options{Target: target, Refresh: interval}}); err != nil {
+	if err := tui.Run(ctx, c, tui.RunOptions{Options: tui.Options{Target: target, Refresh: interval, Theme: *theme, PrefsPath: tuiPrefsPath(env)}}); err != nil {
 		fmt.Fprintln(env.Stderr, "error:", err)
 		return ExitError
 	}

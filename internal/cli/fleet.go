@@ -39,6 +39,16 @@ network detail. Key files must be chmod 600.
 
 // fleetPath is fleet.yaml in the user's configuration directory. The fleet
 // commands never start an agent, so the agent configuration is not loaded.
+// tuiPrefsPath is the TUI's per-user preferences file (theme), or "" when
+// no absolute user configuration directory is known.
+func tuiPrefsPath(env Env) string {
+	dir := config.UserConfigDir(env.LookupEnv, env.Home)
+	if !filepath.IsAbs(dir) {
+		return ""
+	}
+	return filepath.Join(dir, "tui.json")
+}
+
 func fleetPath(env Env) (string, error) {
 	return filepath.Join(config.UserConfigDir(env.LookupEnv, env.Home), fleet.FileName), nil
 }
@@ -269,7 +279,7 @@ func runFleetConsole(ctx context.Context, env Env) int {
 		machines = append(machines, fm)
 	}
 	for {
-		open, err := tui.RunFleet(ctx, machines, tui.FleetRunOptions{})
+		open, err := tui.RunFleet(ctx, machines, tui.FleetRunOptions{FleetOptions: tui.FleetOptions{PrefsPath: tuiPrefsPath(env)}})
 		if err != nil {
 			fmt.Fprintln(env.Stderr, "error:", err)
 			return ExitError
@@ -278,7 +288,7 @@ func runFleetConsole(ctx context.Context, env Env) int {
 			return ExitOK
 		}
 		m, _ := l.Get(open)
-		if err := tui.Run(ctx, clients[open], tui.RunOptions{Options: tui.Options{Target: open + " · " + m.URL, Refresh: 2 * time.Second}}); err != nil {
+		if err := tui.Run(ctx, clients[open], tui.RunOptions{Options: tui.Options{Target: open + " · " + m.URL, Refresh: 2 * time.Second, PrefsPath: tuiPrefsPath(env)}}); err != nil {
 			fmt.Fprintln(env.Stderr, "error:", err)
 			return ExitError
 		}
