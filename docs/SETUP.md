@@ -284,6 +284,26 @@ COCKPIT_API_KEY="$(cat grafana.key)" ./bin/cockpit tui --url http://127.0.0.1:78
 The full contract is served at `/api/v1/openapi.json` and lives in
 `api/openapi.yaml`.
 
+## Web dashboard
+
+The agent serves a read-only dashboard in the browser on its TCP port
+(D35). Open <http://127.0.0.1:7878/> and enter an API key; a key with
+`--scope all` shows everything, and a key with fewer scopes shows what it
+may read and says what it may not. It has the same screens as the TUI
+except API Access and Settings, updates live, and works at phone width.
+Number keys `1`–`9` switch screens.
+
+- The key stays in that browser tab only and is forgotten when the tab
+  closes. **Sign out** forgets it at once.
+- From another computer, set up [remote access](#remote-access) first and
+  open `https://<machine>:7878/`. The browser warns about the certificate,
+  since it comes from Cockpit's own CA: compare the fingerprint it shows
+  with `cockpit tls show`, or import `ca.pem` into the browser or system
+  trust store to remove the warning.
+- The TUI's built-in agent has no TCP port, so run `cockpit agent` (or the
+  system service) to use the dashboard.
+- Turn it off with `api.web.enabled: false`.
+
 ## Remote access
 
 By default TCP binds to `127.0.0.1` only. Remote access requires TLS.

@@ -904,3 +904,41 @@ func TestCORS(t *testing.T) {
 		t.Errorf("socket answered a preflight: %d %v", r.status, r.header)
 	}
 }
+
+// The web dashboard (D35) is served only on TCP, outside /api/v1, without
+// a key, behind the same Host check; the API itself is unchanged.
+func TestWebDashboardRoutes(t *testing.T) {
+	ui := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ui:" + r.URL.Path)) })
+	d := newEnv(t, nil).d
+	tcp := router(t, d, Options{Listener: ListenerTCP, CheckLoopbackHost: true, Web: ui})
+	for _, p := range []string{"/", "/ui"} {
+		if r := do(t, tcp, http.MethodGet, p); r.status != http.StatusFound || r.header.Get("Location") != WebPath {
+			t.Errorf("GET %s: %d to %q", p, r.status, r.header.Get("Location"))
+		}
+	}
+	for _, m := range []string{http.MethodGet, http.MethodHead} {
+		if r := do(t, tcp, m, "/ui/app.js"); r.status != http.StatusOK {
+			t.Errorf("%s /ui/app.js: %d", m, r.status)
+		}
+	}
+	if r := do(t, tcp, http.MethodGet, "/ui/app.js"); string(r.body) != "ui:/ui/app.js" {
+		t.Errorf("served %q", r.body)
+	}
+	if r := do(t, tcp, http.MethodPost, "/ui/app.js"); r.status != http.StatusMethodNotAllowed {
+		t.Errorf("POST /ui/app.js: %d", r.status)
+	}
+	if r := do(t, tcp, http.MethodGet, "/api/v1/system"); r.status != http.StatusUnauthorized {
+		t.Errorf("API without a key: %d", r.status)
+	}
+	if r := do(t, tcp, http.MethodGet, "/ui/", func(r *http.Request) { r.Host = "attacker.example:7878" }); r.status != http.StatusBadRequest {
+		t.Errorf("rebinding host: %d", r.status)
+	}
+	sock := router(t, d, Options{Listener: ListenerSocket, Web: ui})
+	if r := do(t, sock, http.MethodGet, "/ui/"); r.status != http.StatusNotFound {
+		t.Errorf("socket serves the dashboard: %d", r.status)
+	}
+	off := router(t, d, Options{Listener: ListenerTCP})
+	if r := do(t, off, http.MethodGet, "/ui/"); r.status != http.StatusNotFound {
+		t.Errorf("disabled dashboard: %d", r.status)
+	}
+}

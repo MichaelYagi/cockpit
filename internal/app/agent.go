@@ -34,6 +34,7 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/platform"
 	"github.com/MichaelYagi/cockpit/internal/settings"
 	"github.com/MichaelYagi/cockpit/internal/storage/sqlite"
+	"github.com/MichaelYagi/cockpit/internal/web"
 	"github.com/MichaelYagi/cockpit/pkg/apiv1"
 )
 
@@ -228,7 +229,11 @@ func Run(ctx context.Context, o Options) (err error) {
 		}
 	}
 	if cfg.API.TCP.Enabled {
-		if tcpH, err = api.NewRouter(deps, api.Options{Listener: api.ListenerTCP, CheckLoopbackHost: isLoopback(cfg.API.TCP.Address), Limits: limits, CORSOrigins: cfg.API.CORS.AllowedOrigins}); err != nil {
+		opts := api.Options{Listener: api.ListenerTCP, CheckLoopbackHost: isLoopback(cfg.API.TCP.Address), Limits: limits, CORSOrigins: cfg.API.CORS.AllowedOrigins}
+		if cfg.API.Web.Enabled {
+			opts.Web = web.Handler()
+		}
+		if tcpH, err = api.NewRouter(deps, opts); err != nil {
 			return err
 		}
 	}

@@ -220,6 +220,8 @@ api:
     global_burst: 400
   cors:                        # browser access to TCP, off by default (D34)
     allowed_origins: []        # exact origins, e.g. ["https://hoppscotch.io"]
+  web:
+    enabled: true              # web dashboard at /ui/ on the TCP listener (D35)
 collection:
   defaults: { interval: 2s, timeout: 1s }   # samplers; inventory collectors keep their own
   collectors:                  # per-collector overrides, e.g.

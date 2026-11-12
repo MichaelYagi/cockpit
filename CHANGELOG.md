@@ -23,6 +23,12 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Web dashboard (D35).** The agent serves a read-only dashboard at
+  `http://127.0.0.1:7878/` (or your TLS address): Overview, Performance
+  (live and stored history), Health, Storage, Network, Processes,
+  Services, Events (live) and Hardware. Sign in with an API key, which is
+  kept in that browser tab only. No third-party code; strict Content
+  Security Policy. On by default; `api.web.enabled: false` turns it off.
 - **Browser access (D34).** `api.cors.allowed_origins` lists exact web
   origins that may call the TCP listener from a browser (GET only, API key
   still required). Off by default. Preflights from other origins get
