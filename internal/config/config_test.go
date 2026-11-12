@@ -369,3 +369,20 @@ func TestCORSOrigins(t *testing.T) {
 		t.Error("too many origins accepted")
 	}
 }
+
+func TestWebDashboardSetting(t *testing.T) {
+	res, err := Load(Source{ConfigPath: write(t, ""), Env: envMap(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Config.API.Web.Enabled {
+		t.Error("the web dashboard should be on by default (D35)")
+	}
+	res, err = Load(Source{ConfigPath: write(t, "api:\n  web:\n    enabled: false\n"), Env: envMap(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Config.API.Web.Enabled {
+		t.Error("api.web.enabled: false was ignored")
+	}
+}

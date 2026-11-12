@@ -191,6 +191,27 @@ reporting, checked by the same conformance suite in CI.
 **Not in Phase 5:** push-based enrollment, a web UI, write operations,
 cgo-based macOS metrics.
 
+## Phase 6 — Web dashboard and macOS metrics
+
+**Status: in progress.** Decisions D35 and D36 are proposed.
+
+| # | Milestone | Depends on |
+|---|---|---|
+| 6A | Web dashboard serving (D35): embedded files at `/ui/` on the TCP listener, `api.web.enabled`, security headers | — |
+| 6B | Web dashboard screens: key sign-in, Overview, Performance, Health, Storage, Network, Processes, Services, Events, Hardware; live updates | 6A |
+| 6C | purego (D36); macOS CPU usage and CPU inventory | — |
+| 6D | macOS processes | 6C |
+| 6E | macOS batteries and Apple Silicon temperatures | 6C |
+| 6F | Docs, spec and security review; release `v0.6.0` | all |
+
+**Exit criteria:** a browser on another computer shows the same machine
+data as the TUI, with the same keys, TLS and scopes; the dashboard cannot
+change anything; macOS reports CPU usage, processes, batteries and (on
+Apple Silicon) temperatures, checked on the macOS CI runner.
+
+**Not in Phase 6:** key management or settings in the browser, write
+operations, Intel Mac temperatures, cgo.
+
 ## Open questions
 
 | # | Question | Needed by | Current recommendation |

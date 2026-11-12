@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -34,6 +35,9 @@ const (
 
 // BasePath prefixes every API route.
 const BasePath = "/api/v1"
+
+// WebPath is where the web dashboard is served (D35).
+const WebPath = "/ui/"
 
 // Route is one entry in the route table.
 type Route struct {
@@ -86,6 +90,9 @@ type Options struct {
 	// CORSOrigins are the web origins allowed to call this listener from
 	// a browser (TCP only, D34).
 	CORSOrigins []string
+	// Web serves the browser dashboard at /ui/ (TCP only, D35). Nil
+	// disables it.
+	Web http.Handler
 }
 
 // Routes returns the route table.
@@ -193,6 +200,17 @@ func newRouter(d Deps, o Options, routes []Route) (http.Handler, error) {
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		httpx.WriteError(w, req, http.StatusMethodNotAllowed, apiv1.CodeMethodNotAllowed, "Method not allowed for this resource.")
 	})
+
+	if o.Web != nil && o.Listener == ListenerTCP {
+		// Outside /api/v1 and public: static files with no data (D35).
+		toUI := func(w http.ResponseWriter, req *http.Request) {
+			http.Redirect(w, req, WebPath, http.StatusFound)
+		}
+		r.Get("/", toUI)
+		r.Get(strings.TrimSuffix(WebPath, "/"), toUI)
+		r.Get(WebPath+"*", o.Web.ServeHTTP)
+		r.Head(WebPath+"*", o.Web.ServeHTTP)
+	}
 
 	var limits *middleware.Limits
 	if o.Listener == ListenerTCP {

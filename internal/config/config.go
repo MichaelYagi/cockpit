@@ -43,6 +43,12 @@ type API struct {
 	TLS       TLS       `yaml:"tls"`
 	RateLimit RateLimit `yaml:"rate_limit"`
 	CORS      CORS      `yaml:"cors"`
+	Web       Web       `yaml:"web"`
+}
+
+// Web is the browser dashboard served on the TCP listener (D35).
+type Web struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // CORS lets listed web origins call the TCP listener from a browser
@@ -208,6 +214,7 @@ func Defaults() Config {
 			Socket:    Socket{Enabled: true},
 			TCP:       TCP{Enabled: true, Address: DefaultTCPAddress},
 			RateLimit: RateLimit{PerKeyRPS: 20, PerKeyBurst: 40, GlobalRPS: 200, GlobalBurst: 400},
+			Web:       Web{Enabled: true},
 		},
 		Health: Health{
 			Interval:       5 * time.Second,

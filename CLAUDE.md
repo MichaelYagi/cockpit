@@ -126,6 +126,7 @@ internal/
     middleware/              # request ID, recovery, logging, auth, scopes, rate limit, Host check
     handlers/                # thin handlers: decode → service → map → encode
     redact/                  # D9 sensitive-field policy
+  web/                       # browser dashboard (D35): embedded static files, no data, API client
   tui/                       # Bubble Tea app: model.go (state, input, SSE), view.go, theme.go,
                              # sanitize.go (control characters stripped from API text)
 pkg/
@@ -149,6 +150,7 @@ docs/
   `events.Subscriber`; it never calls collectors.
 - `internal/app` is the only package that wires concrete implementations
   (`custom` and `cmd/cockpit` only hand collectors to the CLI).
+- `internal/web` imports nothing internal: it is static files (D35).
 - `pkg/collectorsdk` imports nothing; `internal/extension` imports only
   `collector`, `core` and the SDK.
 - **`internal/tui` imports only `pkg/client`, `pkg/apiv1` and UI

@@ -690,3 +690,61 @@ browsers. The setting is in the configuration file only.
 the agent: the preflight got `405` and the browser never sent the request.
 An exact allowlist enables them without letting arbitrary sites read the
 API.
+
+## D35 — Web dashboard served by the agent
+
+**Status:** Proposed (2026-11-12)
+
+**Decision.** The agent serves a read-only web dashboard on its TCP
+listener at `/ui/`; `/` redirects there. It is on by default and turned off
+with `api.web.enabled: false`. It is an API client like the TUI:
+
+- The files (HTML, CSS, JavaScript) are embedded in the binary, with no
+  third-party code, no CDN and no build step. They are outside `/api/v1`
+  and not part of the OpenAPI contract, contain no data, and need no key.
+- The page asks for an API key and keeps it in the tab's
+  `sessionStorage`, so it is gone when the tab closes. Every API call is
+  same-origin with an `Authorization` header; no cookies are used, so
+  there is nothing for another site to forge. Scopes, rate limits, the
+  `Host` check and TLS rules apply exactly as for any other client.
+  Sections a key may not read say so instead of failing.
+- It is read-only: no key management or settings (those stay on the Unix
+  socket, D3), and no write operations.
+- Responses carry a strict Content Security Policy (`default-src 'none'`,
+  scripts, styles and connections from the same origin only, no framing),
+  `nosniff` and `no-referrer`. API text is inserted only as text, never
+  as HTML.
+- Live updates poll the API and read `/events/stream` with `fetch`
+  (`EventSource` cannot send an `Authorization` header).
+
+**Why.** A browser view is the easiest way to look at a machine from
+another computer, and it reuses the TCP listener, TLS setup and keys that
+already exist. Serving it from the same origin needs no CORS (D34).
+
+## D36 — macOS system libraries through purego
+
+**Status:** Proposed (2026-11-12)
+
+**Decision.** This amends D32. The macOS collectors may call system
+libraries (`libSystem`, IOKit, CoreFoundation) through
+`github.com/ebitengine/purego`, which loads them at run time without cgo.
+Builds stay `CGO_ENABLED=0`, and macOS binaries can still be built on
+Linux. The library is imported only by `internal/platform/darwin`, so Linux
+and Windows binaries do not contain it. This adds:
+
+- CPU usage, total and per core (`host_processor_info`), and the CPU
+  model and core counts (`sysctl`);
+- processes with CPU, memory, threads and executable path (`sysctl`
+  `kern.proc`, `proc_pidinfo`, `proc_pidpath`);
+- batteries and power adapters (IOKit power sources);
+- temperatures on Apple Silicon (IOKit HID sensors). Intel Macs report
+  temperatures `unsupported` for now.
+
+A library or symbol that fails to load makes only its capabilities
+unavailable, with a reason; it is never fatal. These calls cannot run on
+Linux, so they are tested on the `macos-latest` CI runner and by the
+conformance suite.
+
+**Why.** Without CPU usage and processes, the macOS agent misses the most
+basic monitoring. cgo would have meant building macOS binaries on a Mac;
+purego keeps the single static binary and cross-compilation (D7, D32).

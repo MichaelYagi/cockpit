@@ -25,7 +25,7 @@ Threats:
 | Listener | Default | Protection |
 |---|---|---|
 | Unix socket | on | Filesystem permissions (D3) |
-| TCP loopback `127.0.0.1:7878` | on | API key always (D4), `Host` check, CORS only for listed origins (D34) |
+| TCP loopback `127.0.0.1:7878` | on | API key always (D4), `Host` check, CORS only for listed origins (D34); also serves the keyless dashboard files at `/ui/` (D35) |
 | TCP remote | off | Explicit configuration + TLS + API key |
 
 - Never bind to `0.0.0.0` or `::` unless explicitly configured.
@@ -42,6 +42,18 @@ Threats:
   gets no more than the key it is given. Preflights from unlisted origins
   get `403 origin_not_allowed`. The Unix socket never answers browsers.
   Only list sites you trust with a key: the page's code sees the key.
+- **Web dashboard (D35).** The TCP listener serves static files at `/ui/`
+  without a key. They contain no data. The page keeps the key the user
+  enters in the tab's `sessionStorage` (gone when the tab closes; never in
+  cookies or `localStorage`) and sends it as an `Authorization` header to
+  the same origin, so another site cannot make requests with it. Responses
+  carry a strict Content Security Policy (`default-src 'none'`; scripts,
+  styles and connections from the same origin only; no framing), `nosniff`,
+  `no-referrer` and `X-Frame-Options: DENY`. API text is inserted as text,
+  never as HTML; a test rejects `innerHTML` and similar in the page's code.
+  The dashboard cannot manage keys or settings, which stay on the Unix
+  socket. Turn it off with `api.web.enabled: false`. Anyone who can reach
+  the listener can load the page, but sees nothing without a key.
 
 ## 3. Local administration (Unix socket)
 

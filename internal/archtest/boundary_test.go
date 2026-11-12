@@ -188,3 +188,9 @@ func TestExtensionDependencies(t *testing.T) {
 func TestFleetUsesTheSDK(t *testing.T) {
 	rule(t, "internal/fleet/...", hasPrefix("pkg/client", "pkg/apiv1"))
 }
+
+// The web dashboard is static files (D35): it reaches the agent only
+// through the API, from the browser.
+func TestWebIsStatic(t *testing.T) {
+	rule(t, "internal/web/...", func(string) bool { return false })
+}

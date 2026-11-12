@@ -29,6 +29,12 @@ disagree, the spec wins and this document must be fixed.
 
 Keys are never accepted in URLs or query strings.
 
+**Web dashboard.** The TCP listener also serves a read-only web dashboard
+at `/ui/` (`/` redirects there), unless `api.web.enabled` is `false`
+(D35). Its files are outside `/api/v1`, are not part of this contract and
+need no key; the page then calls the API like any other client, with the
+key the user enters. It is same-origin, so it needs no CORS.
+
 **Browsers.** Web pages can call the TCP listener only from origins listed
 in `api.cors.allowed_origins` (D34), for `GET` requests with an
 `Authorization` header. A preflight from any other origin gets `403
