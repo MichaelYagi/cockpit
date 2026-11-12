@@ -844,6 +844,16 @@ func (m *Model) accessScreen(w, h int) string {
 		r := a.Requests
 		srv = append(srv, kv("reqs", fmt.Sprintf("%d total", r.Total)+sMuted.Render(fmt.Sprintf("  2xx %d · 4xx %d · 5xx %d · auth failures %d · rate limited %d", r.Status2xx, r.Status4xx, r.Status5xx, r.AuthFailures, r.RateLimited))))
 		srv = append(srv, kv("clients", fmt.Sprintf("%d active", a.ActiveClients)+sMuted.Render(" (keys used in the last 5 minutes)")))
+		if note := m.noNetworkNote(); note != "" {
+			srv = append(srv, "")
+			for i, l := range wrapText(note, w-6) {
+				prefix := "  "
+				if i == 0 {
+					prefix = sWarn.Render("▲ ")
+				}
+				srv = append(srv, prefix+sWarn.Render(l))
+			}
+		}
 	}
 
 	var keyLines []string
@@ -958,6 +968,14 @@ func (m *Model) modalView(w int) string {
 			"",
 		}
 		lines = append(lines, wrapText("Copy this key now: press c, or select it with the mouse. When you press enter it is erased from this screen and can never be shown again. Send it as: Authorization: Bearer <key>", inner)...)
+		if addr := m.tcpAddress(); addr != "" {
+			lines = append(lines, "", sMuted.Render("Try it: ")+"curl -H \"Authorization: Bearer <key>\" \\", "           http://"+addr+"/api/v1/health")
+		} else if note := m.noNetworkNote(); note != "" {
+			lines = append(lines, "")
+			for _, l := range wrapText(note, inner) {
+				lines = append(lines, sWarn.Render(l))
+			}
+		}
 		if m.copied {
 			lines = append(lines, "", sOK.Render("Sent to the clipboard.")+sMuted.Render(" If paste does not work, your terminal blocks clipboard access; select the key instead."))
 		}

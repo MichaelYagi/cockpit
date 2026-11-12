@@ -114,6 +114,9 @@ type Options struct {
 	Target  string        // shown in the footer, e.g. the socket path
 	Refresh time.Duration // polling interval
 	Now     func() time.Time
+	// Embedded is set when the TUI started its own private agent for this
+	// session (no agent was running). That agent has no network port.
+	Embedded bool
 }
 
 // Model is the Bubble Tea model. It holds only API responses and
@@ -306,6 +309,33 @@ func (m *Model) refresh(all bool) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// tcpAddress is the agent's TCP listener address, or "" when the agent has
+// no network port (or the connection is not the admin socket).
+func (m *Model) tcpAddress() string {
+	if m.status == nil || m.status.API == nil {
+		return ""
+	}
+	for _, l := range m.status.API.Listeners {
+		if l.Transport == "tcp" {
+			return l.Address
+		}
+	}
+	return ""
+}
+
+// noNetworkNote explains, on the admin socket, that keys cannot be used
+// yet because the agent has no network port. Empty when it has one.
+func (m *Model) noNetworkNote() string {
+	if !m.isAdmin() || m.tcpAddress() != "" {
+		return ""
+	}
+	if m.opts.Embedded {
+		return "This session's private agent has no network port, so other programs cannot use API keys yet. " +
+			"Keys you create are saved and will work once you run the agent on its own: quit, run cockpit agent, then open cockpit in another terminal."
+	}
+	return "This agent has no network port (api.tcp.enabled is false), so other programs cannot use API keys until TCP is enabled."
 }
 
 // isAdmin reports whether the connection is the local admin socket (the

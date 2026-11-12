@@ -44,7 +44,9 @@ Without a terminal (in a script or pipe), plain `cockpit` prints the help
 text instead; `cockpit help` always does. If no agent is running, the TUI starts an embedded one for the session.
 It listens only on a private socket and stops when you quit. To keep
 monitoring when the TUI is closed, and to allow API access from other
-programs, run the agent separately:
+programs, run the agent separately. Keys created while the TUI runs its own
+agent are saved, but nothing can use them until a separate agent with a
+TCP listener is running; the API Access screen says so.
 
 ```sh
 ./bin/cockpit agent        # terminal 1: foreground; Ctrl-C stops it
