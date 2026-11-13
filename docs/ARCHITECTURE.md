@@ -242,7 +242,7 @@ collection:
     targets:                   # at most 64
       - name: Home Assistant
         url: http://192.168.0.50:8123/   # http(s)://… or tcp://host:port; no user:password
-        expect_status: []      # default: 200-399
+        expect_status: []      # default: 200-399, 401, 403
         tls_skip_verify: false
 health:
   interval: 5s

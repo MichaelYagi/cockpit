@@ -547,7 +547,7 @@ collection:
         tls_skip_verify: true     # self-signed certificate
       - name: Jellyfin
         url: http://192.168.0.30:8096/health
-        expect_status: [200]      # default: any 2xx or 3xx
+        expect_status: [200]      # default: any 2xx or 3xx, or 401/403 (login required)
       - name: NAS SSH
         url: tcp://192.168.0.10:22    # just the port must accept connections
 ```
@@ -561,7 +561,9 @@ notifications cover your services too.
 
 Each service is checked in its own background loop, so one that hangs
 only waits out its own timeout and never delays the others or the rest
-of Cockpit. Results show what *this* machine can reach. Don't put passwords or
+of Cockpit. A service that asks for a login (HTTP 401 or 403) counts as up: it
+answered, and checks never send passwords. Results show what *this*
+machine can reach. Don't put passwords or
 tokens in these URLs: the configuration file is not secret. API keys
 need the `network:read` scope to see the URLs; without it they see names
 and states only.

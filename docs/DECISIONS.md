@@ -868,8 +868,10 @@ retries are logged, not stored.
 `collection.endpoints.targets` (at most 64; none by default):
 
 - **Targets:** `http://` or `https://` URLs, checked with a GET that
-  must answer with an expected status (200-399 unless `expect_status`
-  lists codes), or `tcp://host:port`, which must accept a connection.
+  must answer with an expected status (200-399, 401 or 403 unless
+  `expect_status` lists codes; a login prompt means the service is
+  running, and checks never send credentials), or `tcp://host:port`,
+  which must accept a connection.
   `tls_skip_verify` accepts any certificate for self-signed home
   servers. URLs must not contain a user name or password, because the
   configuration file is not a place for secrets; headers and request

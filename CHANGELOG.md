@@ -33,6 +33,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Services that ask for a login count as up.** A service check that
+  gets 401 or 403 now reports the service up (it answered; it just wants
+  a password), so login-protected apps no longer show as failing.
+  `expect_status` still overrides the default.
 - **Paste into TUI fields.** Service check names and addresses, API key
   names and confirmations, thresholds and the process search accept
   pasted text (Ctrl+V or Shift+Insert, depending on the terminal). Line
