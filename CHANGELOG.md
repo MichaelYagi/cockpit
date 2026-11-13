@@ -33,6 +33,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Paste into TUI fields.** Service check names and addresses, API key
+  names and confirmations, thresholds and the process search accept
+  pasted text (Ctrl+V or Shift+Insert, depending on the terminal). Line
+  breaks and control characters are removed, and the text is trimmed.
 - **Add and remove service checks from the TUI (D41).** On the agent's
   machine, the Network screen's Endpoints panel takes `a` to add a check
   (name, address, and for `https://` whether to accept a self-signed

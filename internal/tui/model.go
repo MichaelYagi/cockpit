@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -486,6 +487,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.click(msg.Mouse())
 	case tea.KeyPressMsg:
 		return m, m.key(msg)
+	case tea.PasteMsg:
+		m.paste(msg.Content)
 	}
 	return m, nil
 }
@@ -1049,6 +1052,52 @@ const confirmChars = 4
 // confirmChars long (the whole ID also works).
 func idConfirmed(id, typed string) bool {
 	return len(typed) >= confirmChars && strings.HasPrefix(id, typed)
+}
+
+// paste inserts pasted text into the field being edited, if any. Fields
+// are single-line: line breaks and tabs become spaces, other control
+// characters are dropped, and surrounding space is trimmed (a URL copied
+// from a browser often ends with a newline).
+func (m *Model) paste(s string) {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(s, ""))
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return
+	}
+	add := func(cur string, limit int) string {
+		r := append([]rune(cur), []rune(s)...)
+		if len(r) > limit {
+			r = r[:limit]
+		}
+		return string(r)
+	}
+	switch {
+	case m.modal == modalCreateName || m.modal == modalEndpointName:
+		m.input = add(m.input, 64)
+	case m.modal == modalEndpointURL:
+		m.input = add(m.input, 512)
+	case m.modal == modalConfirm:
+		m.input = add(m.input, 32)
+	case m.modal == modalEditSetting:
+		digits := strings.Map(func(r rune) rune {
+			if strings.ContainsRune("0123456789.", r) {
+				return r
+			}
+			return -1
+		}, s)
+		m.input = (m.input + digits)[:min(10, len(m.input)+len(digits))]
+	case m.modal == modalNone && m.searching:
+		r := append([]rune(m.procSearch), []rune(s)...)
+		m.procSearch = string(r[:min(64, len(r))])
+	}
 }
 
 func (m *Model) typeText(k tea.KeyPressMsg, limit int) {

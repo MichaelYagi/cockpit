@@ -524,7 +524,7 @@ Cockpit can check that your services answer: web apps, APIs, or
 anything listening on a TCP port (D40).
 
 **From the TUI** (on the agent's machine, so it uses the admin socket):
-open the Network screen (`6`), press `a`, type a name, then the address
+open the Network screen (`6`), press `a`, type or paste a name, then the address
 (`http://192.168.0.50:8123/`, `https://nas.lan/` or
 `tcp://192.168.0.10:22`). For `https://` addresses it asks whether to
 accept a self-signed certificate. The check starts within a few seconds

@@ -1420,3 +1420,53 @@ func TestNetworkChecksReadOnlyWithKey(t *testing.T) {
 		t.Error("add hint shown without admin access")
 	}
 }
+
+// Names and addresses can be pasted (bracketed paste), as one clean line.
+func TestPasteIntoFields(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 140, 50)
+	press(t, m, key(scrNetwork))
+	drive(t, m, m.refresh(true))
+	m.Update(tea.PasteMsg{Content: "ignored: no field is open"})
+	if m.input != "" {
+		t.Fatalf("paste outside a field: %q", m.input)
+	}
+	press(t, m, "a")
+	m.Update(tea.PasteMsg{Content: "Home\tLab\x1b[31m NAS\n"})
+	if m.input != "Home Lab[31m NAS" {
+		t.Errorf("name %q", m.input)
+	}
+	press(t, m, "backspace", "backspace", "backspace", "backspace")
+	press(t, m, "enter")
+	m.Update(tea.PasteMsg{Content: "  https://192.168.1.20:8006/\r\n"})
+	if m.input != "https://192.168.1.20:8006/" {
+		t.Errorf("url %q", m.input)
+	}
+	press(t, m, "enter")
+	drive(t, m, m.key(tea.KeyPressMsg{Code: 'n', Text: "n"}))
+	if len(api.addedChecks) != 1 || api.addedChecks[0].Name != "Home Lab[31m" || api.addedChecks[0].URL != "https://192.168.1.20:8006/" {
+		t.Errorf("added %+v", api.addedChecks)
+	}
+
+	// Typing and pasting mix, and long pastes are cut at the field limit.
+	press(t, m, "a")
+	typeText(t, m, "x")
+	m.Update(tea.PasteMsg{Content: strings.Repeat("y", 100)})
+	if len([]rune(m.input)) != 64 || !strings.HasPrefix(m.input, "xy") {
+		t.Errorf("limit: %d %q", len(m.input), m.input)
+	}
+	press(t, m, "esc")
+
+	// API key names, and numbers only in threshold fields.
+	press(t, m, key(scrAccess), "n")
+	m.Update(tea.PasteMsg{Content: "grafana\n"})
+	if m.modal != modalCreateName || m.input != "grafana" {
+		t.Errorf("key name %v %q", m.modal, m.input)
+	}
+	press(t, m, "esc")
+	m.modal, m.input = modalEditSetting, ""
+	m.Update(tea.PasteMsg{Content: " 87.5 % "})
+	if m.input != "87.5" {
+		t.Errorf("threshold %q", m.input)
+	}
+}
