@@ -98,7 +98,7 @@ func TestInstallUpgradeUninstallStaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := []string{"DESTDIR=" + root}
-	out := sh(t, dest, "install.sh", "--binary", bin, "--prefix", "/opt/ckp", "--smart-helper")
+	out := sh(t, dest, "install.sh", "--binary", bin, "--prefix", "/opt/ckp")
 	if !strings.Contains(out, "skipped (DESTDIR): systemd-sysusers") || !strings.Contains(out, "systemctl enable --now cockpit-smart.timer") {
 		t.Errorf("install output:\n%s", out)
 	}
@@ -241,5 +241,34 @@ func TestInstallFromArchiveLayout(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "usr/local/bin/cockpit")); !strings.Contains(string(data), "archive") {
 		t.Error("archive binary not installed")
+	}
+}
+
+// smartmontools is installed and the SMART timer enabled by default;
+// --no-smart skips both.
+func TestInstallSmartDefault(t *testing.T) {
+	if _, err := exec.LookPath("smartctl"); err == nil {
+		t.Skip("smartctl is installed here, so install.sh would not install it")
+	}
+	bin := filepath.Join(t.TempDir(), "cockpit")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A fake apt-get first on PATH; DESTDIR mode only prints it.
+	fake := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fake, "apt-get"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"DESTDIR=" + t.TempDir(), "PATH=" + fake + ":" + os.Getenv("PATH")}
+	out := sh(t, env, "install.sh", "--binary", bin)
+	for _, want := range []string{"skipped (DESTDIR): env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends smartmontools", "systemctl enable --now cockpit-smart.timer"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("default install lacks %q:\n%s", want, out)
+		}
+	}
+	env[0] = "DESTDIR=" + t.TempDir()
+	out = sh(t, env, "install.sh", "--binary", bin, "--no-smart")
+	if strings.Contains(out, "smartmontools (for") || strings.Contains(out, "skipped (DESTDIR): systemctl enable --now cockpit-smart.timer") {
+		t.Errorf("--no-smart still sets up SMART:\n%s", out)
 	}
 }

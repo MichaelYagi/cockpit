@@ -1,15 +1,17 @@
 #!/bin/sh
 # Install Cockpit as a hardened system service (cockpit-agent.service).
 #
-#   sudo ./deploy/install.sh [--binary PATH] [--prefix DIR] [--smart-helper] [--no-start]
+#   sudo ./deploy/install.sh [--binary PATH] [--prefix DIR] [--no-smart] [--no-start]
 #
 # --binary defaults to bin/cockpit in a source checkout, or the cockpit
 # binary next to deploy/ in a release archive.
 #
 # Installs the binary, systemd units and the cockpit-monitor system user,
-# then enables and starts the agent. --smart-helper also enables the hourly
-# SMART helper timer (D20), which runs smartctl as root. Running it again
-# upgrades in place: the binary and units are replaced, data is kept.
+# then enables and starts the agent. It also installs smartmontools with the
+# system's package manager when smartctl is missing, and enables the hourly
+# SMART helper timer (D20), which runs smartctl as root; --no-smart skips
+# both. Running it again upgrades in place: the binary and units are
+# replaced, data is kept.
 #
 # DESTDIR=/some/dir stages the files there instead and skips every
 # system-changing step (user creation, systemctl); used by the tests.
@@ -17,11 +19,11 @@ set -eu
 
 binary=""
 prefix=/usr/local
-smart=no
+smart=yes
 start=yes
 
 usage() {
-	sed -n '2,16s/^# \{0,1\}//p' "$0"
+	sed -n '2,18s/^# \{0,1\}//p' "$0"
 	exit "${1:-0}"
 }
 
@@ -29,7 +31,8 @@ while [ $# -gt 0 ]; do
 	case $1 in
 	--binary) binary=${2:?--binary needs a path}; shift 2 ;;
 	--prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
-	--smart-helper) smart=yes; shift ;;
+	--smart-helper) smart=yes; shift ;; # the default; kept for old scripts
+	--no-smart) smart=no; shift ;;
 	--no-start) start=no; shift ;;
 	-h | --help) usage 0 ;;
 	*) echo "unknown option: $1" >&2; usage 2 >&2 ;;
@@ -85,6 +88,36 @@ for unit in cockpit-agent.service cockpit-smart.service cockpit-smart.timer; do
 	chmod 0644 "$dest$unitdir/$unit.new"
 	mv -f "$dest$unitdir/$unit.new" "$dest$unitdir/$unit"
 done
+
+# smartctl for disk health. A failed package install is not fatal: the
+# agent reports disk health as not configured until smartctl is there.
+install_smartctl() {
+	if command -v smartctl >/dev/null 2>&1; then
+		return 0
+	fi
+	echo "Installing smartmontools (for disk health; --no-smart skips this)"
+	if command -v apt-get >/dev/null 2>&1; then
+		# Package lists may be missing or old on a fresh machine.
+		run env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends smartmontools ||
+			{ run apt-get update -q && run env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends smartmontools; }
+	elif command -v dnf >/dev/null 2>&1; then
+		run dnf install -y smartmontools
+	elif command -v yum >/dev/null 2>&1; then
+		run yum install -y smartmontools
+	elif command -v zypper >/dev/null 2>&1; then
+		run zypper --non-interactive install smartmontools
+	elif command -v pacman >/dev/null 2>&1; then
+		run pacman -S --noconfirm --needed smartmontools
+	elif command -v apk >/dev/null 2>&1; then
+		run apk add smartmontools
+	else
+		echo "No known package manager found; install smartmontools yourself." >&2
+		return 1
+	fi
+}
+if [ "$smart" = yes ] && ! install_smartctl; then
+	echo "warning: smartmontools was not installed; disk health stays unavailable." >&2
+fi
 
 run systemd-sysusers "$sysusersdir/cockpit-monitor.conf"
 # The agent creates its own state, runtime and configuration directories

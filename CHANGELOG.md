@@ -10,6 +10,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Disk health works after install.** `deploy/install.sh` installs
+  smartmontools with the system's package manager when `smartctl` is
+  missing and enables the hourly SMART helper by default. `--no-smart`
+  skips both; `--smart-helper` is still accepted and does nothing extra.
 - **Shorter key confirmations.** Rotating, revoking and removing a key
   (TUI and CLI) need only the first 4 characters of the key ID; the whole
   ID still works.
