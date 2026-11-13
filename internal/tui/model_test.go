@@ -442,7 +442,7 @@ func TestOverviewContent(t *testing.T) {
 		"62.5%", "6.0 GiB of 16.0 GiB", "stall  unsupported",
 		"91.2%", "1.4 MiB/s", "eth0",
 		"? unsupported", "This is normal in", // unsupported sensors with reason
-		"? UNKNOWN", "CPU temperature",
+		"– N/A", "CPU temperature", // cannot run here: not a problem
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("overview missing %q:\n%s", want, out)
@@ -460,7 +460,7 @@ func TestScreensShowUnavailableReasons(t *testing.T) {
 	m := setup(t, &fakeAPI{}, 120, 40)
 	press(t, m, key(scrHealth))
 	out := screenText(m)
-	for _, want := range []string{"Health checks", "unsupported: No hardware temperature sensors", "/ is 91.2% full", "Remove or archive", "Recent events"} {
+	for _, want := range []string{"Health checks", "– N/A", "No hardware temperature sensors", "/ is 91.2% full", "Remove or archive", "Recent events"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("health missing %q:\n%s", want, out)
 		}

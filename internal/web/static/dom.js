@@ -91,8 +91,8 @@ export function level(p, warn = 75, crit = 90) {
   return p >= crit ? 'crit' : p >= warn ? 'warn' : 'ok';
 }
 
-const statusWords = { ok: 'OK', warning: 'Warning', critical: 'Critical', unknown: 'Unknown', info: 'Info' };
-const statusClass = { ok: 'ok', warning: 'warn', critical: 'crit', unknown: 'muted', info: 'accent' };
+const statusWords = { ok: 'OK', warning: 'Warning', critical: 'Critical', unknown: 'Unknown', info: 'Info', 'n/a': 'N/A' };
+const statusClass = { ok: 'ok', warning: 'warn', critical: 'crit', unknown: 'muted', info: 'accent', 'n/a': 'muted' };
 
 // pill shows a status as a coloured label with its name, so colour is
 // never the only signal.

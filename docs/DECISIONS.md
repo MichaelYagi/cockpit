@@ -366,6 +366,11 @@ others, and writes only relative to the opened directory.
 **Why.** Resolves Q1 without giving the long-running, network-facing
 agent elevated privileges.
 
+**Amended (2026-11-13, proposed).** `deploy/install.sh` installs
+smartmontools from the distribution's packages when `smartctl` is
+missing and enables the timer by default; `--no-smart` opts out. The
+agent still detects `smartctl` at runtime and works without it.
+
 ## D21 — Diagnostic reports
 
 **Status:** Accepted (2026-11-11)

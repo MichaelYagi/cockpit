@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 type theme struct {
 	id, name string
 	single   bool // one accent hue; listed first in Settings
+	retro    bool // old CRT look: tinted text and square corners; listed last
 	bg       color.Color
 	border   color.Color
 	borderHi color.Color // focused panel border
@@ -46,6 +48,8 @@ var themes = []theme{
 	mixed("lagoon", "Lagoon", "#1a2027", "#33404c", "#3f8f8a", "#6cb6ff", "#4fd1c5", "#f08bb0"),
 	mixed("orchid", "Orchid", "#211d25", "#433a4c", "#8a5f9a", "#f08bb0", "#b392f0", "#4fd1c5"),
 	mixed("dusk", "Dusk", "#201d27", "#3f3850", "#9a5f86", "#a98bf0", "#f08bb0", "#6cb6ff"),
+	retro("amber", "Amber", "#140d04", "#5a3b0c", "#b87a14", "#ffb000", "#ffc84a", "#d98a00", "#ffb84d", "#a8762c"),
+	retro("phosphor", "Phosphor", "#04110a", "#174a2c", "#2f9e5e", "#33ff77", "#8cffb0", "#1fbf5a", "#7dffa8", "#3f9a62"),
 }
 
 func single(id, name, bg, border, borderHi, accent, light string) theme {
@@ -58,6 +62,14 @@ func mixed(id, name, bg, border, borderHi, accent, accent2, accent3 string) them
 	return theme{id: id, name: name, bg: hex(bg), border: hex(border), borderHi: hex(borderHi),
 		text: hex("#d0d6de"), muted: hex("#8a939e"), accent: hex(accent), accent2: hex(accent2), accent3: hex(accent3),
 		ok: hex("#7ccf8a"), warn: hex("#e9b85b"), crit: hex("#f0716b")}
+}
+
+// retro is a monochrome terminal look: text and borders in the accent's
+// hue, square corners. Status colors stay the same as every other theme.
+func retro(id, name, bg, border, borderHi, accent, accent2, accent3, text, muted string) theme {
+	t := mixed(id, name, bg, border, borderHi, accent, accent2, accent3)
+	t.text, t.muted, t.retro = hex(text), hex(muted), true
+	return t
 }
 
 // ThemeIDs lists the theme IDs, for flag validation and help.
@@ -166,6 +178,36 @@ func healthBadge(st *styles, status string) string {
 	return badge(st, healthLevel(status), strings.ToUpper(status))
 }
 
+// notApplicable reports a check that cannot run on this machine because
+// the hardware or feature is absent or turned off (no sensors, no ZFS, UPS
+// monitoring off). It is still "unknown" in the API; the TUI shows it as
+// N/A so it does not look like a problem.
+func notApplicable(c apiv1.HealthCheck) bool {
+	return c.Status == apiv1.HealthUnknown && (c.Availability == apiv1.Unsupported || c.Availability == apiv1.NotConfigured)
+}
+
+// checkBadge is a check's status, padded to a fixed width.
+func checkBadge(st *styles, c apiv1.HealthCheck) string {
+	if notApplicable(c) {
+		return st.muted.Render(pad("– N/A", 10))
+	}
+	return badge(st, healthLevel(c.Status), pad(strings.ToUpper(c.Status), 8))
+}
+
+// sortChecks orders checks by what needs attention: critical, warning,
+// unknown, OK, then N/A. The order within each group is kept.
+func sortChecks(in []apiv1.HealthCheck) []apiv1.HealthCheck {
+	rank := func(c apiv1.HealthCheck) int {
+		if notApplicable(c) {
+			return 4
+		}
+		return map[string]int{apiv1.HealthCritical: 0, apiv1.HealthWarning: 1, apiv1.HealthUnknown: 2, apiv1.HealthOK: 3}[c.Status]
+	}
+	out := append([]apiv1.HealthCheck(nil), in...)
+	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	return out
+}
+
 // availabilityText explains why a section has no data.
 func availabilityText(status string) string {
 	switch status {
@@ -232,7 +274,11 @@ func panel(st *styles, title, body string, width, height int, focused bool) stri
 		lines[i] = truncate(l, inner)
 	}
 	content := st.title.Render(truncate(title, inner)) + "\n" + strings.Join(lines, "\n")
-	frame := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1).Width(width)
+	shape := lipgloss.RoundedBorder()
+	if st.c.retro {
+		shape = lipgloss.NormalBorder()
+	}
+	frame := lipgloss.NewStyle().Border(shape).BorderForeground(border).Padding(0, 1).Width(width)
 	if height > 0 {
 		frame = frame.Height(height)
 		// Clip content that would overflow the panel.

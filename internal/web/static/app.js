@@ -669,6 +669,18 @@ function Performance(el) {
   return { tick: liveTick, destroy: () => poll?.stop() };
 }
 
+// A check that cannot run here (no such hardware, or turned off) is still
+// "unknown" in the API; it is shown as N/A so it does not look like a
+// problem, and listed last.
+function notApplicable(c) {
+  return c.status === 'unknown' && (c.availability === 'unsupported' || c.availability === 'not_configured');
+}
+
+function sortChecks(checks) {
+  const rank = c => notApplicable(c) ? 4 : ({ critical: 0, warning: 1, unknown: 2, ok: 3 }[c.status] ?? 2);
+  return checks.map((c, i) => [c, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(x => x[0]);
+}
+
 function Health(el) {
   const body = h('div');
   el.append(body);
@@ -681,9 +693,9 @@ function Health(el) {
       h('div', { class: 'toolbar' }, h('span', { class: 'big-pill' }, 'Overall ', pill(hl.status)), h('span', { class: 'muted' }, 'Evaluated ' + clock(hl.evaluated_at))),
       card('Checks', table([
         { label: 'Check', value: c => c.name },
-        { label: 'Status', value: c => pill(c.status) },
+        { label: 'Status', value: c => notApplicable(c) ? pill('n/a') : pill(c.status) },
         { label: 'Details', value: c => c.summary || c.reason || (c.availability !== 'available' ? c.availability.replace(/_/g, ' ') : '') },
-      ], hl.checks)),
+      ], sortChecks(hl.checks))),
       card(`Findings (${findings.length})`, findings.length ? findings.map(f => h('article', { class: 'finding ' + (f.severity === 'critical' ? 'crit' : 'warn') },
         h('header', null, pill(f.severity), h('b', null, f.subject), h('span', { class: 'muted' }, 'since ' + clock(f.since))),
         h('p', null, f.summary),

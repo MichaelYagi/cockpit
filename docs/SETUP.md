@@ -64,7 +64,9 @@ TCP listener is running; the API Access screen says so.
 
 The Settings screen (`S`) lists the color themes with a swatch of each.
 Single-color themes (Teal, Ocean, Violet, Rose, Graphite) come first, then
-mixed ones (Aurora, Lagoon, Orchid, Dusk). `[` and `]` switch theme at once
+mixed ones (Aurora, Lagoon, Orchid, Dusk), then retro ones (Amber,
+Phosphor) that look like an old CRT terminal: tinted text and square
+panel corners. `[` and `]` switch theme at once
 and save it to `tui.json` in your configuration directory
 (`~/.config/cockpit-monitor/` on Linux, mode `0600`); the fleet console
 uses it too. Every theme keeps green, amber and red for health, and every
@@ -145,13 +147,16 @@ user:
 ```sh
 make build
 sudo ./deploy/install.sh                  # binary to /usr/local/bin, units to /etc/systemd/system
-sudo ./deploy/install.sh --smart-helper   # also enable the hourly SMART helper (needs smartmontools)
 sudo usermod -aG cockpit-monitor "$USER"  # admin socket access; log in again afterwards
 cockpit tui --mode system
 cockpit keys list --mode system
 ```
 
-`install.sh` accepts `--prefix DIR` (default `/usr/local`) and `--no-start`.
+`install.sh` also installs smartmontools with the system's package manager
+(apt, dnf, yum, zypper, pacman or apk) when `smartctl` is missing, and
+enables the hourly SMART helper, so disk health works out of the box.
+`--no-smart` skips both. A failed package install only prints a warning.
+It accepts `--prefix DIR` (default `/usr/local`) and `--no-start`.
 It installs:
 
 | Path | Contents | Mode |
@@ -436,7 +441,7 @@ Unavailable data is reported with a reason, never as an error:
 | Area | Typical reason | What to do |
 |---|---|---|
 | Temperatures, fans | No hwmon/thermal sensors (VMs, containers, WSL) | Nothing; this is expected |
-| Disk health | `smartctl` not installed | Install smartmontools 7.0+ |
+| Disk health | `smartctl` not installed | Install smartmontools 7.0+ (`install.sh` does this for the system service). Virtual disks in VMs and WSL have no SMART data even with it |
 | Disk health | Permission denied | Reading SMART data needs raw device access; in system mode enable the SMART helper (see System service) |
 | Disk health | Results more than 3 hours old | The SMART helper stopped running: `systemctl status cockpit-smart.timer` |
 | Memory pressure | Kernel without PSI (before 4.20, or `psi=0`) | Memory utilization is still checked |
