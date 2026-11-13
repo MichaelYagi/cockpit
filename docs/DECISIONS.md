@@ -813,3 +813,49 @@ machine, and the owner chose to accept the risk on networks they trust.
 the key until it is revoked. The private-address filter does not protect
 against devices on the same LAN.
 
+
+## D39 — Notifications through webhooks
+
+**Status:** Proposed (2026-11-13)
+
+**Decision.** The agent can send health findings to up to 8 webhooks,
+configured under `notifications.webhooks` in the configuration file. It
+is off until a webhook is listed.
+
+- **Formats:** `ntfy` (title, priority and tag headers, text body),
+  `discord` (`content`, with `allowed_mentions` empty so text from the
+  machine cannot ping anyone), `slack` (`text`, escaped) and `json` (a
+  flat object: machine, title, event, severity, status, subject, message,
+  time). This covers phone push (ntfy), chat, and anything that takes
+  JSON (Home Assistant, Gotify bridges, scripts).
+- **What is sent:** a `finding.raised` event at or above the webhook's
+  `min_severity` (`warning` by default, or `critical`), including a
+  finding that gets worse; and the matching `finding.resolved`, only to
+  webhooks that were told about the finding. Other events (keys,
+  settings, collectors) are not sent.
+- **Secrets:** a webhook URL usually is the credential (ntfy topic,
+  Discord or Slack token), so the configuration names a file
+  (`url_file`, absolute path) holding only the URL. On Unix it must not
+  be readable by group or others. URLs are never logged, and delivery
+  errors are rewritten so they do not contain the URL. Plain `http://`
+  is allowed (self-hosted ntfy on a LAN) with a startup warning.
+- **Delivery never slows the agent:** the notifier subscribes to the
+  event log; each webhook has a queue of 64 messages (overflow is
+  dropped and logged), a rate limit (20 a minute, burst 10), a 10-second
+  timeout, and two retries (after 5 and 30 seconds) for network errors,
+  408, 429 and 5xx. Other 4xx and redirects are not retried and not
+  followed.
+- **Checking the setup:** `cockpit notify test` sends a test message to
+  every webhook directly from the CLI and prints the result for each.
+  `cockpit config check` also reads the URL files.
+- No API or TUI changes: webhooks are configured only in the file, so an
+  API key can never add a destination.
+
+**Why.** Cockpit found problems but showed them only to someone looking
+at it. Webhooks reach phones and chat without Cockpit storing passwords
+or running a mail client, and ntfy needs no account.
+
+**Limits.** Findings are not repeated while they persist, and the
+agent's health state is not kept across restarts, so a problem still
+present after a restart is announced again. Messages that fail all
+retries are logged, not stored.

@@ -32,6 +32,7 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/health"
 	"github.com/MichaelYagi/cockpit/internal/history"
 	"github.com/MichaelYagi/cockpit/internal/netaddr"
+	"github.com/MichaelYagi/cockpit/internal/notify"
 	"github.com/MichaelYagi/cockpit/internal/platform"
 	"github.com/MichaelYagi/cockpit/internal/settings"
 	"github.com/MichaelYagi/cockpit/internal/storage/sqlite"
@@ -143,6 +144,21 @@ func Run(ctx context.Context, o Options) (err error) {
 	go func() { defer bg.Done(); keys.RunFlusher(bgCtx, 30*time.Second) }()
 	bg.Add(1)
 	go func() { defer bg.Done(); eventLog.RunWriter(bgCtx) }()
+
+	// Notifications (D39) read findings from the event log.
+	if targets, err := NotificationTargets(cfg.Notifications); err != nil {
+		return err
+	} else if len(targets) > 0 {
+		nlog := log.With("component", "notify")
+		warnPlainWebhooks(targets, nlog)
+		opts := notifyOptions(cfg.Notifications, nlog)
+		opts.Now = o.Now
+		notifier := notify.New(targets, opts)
+		sub := eventLog.Subscribe(events.Filter{})
+		bg.Add(1)
+		go func() { defer bg.Done(); defer sub.Close(); notifier.Run(bgCtx, sub) }()
+		nlog.Info("notifications on", "webhooks", len(targets))
+	}
 
 	// 3. Collectors and engine.
 	env := collector.DefaultEnv(log.With("component", "collector"), pathTools{})

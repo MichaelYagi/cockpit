@@ -435,3 +435,28 @@ func TestLANHTTPSetting(t *testing.T) {
 		t.Error("non-loopback without TLS accepted")
 	}
 }
+
+func TestNotificationsSetting(t *testing.T) {
+	ok := "notifications:\n  machine_name: nas\n  webhooks:\n    - name: phone\n      url_file: /etc/cockpit-monitor/ntfy.url\n      format: ntfy\n      min_severity: critical\n    - name: team chat\n      url_file: /etc/cockpit-monitor/discord.url\n      format: discord\n"
+	res, err := Load(Source{ConfigPath: write(t, ok), Env: envMap(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := res.Config.Notifications
+	if n.MachineName != "nas" || len(n.Webhooks) != 2 || n.Webhooks[0].Format != "ntfy" || n.Webhooks[1].MinSeverity != "" {
+		t.Errorf("%+v", n)
+	}
+	for bad, want := range map[string]string{
+		"notifications:\n  webhooks:\n    - name: x\n":                                                        "url_file",
+		"notifications:\n  webhooks:\n    - name: x\n      url_file: rel.url\n":                               "absolute",
+		"notifications:\n  webhooks:\n    - name: x\n      url_file: /a\n      format: teams\n":               "format",
+		"notifications:\n  webhooks:\n    - name: x\n      url_file: /a\n      min_severity: info\n":          "min_severity",
+		"notifications:\n  webhooks:\n    - name: x\n      url_file: /a\n    - name: X\n      url_file: /b\n": "used twice",
+		"notifications:\n  webhooks:\n    - name: \"\"\n      url_file: /a\n":                                 "name",
+		"notifications:\n  webhooks:\n    - name: x\n      url: https://ntfy.sh/t\n":                          "url",
+	} {
+		if _, err := Load(Source{ConfigPath: write(t, bad), Env: envMap(nil)}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}

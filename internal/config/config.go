@@ -27,7 +27,34 @@ type Config struct {
 	History    History    `yaml:"history"`
 	Logging    Logging    `yaml:"logging"`
 	TUI        TUI        `yaml:"tui"`
+
+	Notifications Notifications `yaml:"notifications"`
 }
+
+// Notifications send health findings to webhooks (D39). None are
+// configured by default.
+type Notifications struct {
+	// MachineName names this machine in messages; empty = host name.
+	MachineName string    `yaml:"machine_name"`
+	Webhooks    []Webhook `yaml:"webhooks"`
+}
+
+// Webhook is one notification destination. Its URL usually contains a
+// secret token, so it is read from a private file, never from this
+// configuration.
+type Webhook struct {
+	Name string `yaml:"name"`
+	// URLFile is an absolute path to a file holding only the URL. On
+	// Unix it must not be readable by group or others (chmod 600).
+	URLFile string `yaml:"url_file"`
+	// Format is json (default), ntfy, discord or slack.
+	Format string `yaml:"format"`
+	// MinSeverity is warning (default) or critical.
+	MinSeverity string `yaml:"min_severity"`
+}
+
+// MaxWebhooks bounds notifications.webhooks.
+const MaxWebhooks = 8
 
 // Agent holds process-level settings.
 type Agent struct {

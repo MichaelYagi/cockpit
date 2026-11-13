@@ -140,6 +140,7 @@ func validate(c *Config, p *Paths, v *validator) {
 	}
 
 	validateHealth(v, c.Health)
+	validateNotifications(v, c.Notifications)
 	hr := c.History.Retention
 	inRange(v, "history.retention.raw", hr.Raw, time.Hour, 7*24*time.Hour)
 	inRange(v, "history.retention.minute", hr.Minute, 24*time.Hour, 90*24*time.Hour)
@@ -280,6 +281,43 @@ func validateFilesystems(v *validator, f Filesystems) {
 		pat := strings.TrimSuffix(p, "/**")
 		if _, err := path.Match(pat, ""); err != nil || !strings.HasPrefix(p, "/") {
 			v.add(base+"exclude_mount_points", "%q must be an absolute path or glob pattern", p)
+		}
+	}
+}
+
+var webhookNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$`)
+
+func validateNotifications(v *validator, n Notifications) {
+	if len(n.MachineName) > 64 || strings.ContainsFunc(n.MachineName, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		v.add("notifications.machine_name", "must be at most 64 characters with no control characters")
+	}
+	if len(n.Webhooks) > MaxWebhooks {
+		v.add("notifications.webhooks", "at most %d webhooks are allowed (got %d)", MaxWebhooks, len(n.Webhooks))
+		return
+	}
+	seen := map[string]bool{}
+	for i, w := range n.Webhooks {
+		field := fmt.Sprintf("notifications.webhooks[%d]", i)
+		switch {
+		case !webhookNamePattern.MatchString(w.Name):
+			v.add(field+".name", "must be 1-64 letters, digits, spaces or . _ - (got %q)", w.Name)
+		case seen[strings.ToLower(w.Name)]:
+			v.add(field+".name", "%q is used twice", w.Name)
+		}
+		seen[strings.ToLower(w.Name)] = true
+		if w.URLFile == "" {
+			v.add(field+".url_file", "is required: the path of a file holding the webhook URL")
+		}
+		absPath(v, field+".url_file", w.URLFile)
+		switch w.Format {
+		case "", "json", "ntfy", "discord", "slack":
+		default:
+			v.add(field+".format", "must be json, ntfy, discord or slack (got %q)", w.Format)
+		}
+		switch w.MinSeverity {
+		case "", "warning", "critical":
+		default:
+			v.add(field+".min_severity", "must be warning or critical (got %q)", w.MinSeverity)
 		}
 	}
 }

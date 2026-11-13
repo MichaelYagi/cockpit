@@ -33,6 +33,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Notifications (D39).** The agent can send health findings to ntfy
+  (phone push), Discord, Slack or any JSON webhook when a problem appears,
+  gets worse or is resolved. Configure `notifications.webhooks`, with each
+  URL in a private file, and check the setup with `cockpit notify test`.
+  `cockpit config check` also reads the URL files.
 - **Plain HTTP on the LAN, opt-in (D38).** `cockpit agent --lan-http`
   (or `api.lan.http: true`) serves `http://` on the network with no
   certificate, accepts only private-network clients and still requires an
