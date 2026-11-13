@@ -161,11 +161,18 @@ func (m *Model) footer(w int) string {
 			f = "all"
 		}
 		hints = []string{"v severity:" + f, "m older", "tab next", "q quit"}
+	case scrNetwork:
+		if m.isAdmin() {
+			hints = []string{"↑↓ select", "a add check", "d remove check", "tab next", "? help", "q quit"}
+		}
 	case scrSettings:
 		hints = []string{"[ ]\ttheme", "↑↓ select", "enter edit", "w save", "d reset", "esc discard", "+/- refresh"}
 	}
 	if m.modal != modalNone {
 		hints = []string{"enter confirm", "esc cancel"}
+		if m.modal == modalEndpointTLS || m.modal == modalEndpointRemove {
+			hints = []string{"y yes", "n no", "esc cancel"}
+		}
 	}
 	for i, h := range hints {
 		k, rest := splitHint(h)
@@ -832,39 +839,73 @@ func (m *Model) networkScreen(w, h int) string {
 	}...), w, h)
 }
 
-// endpointLines lists configured service checks (D40), or one hint when
-// none are configured. Nil before the first /network response.
+// endpointLines lists service checks (D40, D41), or one hint when none
+// are configured. On the admin socket the rows follow the check list, so
+// new checks show before their first result and can be selected.
 func (m *Model) endpointLines(inner int) []string {
 	if m.network == nil {
 		return nil
 	}
 	s := m.network.Endpoints
-	if s.Status == apiv1.NotConfigured {
-		return []string{m.st.muted.Render(truncate("No services checked. List them under collection.endpoints.targets in config.yaml.", inner))}
+	results := map[string]apiv1.Endpoint{}
+	var order []string
+	if s.Data != nil {
+		for _, e := range *s.Data {
+			results[e.Name] = e
+			order = append(order, e.Name)
+		}
 	}
-	if s.Data == nil {
-		return unavailable(m.st, s, inner)
+	admin := m.isAdmin() && m.epChecks != nil
+	source := map[string]string{}
+	if admin {
+		order = order[:0]
+		for _, c := range m.epChecks.Items {
+			order = append(order, c.Name)
+			source[c.Name] = c.Source
+		}
 	}
-	lines := []string{m.st.muted.Render(pad("NAME", 22) + pad("STATE", 10) + padLeft("RESPONSE", 10) + "  " + "DETAIL")}
-	for _, e := range *s.Data {
-		state := badge(m.st, lvOK, "up")
-		detail := e.Target
-		switch {
-		case !e.Up && e.ConsecutiveFailures >= 2:
-			state, detail = badge(m.st, lvCrit, "down"), e.Error
-		case !e.Up:
-			state, detail = badge(m.st, lvWarn, "failing"), e.Error
-		case e.CertExpiresAt != nil && e.CertExpiresAt.Sub(m.opts.Now()) < 14*24*time.Hour:
-			state, detail = badge(m.st, lvWarn, "cert"), "certificate expires "+e.CertExpiresAt.Format("2006-01-02")
+	if len(order) == 0 {
+		hint := "No services checked. List them under collection.endpoints.targets in config.yaml."
+		if m.isAdmin() {
+			hint = "No services checked yet. Press a to add one (a web address or tcp://host:port)."
 		}
-		resp := "—"
-		if e.ResponseMillis != nil {
-			resp = fmt.Sprintf("%.0f ms", *e.ResponseMillis)
+		if s.Status != apiv1.NotConfigured && s.Status != "" && !admin {
+			return unavailable(m.st, s, inner)
 		}
-		if e.StatusCode != nil {
-			resp = fmt.Sprintf("%d %s", *e.StatusCode, resp)
+		return []string{m.st.muted.Render(truncate(hint, inner))}
+	}
+	lines := []string{m.st.muted.Render("  " + pad("NAME", 22) + pad("STATE", 12) + padLeft("RESPONSE", 10) + "  " + "DETAIL")}
+	for i, name := range order {
+		e, ok := results[name]
+		state, detail, resp := m.st.muted.Render("… checking"), "", "—"
+		if ok {
+			state, detail = badge(m.st, lvOK, "up"), e.Target
+			switch {
+			case !e.Up && e.ConsecutiveFailures >= 2:
+				state, detail = badge(m.st, lvCrit, "down"), e.Error
+			case !e.Up:
+				state, detail = badge(m.st, lvWarn, "failing"), e.Error
+			case e.CertExpiresAt != nil && e.CertExpiresAt.Sub(m.opts.Now()) < 14*24*time.Hour:
+				state, detail = badge(m.st, lvWarn, "cert"), "certificate expires "+e.CertExpiresAt.Format("2006-01-02")
+			}
+			if e.ResponseMillis != nil {
+				resp = fmt.Sprintf("%.0f ms", *e.ResponseMillis)
+			}
+			if e.StatusCode != nil {
+				resp = fmt.Sprintf("%d %s", *e.StatusCode, resp)
+			}
 		}
-		lines = append(lines, pad(truncate(e.Name, 21), 22)+pad(state, 10)+padLeft(resp, 10)+"  "+m.st.muted.Render(truncate(detail, max(0, inner-44))))
+		if source[name] == "configuration" {
+			detail = "[config.yaml] " + detail
+		}
+		cur := "  "
+		if admin && i == m.epSel {
+			cur = m.st.accent.Render("▶ ")
+		}
+		lines = append(lines, cur+pad(truncate(name, 21), 22)+pad(state, 12)+padLeft(resp, 10)+"  "+m.st.muted.Render(truncate(detail, max(0, inner-48))))
+	}
+	if m.epErr != "" {
+		lines = append(lines, m.st.crit.Render("✖ "+m.epErr))
 	}
 	return lines
 }
@@ -997,6 +1038,26 @@ func (m *Model) modalView(w int) string {
 		title = verb + " key " + m.pendingID
 		lines = append(lines, wrapText(effect, inner)...)
 		lines = append(lines, "", fmt.Sprintf("Type the first %d characters of the key ID to confirm:", confirmChars), m.st.accent.Render("› ")+m.input+m.st.accent.Render("█"), "", m.st.muted.Render("enter confirm · esc cancel"))
+	case modalEndpointName:
+		title = "New service check · name"
+		lines = []string{"A name for the service (e.g. Home Assistant, NAS SSH):", "", m.st.accent.Render("› ") + m.input + m.st.accent.Render("█"), "", m.st.muted.Render("enter next · esc cancel")}
+	case modalEndpointURL:
+		title = "New service check · address"
+		lines = []string{"Address of " + m.st.bold.Render(truncate(m.epName, inner-12)) + ", for example:"}
+		for _, ex := range []string{"http://192.168.0.50:8123/", "https://nas.lan/health", "tcp://192.168.0.10:22   (port only)"} {
+			lines = append(lines, m.st.muted.Render("  "+ex))
+		}
+		lines = append(lines, "", m.st.accent.Render("› ")+truncateLeft(m.input, inner-3)+m.st.accent.Render("█"), "")
+		lines = append(lines, wrapText("Web addresses must answer with a 2xx or 3xx status; tcp:// only needs the port to accept a connection. Don't include passwords.", inner)...)
+		lines = append(lines, "", m.st.muted.Render("enter add · esc cancel"))
+	case modalEndpointTLS:
+		title = "New service check · certificate"
+		lines = wrapText("Accept any certificate for "+truncate(m.epURL, 60)+"? Choose yes for a server with a self-signed certificate (common on home servers such as Proxmox or a NAS). The check then cannot detect an impostor.", inner)
+		lines = append(lines, "", m.st.muted.Render("y accept any certificate · n verify it (default) · esc cancel"))
+	case modalEndpointRemove:
+		title = "Remove service check"
+		lines = wrapText("Stop checking "+truncate(m.pendingID, 40)+" and remove it? Its results disappear from this screen; past events are kept.", inner)
+		lines = append(lines, "", m.st.muted.Render("y remove · n cancel"))
 	case modalEditSetting:
 		f := settingFields[m.setField]
 		title = "Edit threshold"
@@ -1056,8 +1117,8 @@ func (m *Model) helpView(w, h int) string {
 		kv(m.st, "t", "chart range") + "        " + kv(m.st, "v", "event severity") + "    " + kv(m.st, "m", "older events"),
 		kv(m.st, "enter", "edit threshold") + "   " + kv(m.st, "w", "save") + "  " + kv(m.st, "d", "reset to file"),
 		"",
-		m.st.bold.Render("Services"),
-		kv(m.st, "f", "failed only / all"),
+		m.st.bold.Render("Services · Network"),
+		kv(m.st, "f", "failed only / all") + "  " + kv(m.st, "a", "add service check") + "  " + kv(m.st, "d", "remove check"),
 		"",
 		m.st.bold.Render("API Access"),
 		kv(m.st, "↑/↓", "select key") + "        " + kv(m.st, "n", "create key"),
@@ -1837,4 +1898,13 @@ func (m *Model) containersView(w, h int) string {
 		lines = append(lines, m.st.muted.Render(truncate("CPU % of one core · "+d.NamesReason, inner)))
 	}
 	return column(m.st, []box{{title: title, lines: lines, flex: true}}, w, h)
+}
+
+// truncateLeft keeps the end of s (what is being typed) within width.
+func truncateLeft(s string, width int) string {
+	r := []rune(s)
+	if width <= 1 || len(r) <= width {
+		return s
+	}
+	return "…" + string(r[len(r)-width+1:])
 }

@@ -250,8 +250,9 @@ if any key material appears.
 - Collector and external-tool timeouts. External tools run without a shell,
   with absolute paths resolved at startup and fixed arguments.
 - No unbounded goroutines or queues.
-- **Endpoint checks (D40)** connect only to targets in the configuration
-  file (at most 64), never to addresses from the API: 8 at a time, one
+- **Endpoint checks (D40, D41)** connect only to targets in the
+  configuration file or added by the local admin over the Unix socket (at
+  most 64 in total); API keys can never add one: 8 at a time, one
   timeout each, no proxy, no redirects, a new connection per check and at
   most 64 KiB read per response. Target URLs may name internal hosts, so
   they need `network:read` and are dropped from anonymized reports. URLs

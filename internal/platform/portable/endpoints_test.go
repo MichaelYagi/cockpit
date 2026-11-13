@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -201,5 +202,62 @@ func TestSlowEndpointDoesNotBlock(t *testing.T) {
 	start = time.Now()
 	if err := c.Close(context.Background()); err != nil || time.Since(start) > time.Second {
 		t.Errorf("close: %v after %s", err, time.Since(start))
+	}
+}
+
+// Targets from Source can change while the checker runs (D41): new ones
+// start, removed ones stop and disappear from the results.
+func TestEndpointTargetsChange(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	var mu sync.Mutex
+	list := []collector.EndpointTarget{{Name: "a", URL: srv.URL + "/a"}}
+	c := NewEndpoints(collector.Env{Endpoints: collector.EndpointSettings{Interval: 50 * time.Millisecond, Timeout: time.Second,
+		Source: func() []collector.EndpointTarget {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]collector.EndpointTarget(nil), list...)
+		}}})
+	defer c.Close(context.Background())
+	set := func(ts ...collector.EndpointTarget) { mu.Lock(); list = ts; mu.Unlock() }
+	names := func() []string {
+		res := c.Collect(context.Background())
+		if len(res.Records) == 0 {
+			return nil
+		}
+		var out []string
+		for _, r := range res.Records[0].(core.EndpointList) {
+			out = append(out, r.Name)
+		}
+		return out
+	}
+	wait := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for strings.Join(names(), ",") != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("results %v, want %s", names(), want)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	wait("a")
+	set(collector.EndpointTarget{Name: "a", URL: srv.URL + "/a"}, collector.EndpointTarget{Name: "b", URL: srv.URL + "/b"})
+	wait("a,b")
+	set(collector.EndpointTarget{Name: "b", URL: srv.URL + "/b"})
+	wait("b")
+	c.mu.Lock()
+	running := len(c.running)
+	c.mu.Unlock()
+	if running != 1 {
+		t.Errorf("%d loops running", running)
+	}
+	set()
+	if res := c.Collect(context.Background()); res.Status[core.CapNetworkEndpoints].Availability != core.NotConfigured {
+		t.Errorf("empty list: %+v", res.Status)
+	}
+	// With a Source, an empty list is temporary: checks may be added.
+	if p := c.Probe(context.Background()); p[core.CapNetworkEndpoints].Availability != core.TemporarilyUnavailable {
+		t.Errorf("probe %+v", p)
 	}
 }

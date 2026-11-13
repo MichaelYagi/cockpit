@@ -909,3 +909,43 @@ what that machine can reach.
 history or charts yet, no keyword matching in the body, no ICMP ping
 (it needs privileges). Results show reachability from this machine
 only.
+
+## D41 — Adding and removing service checks at runtime
+
+**Status:** Proposed (2026-11-13)
+
+**Decision.** This extends D40. Service checks can be added and removed
+while the agent runs, from the TUI's Network screen or the admin API,
+without editing the configuration file or restarting:
+
+- **Admin socket only**, like keys and settings (D3, D19):
+  `GET /endpoint-checks` lists every check with its `source`
+  (`configuration` or `runtime`), `POST /endpoint-checks` adds one, and
+  `DELETE /endpoint-checks/{name}` removes one. Over TCP these routes
+  do not exist, so an API key can never make the agent connect somewhere
+  new.
+- **Same rules as the file:** each check is validated exactly like
+  `collection.endpoints.targets` (http(s) or tcp, no user name or
+  password, at most 64 checks in total). Names are unique, ignoring case,
+  across the file and runtime checks. A duplicate, the limit or removing a
+  file entry answers `409 conflict`.
+- **Storage:** runtime checks are kept in the agent's database under
+  the existing settings table, so they survive restarts. Checks from the
+  file are listed first and are read-only through the API; they change
+  only when the file does. A stored check whose name the file now uses is
+  skipped with a warning.
+- **Applied live:** the checker reads the current list every 2 seconds,
+  starts a background loop for each new check and stops the loop of a
+  removed or changed one. The engine now clears a section's data when it
+  becomes `not_configured` or `unsupported`, so a removed last check does
+  not linger as stale data.
+- **TUI:** on the admin socket, the Network screen's Endpoints panel has
+  a selection (`↑`/`↓`), `a` to add (name, then address, then, for
+  `https://`, whether to accept any certificate) and `d` to remove, with
+  a `y`/`n` confirmation. Each change is a `settings.changed` event.
+
+**Why.** The owner asked to manage checks from the TUI. Editing YAML and
+restarting the agent was the only way.
+
+**Limits.** `expect_status` is set only through the API or the file, not
+in the TUI form. There are no CLI subcommands yet.

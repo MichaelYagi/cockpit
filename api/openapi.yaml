@@ -694,6 +694,74 @@ paths:
               schema: { $ref: "#/components/schemas/SettingsResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/endpoint-checks:
+    get:
+      operationId: listEndpointChecks
+      tags: [keys]
+      summary: Service checks, from the configuration file and added at runtime
+      description: Unix socket only (D41). Results of the checks are in GET /network.
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EndpointChecksResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      operationId: addEndpointCheck
+      tags: [keys]
+      summary: Add a service check
+      description: >-
+        Validated like collection.endpoints.targets in the configuration file, stored, checked within a few
+        seconds and recorded as a settings.changed event. Names are unique, case-insensitive, across the file
+        and runtime checks. Unix socket only (D41).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddEndpointCheckRequest" }
+      responses:
+        "201":
+          description: Added.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EndpointCheck" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /api/v1/endpoint-checks/{name}:
+    delete:
+      operationId: removeEndpointCheck
+      tags: [keys]
+      summary: Remove a service check added at runtime
+      description: Checks from the configuration file cannot be removed here (409). Unix socket only (D41).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: The check's name, URL-encoded; matched case-insensitively.
+          schema: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "204":
+          description: Removed.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
 components:
   securitySchemes:
     apiKey:
@@ -751,6 +819,13 @@ components:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
     NotFound:
       description: No such resource.
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Conflict:
+      description: The request conflicts with the current state (for example a name already in use).
       headers:
         X-Request-ID: { $ref: "#/components/headers/RequestID" }
       content:
@@ -1574,6 +1649,38 @@ components:
             - type: array
               items: { $ref: "#/components/schemas/Route" }
             - type: "null"
+    EndpointCheck:
+      type: object
+      additionalProperties: false
+      description: One configured service check (D41).
+      required: [name, url, expect_status, tls_skip_verify, source, added_at]
+      properties:
+        name: { type: string }
+        url: { type: string, description: "http(s):// URL or tcp://host:port." }
+        expect_status: { type: array, items: { type: integer }, description: HTTP codes that count as up; empty means 200-399. }
+        tls_skip_verify: { type: boolean }
+        source: { type: string, enum: [configuration, runtime], description: configuration entries are read-only here. }
+        added_at: { type: [string, "null"], format: date-time }
+    EndpointChecksResponse:
+      type: object
+      additionalProperties: false
+      description: GET /endpoint-checks.
+      required: [schema_version, machine_id, generated_at, items, max]
+      properties:
+        schema_version: { $ref: "#/components/schemas/SchemaVersion" }
+        machine_id: { $ref: "#/components/schemas/MachineID" }
+        generated_at: { $ref: "#/components/schemas/Timestamp" }
+        items: { type: array, items: { $ref: "#/components/schemas/EndpointCheck" } }
+        max: { type: integer, description: "The most checks the agent accepts, file and runtime together." }
+    AddEndpointCheckRequest:
+      type: object
+      additionalProperties: false
+      required: [name, url]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64, description: "Letters, digits, spaces and . _ -" }
+        url: { type: string, maxLength: 2048, description: "http://, https:// or tcp://host:port; no user name or password." }
+        expect_status: { type: array, maxItems: 16, items: { type: integer, minimum: 100, maximum: 599 } }
+        tls_skip_verify: { type: boolean }
     EndpointsSection:
       type: object
       additionalProperties: false
@@ -2165,6 +2272,7 @@ components:
                 - invalid_credentials
                 - insufficient_scope
                 - not_found
+                - conflict
                 - method_not_allowed
                 - request_too_large
                 - rate_limited

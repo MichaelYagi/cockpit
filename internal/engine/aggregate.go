@@ -266,6 +266,10 @@ func (a *aggregator) apply(o outcome) {
 		case meta.Status == core.Available:
 			meta.Status = core.TemporarilyUnavailable
 			meta.Reason = "The collector returned no data."
+		case meta.Status == core.NotConfigured || meta.Status == core.Unsupported:
+			// Nothing to show any more (e.g. the last service check was
+			// removed, D41): old data would be misleading.
+			a.data[s] = nil
 		}
 		// Otherwise the last good data (if any) is kept and becomes stale.
 		a.meta[s] = meta

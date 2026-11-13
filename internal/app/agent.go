@@ -168,7 +168,13 @@ func Run(ctx context.Context, o Options) (err error) {
 	if cfg.Collection.UPS.Enabled {
 		env.UPSAddress = cfg.Collection.UPS.Address
 	}
+	// Service checks: the file's, plus those added at runtime (D40, D41).
+	checks := settings.NewEndpoints(db, cfg.Collection.Endpoints.Targets, o.Now, publish, log.With("component", "settings"))
+	if err := checks.Load(ctx); err != nil {
+		return fmt.Errorf("load service checks: %w", err)
+	}
 	env.Endpoints = EndpointSettings(cfg.Collection.Endpoints)
+	env.Endpoints.Source = func() []collector.EndpointTarget { return endpointTargets(checks.Targets()) }
 	fsf := cfg.Collection.Filesystems
 	env.Filesystems = collector.FilesystemFilter{ExcludeTypes: fsf.ExcludeTypes, IncludeTypes: fsf.IncludeTypes, ExcludeMountPoints: fsf.ExcludeMountPoints}
 	eng, err := engine.New(o.Collectors(env), engine.Options{
@@ -217,7 +223,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	deps := api.Deps{
 		Logger: log.With("component", "api"), Verifier: verifier, Status: status, SpecJSON: specJSON, Now: o.Now,
 		Snapshots: eng, Health: evaluator, Events: eventLog, Keys: keys,
-		Subscriber: eventLog, KeyChecker: keys, Processes: eng, Settings: settingsSvc,
+		Subscriber: eventLog, KeyChecker: keys, Processes: eng, Settings: settingsSvc, EndpointChecks: checks,
 		Stats: middleware.NewStats(o.Now),
 		Listeners: func() []apiv1.Listener {
 			if l := listeners.Load(); l != nil {
@@ -424,9 +430,13 @@ func watchCertificate(ctx context.Context, log *slog.Logger, expires time.Time, 
 
 // EndpointSettings maps the configuration to the endpoint checker (D40).
 func EndpointSettings(e config.Endpoints) collector.EndpointSettings {
-	out := collector.EndpointSettings{Interval: e.Interval, Timeout: e.Timeout}
-	for _, t := range e.Targets {
-		out.Targets = append(out.Targets, collector.EndpointTarget{Name: t.Name, URL: t.URL,
+	return collector.EndpointSettings{Interval: e.Interval, Timeout: e.Timeout, Targets: endpointTargets(e.Targets)}
+}
+
+func endpointTargets(ts []config.EndpointTarget) []collector.EndpointTarget {
+	out := make([]collector.EndpointTarget, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, collector.EndpointTarget{Name: t.Name, URL: t.URL,
 			ExpectStatus: append([]int(nil), t.ExpectStatus...), SkipTLSVerify: t.TLSSkipVerify})
 	}
 	return out

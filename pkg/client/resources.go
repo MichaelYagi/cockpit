@@ -260,3 +260,25 @@ func reportPath(format string, anonymize bool) string {
 func (c *Client) Containers(ctx context.Context) (*apiv1.ContainersResponse, error) {
 	return get[apiv1.ContainersResponse](ctx, c, "/containers")
 }
+
+// EndpointChecks lists the service checks: the configuration file's and
+// those added at runtime (Unix socket only, D41).
+func (c *Client) EndpointChecks(ctx context.Context) (*apiv1.EndpointChecksResponse, error) {
+	return get[apiv1.EndpointChecksResponse](ctx, c, "/endpoint-checks")
+}
+
+// AddEndpointCheck adds a service check; the agent starts checking it
+// within a few seconds (Unix socket only).
+func (c *Client) AddEndpointCheck(ctx context.Context, req apiv1.AddEndpointCheckRequest) (*apiv1.EndpointCheck, error) {
+	var out apiv1.EndpointCheck
+	if err := c.do(ctx, "POST", "/endpoint-checks", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RemoveEndpointCheck removes a service check added at runtime (Unix
+// socket only). Checks from the configuration file cannot be removed.
+func (c *Client) RemoveEndpointCheck(ctx context.Context, name string) error {
+	return c.do(ctx, "DELETE", "/endpoint-checks/"+url.PathEscape(name), nil, nil)
+}
