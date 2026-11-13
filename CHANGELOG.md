@@ -18,11 +18,19 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 - **Line charts.** Performance charts and Overview sparklines are drawn
   as connected lines in braille characters (2 points across and 4 levels
   up per character) instead of block bars. Gaps in history still show.
+- **Health checks that cannot run here show as N/A.** A check whose
+  hardware or feature is absent or turned off (no temperature sensors,
+  no ZFS, UPS monitoring off, smartctl not installed) is shown as `– N/A`
+  in the TUI and the web dashboard and listed after the real results, so
+  it no longer looks like a problem. The API still reports it as
+  `unknown` with its availability and reason.
 - **Storage shows used / total.** Filesystem rows on the Overview and
   Storage screens show used and total space; they showed free space.
 
 ### Added
 
+- **Retro themes.** Amber and Phosphor give the TUI an old CRT terminal
+  look: tinted text and square panel corners.
 - **Web dashboard (D35).** The agent serves a read-only dashboard at
   `http://127.0.0.1:7878/` (or your TLS address): Overview, Performance
   (live and stored history), Health, Storage, Network, Processes,
@@ -64,6 +72,8 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Fixed
 
+- The footer highlighted only part of keys that contain a space: `0-9 S`
+  showed `S` as a label, and `[ ]` showed `]` as one.
 - **Embedded agent log is capped.** When the TUI runs its own agent, its
   log (`embedded-agent.log`) grew by every API request and was never
   trimmed (about 2 MB an hour). It is now capped at 10 MiB, with one older

@@ -64,7 +64,9 @@ TCP listener is running; the API Access screen says so.
 
 The Settings screen (`S`) lists the color themes with a swatch of each.
 Single-color themes (Teal, Ocean, Violet, Rose, Graphite) come first, then
-mixed ones (Aurora, Lagoon, Orchid, Dusk). `[` and `]` switch theme at once
+mixed ones (Aurora, Lagoon, Orchid, Dusk), then retro ones (Amber,
+Phosphor) that look like an old CRT terminal: tinted text and square
+panel corners. `[` and `]` switch theme at once
 and save it to `tui.json` in your configuration directory
 (`~/.config/cockpit-monitor/` on Linux, mode `0600`); the fleet console
 uses it too. Every theme keeps green, amber and red for health, and every

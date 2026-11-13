@@ -122,8 +122,20 @@ func (m *Model) tabs(w int) string {
 	return truncate(strings.Join(parts, strings.Repeat(" ", gap)), w)
 }
 
+// splitHint splits a footer hint into its key and label. The key is the
+// first word, or everything before a tab when the key itself has a space
+// ("[ ]", "0-9 S").
+func splitHint(h string) (key, label string) {
+	sep := " "
+	if strings.Contains(h, "\t") {
+		sep = "\t"
+	}
+	key, label, _ = strings.Cut(h, sep)
+	return key, label
+}
+
 func (m *Model) footer(w int) string {
-	hints := []string{"0-9 S screens", "tab next", "r refresh", "? help", "q quit"}
+	hints := []string{"0-9 S\tscreens", "tab next", "r refresh", "? help", "q quit"}
 	switch m.screen {
 	case scrAccess:
 		hints = []string{"↑↓ select", "n new key", "o rotate", "x revoke", "d remove", "? help", "q quit"}
@@ -150,13 +162,13 @@ func (m *Model) footer(w int) string {
 		}
 		hints = []string{"v severity:" + f, "m older", "tab next", "q quit"}
 	case scrSettings:
-		hints = []string{"[ ] theme", "↑↓ select", "enter edit", "w save", "d reset", "esc discard", "+/- refresh"}
+		hints = []string{"[ ]\ttheme", "↑↓ select", "enter edit", "w save", "d reset", "esc discard", "+/- refresh"}
 	}
 	if m.modal != modalNone {
 		hints = []string{"enter confirm", "esc cancel"}
 	}
 	for i, h := range hints {
-		k, rest, _ := strings.Cut(h, " ")
+		k, rest := splitHint(h)
 		hints[i] = m.st.keyHint.Render(k) + " " + m.st.muted.Render(rest)
 	}
 	left := strings.Join(hints, m.st.muted.Render("  "))
@@ -474,12 +486,12 @@ func (m *Model) healthSummary(inner int) []string {
 		return waiting(m.st)
 	}
 	out := []string{healthBadge(m.st, m.health.Status) + m.st.muted.Render("  evaluated "+ago(m.health.EvaluatedAt, m.opts.Now()))}
-	for _, c := range m.health.Checks {
+	for _, c := range sortChecks(m.health.Checks) {
 		detail := c.Summary
 		if c.Status == apiv1.HealthUnknown {
 			detail = availabilityText(c.Availability)
 		}
-		out = append(out, pad(badge(m.st, healthLevel(c.Status), pad(strings.ToUpper(c.Status), 8)), 11)+pad(c.Name, 18)+m.st.muted.Render(detail))
+		out = append(out, pad(checkBadge(m.st, c), 11)+pad(c.Name, 18)+m.st.muted.Render(detail))
 	}
 	return out
 }
@@ -590,9 +602,11 @@ func (m *Model) healthScreen(w, h int) string {
 	}
 	var lines []string
 	lines = append(lines, healthBadge(m.st, m.health.Status)+m.st.muted.Render("  evaluated "+ago(m.health.EvaluatedAt, m.opts.Now())), "")
-	for _, c := range m.health.Checks {
-		lines = append(lines, badge(m.st, healthLevel(c.Status), pad(strings.ToUpper(c.Status), 8))+" "+m.st.bold.Render(c.Name))
-		if c.Status == apiv1.HealthUnknown {
+	for _, c := range sortChecks(m.health.Checks) {
+		lines = append(lines, checkBadge(m.st, c)+" "+m.st.bold.Render(c.Name))
+		if notApplicable(c) {
+			lines = append(lines, "  "+m.st.muted.Render(c.Reason))
+		} else if c.Status == apiv1.HealthUnknown {
 			lines = append(lines, "  "+m.st.muted.Render(availabilityText(c.Availability)+": "+c.Reason))
 		} else if len(c.Findings) == 0 {
 			lines = append(lines, "  "+m.st.muted.Render(c.Summary))
@@ -1645,7 +1659,7 @@ func (m *Model) settingsScreen(w, h int) string {
 // themeLines lists every theme with a swatch drawn in its own colors:
 // single-color themes, then mixed ones, side by side when there is room.
 func (m *Model) themeLines(inner int) []string {
-	var single, mixed []string
+	var single, mixed, old []string
 	for _, t := range themes {
 		ts := newStyles(t)
 		cursor, name := "  ", t.name
@@ -1654,14 +1668,19 @@ func (m *Model) themeLines(inner int) []string {
 		}
 		row := cursor + pad(name, 10) + ts.accent.Render("██") + " " + ts.title.Render("██") + " " + ts.accent3.Render("██") + "  " +
 			ts.ok.Render("●") + ts.warn.Render("▲") + ts.crit.Render("✖") + "  " + ts.series(0).Render("⣀⡠⠔⠊") + ts.series(1).Render("⠉⠒⢄⣀")
-		if t.single {
+		switch {
+		case t.single:
 			single = append(single, row)
-		} else {
+		case t.retro:
+			old = append(old, row)
+		default:
 			mixed = append(mixed, row)
 		}
 	}
 	single = append([]string{m.st.muted.Render("Single color")}, single...)
 	mixed = append([]string{m.st.muted.Render("Mixed")}, mixed...)
+	// Retro themes go under the mixed ones, which is the shorter column.
+	mixed = append(append(mixed, m.st.muted.Render("Retro")), old...)
 	lines := []string{m.st.muted.Render("[ and ] switch theme. It is saved for you on this machine.")}
 	const colW = 46
 	if inner < 2*colW {
