@@ -199,3 +199,53 @@ func serial() *big.Int {
 	n, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127)) // crypto/rand does not fail
 	return n
 }
+
+// RenewBefore is how long before expiry Ensure issues a new certificate.
+const RenewBefore = 30 * 24 * time.Hour
+
+// Ensure keeps a CA and server certificate in dir valid for hosts, for an
+// agent that manages its own certificate (D37). It creates both when the
+// CA is missing, issues a new server certificate from the same CA when the
+// current one is missing, does not cover every host, or expires within
+// RenewBefore, and otherwise leaves the files alone. issued reports
+// whether a new server certificate was written.
+func Ensure(dir string, hosts []string, now time.Time) (cert *x509.Certificate, issued bool, err error) {
+	ca, caKey, srv, srvKey := Paths(dir)
+	_, errCA := os.Stat(ca)
+	_, errKey := os.Stat(caKey)
+	if errCA != nil || errKey != nil {
+		cert, err = Init(dir, hosts, now, true)
+		return cert, err == nil, err
+	}
+	cur, err := ReadCertificate(srv)
+	_, errSrvKey := os.Stat(srvKey)
+	if err == nil && errSrvKey == nil && covers(cur, hosts) && now.Add(RenewBefore).Before(cur.NotAfter) {
+		return cur, false, nil
+	}
+	cert, err = Renew(dir, hosts, now)
+	return cert, err == nil, err
+}
+
+// covers reports whether c names every host.
+func covers(c *x509.Certificate, hosts []string) bool {
+	for _, h := range hosts {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		found := false
+		if ip := net.ParseIP(h); ip != nil {
+			for _, have := range c.IPAddresses {
+				found = found || have.Equal(ip)
+			}
+		} else {
+			for _, have := range c.DNSNames {
+				found = found || strings.EqualFold(have, h)
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}

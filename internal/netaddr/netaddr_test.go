@@ -1,6 +1,10 @@
 package netaddr
 
-import "testing"
+import (
+	"net"
+	"strings"
+	"testing"
+)
 
 func TestIsLoopbackHost(t *testing.T) {
 	tests := []struct {
@@ -38,5 +42,18 @@ func TestIsLoopbackHostHeader(t *testing.T) {
 		if IsLoopbackHostHeader(h) {
 			t.Errorf("%q accepted", h)
 		}
+	}
+}
+
+func TestLANAddresses(t *testing.T) {
+	ipnet := func(s string) net.Addr { return &net.IPNet{IP: net.ParseIP(s), Mask: net.CIDRMask(24, 32)} }
+	in := []net.Addr{ipnet("127.0.0.1"), ipnet("203.0.113.9"), ipnet("192.168.0.185"), ipnet("169.254.1.1"),
+		ipnet("fe80::1"), ipnet("2001:db8::1"), ipnet("10.0.0.2"), ipnet("192.168.0.185"), &net.IPAddr{IP: net.ParseIP("172.16.0.1")}}
+	var got []string
+	for _, a := range lanAddresses(in) {
+		got = append(got, a.String())
+	}
+	if strings.Join(got, " ") != "10.0.0.2 172.16.0.1 192.168.0.185 203.0.113.9" {
+		t.Errorf("got %v", got)
 	}
 }

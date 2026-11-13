@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/MichaelYagi/cockpit/internal/netaddr"
 )
 
 // Overrides are values set by command-line flags. Nil means "not set".
@@ -24,6 +28,7 @@ type Overrides struct {
 	SocketPath    *string
 	StateDir      *string
 	RuntimeDir    *string
+	LAN           *bool
 }
 
 // Source describes where configuration comes from.
@@ -70,6 +75,7 @@ const (
 	envTLSKey        = "COCKPIT_TLS_KEY_FILE"
 	envStateDir      = "COCKPIT_STATE_DIR"
 	envRuntimeDir    = "COCKPIT_RUNTIME_DIR"
+	envLAN           = "COCKPIT_API_LAN"
 )
 
 // Load builds the effective configuration. All validation problems are
@@ -117,6 +123,7 @@ func Load(src Source) (*Result, error) {
 		paths.SocketPath = defaultSocketPath(paths)
 	}
 
+	applyLAN(&cfg, &paths)
 	validate(&cfg, &paths, &v)
 	if err := v.err(); err != nil {
 		return nil, err
@@ -182,6 +189,7 @@ func applyEnv(env func(string) (string, bool), cfg *Config, v *validator) {
 	str(envTLSKey, &cfg.API.TLS.KeyFile)
 	str(envStateDir, &cfg.Agent.StateDir)
 	str(envRuntimeDir, &cfg.Agent.RuntimeDir)
+	boolean(envLAN, &cfg.API.LAN.Enabled)
 }
 
 func applyFlags(f Overrides, cfg *Config) {
@@ -203,13 +211,14 @@ func applyFlags(f Overrides, cfg *Config) {
 	set(f.SocketPath, &cfg.API.Socket.Path)
 	set(f.StateDir, &cfg.Agent.StateDir)
 	set(f.RuntimeDir, &cfg.Agent.RuntimeDir)
+	setB(f.LAN, &cfg.API.LAN.Enabled)
 }
 
 var knownEnv = map[string]bool{
 	EnvMode: true, EnvConfig: true, EnvAPIKey: true, EnvAPIURL: true, EnvTLSPin: true, EnvTLSCA: true,
 	envLogLevel: true, envLogFormat: true, envTCPEnabled: true, envTCPAddress: true,
 	envSocketEnabled: true, envSocketPath: true, envTLSCert: true, envTLSKey: true,
-	envStateDir: true, envRuntimeDir: true,
+	envStateDir: true, envRuntimeDir: true, envLAN: true,
 }
 
 // unknownEnv warns about likely typos. It reports names only, never values.
@@ -229,3 +238,27 @@ func unknownEnv(environ []string) []string {
 func Marshal(cfg Config) ([]byte, error) {
 	return yaml.Marshal(cfg)
 }
+
+// applyLAN turns api.lan into concrete settings (D37): a loopback TCP
+// address becomes every interface on the same port, and without
+// configured certificate files the agent's own certificate in
+// <state dir>/tls is used. An explicit non-loopback address or explicit
+// files are kept.
+func applyLAN(cfg *Config, paths *Paths) {
+	if !cfg.API.LAN.Enabled || !cfg.API.TCP.Enabled {
+		return
+	}
+	if host, port, err := net.SplitHostPort(cfg.API.TCP.Address); err == nil {
+		if lb, ok := netaddr.IsLoopbackHost(host); ok && lb {
+			cfg.API.TCP.Address = net.JoinHostPort(LANHost, port)
+		}
+	}
+	if !cfg.API.TLS.Enabled() {
+		paths.TLSAutoDir = filepath.Join(paths.StateDir, "tls")
+		cfg.API.TLS.CertFile = filepath.Join(paths.TLSAutoDir, "server.pem")
+		cfg.API.TLS.KeyFile = filepath.Join(paths.TLSAutoDir, "server-key.pem")
+	}
+}
+
+// LANHost is the listen host api.lan uses: every IPv4 interface.
+const LANHost = "0.0.0.0"

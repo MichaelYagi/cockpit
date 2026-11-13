@@ -33,6 +33,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **One-step LAN access (D37).** `cockpit agent --lan` (or
+  `api.lan.enabled: true`) listens on the network, creates and renews
+  its own HTTPS certificate for this machine's addresses, and prints the
+  address to open in a browser, the certificate fingerprint and the TUI
+  command. API keys are still required.
 - **Retro themes.** Amber and Phosphor give the TUI an old CRT terminal
   look: tinted text and square panel corners.
 - **Web dashboard (D35).** The agent serves a read-only dashboard at

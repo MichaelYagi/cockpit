@@ -305,8 +305,8 @@ Number keys `1`–`9` switch screens.
 
 - The key stays in that browser tab only and is forgotten when the tab
   closes. **Sign out** forgets it at once.
-- From another computer, set up [remote access](#remote-access) first and
-  open `https://<machine>:7878/`. The browser warns about the certificate,
+- From another computer, start the agent with `--lan` (see
+  [remote access](#remote-access)) and open the address it prints. The browser warns about the certificate,
   since it comes from Cockpit's own CA: compare the fingerprint it shows
   with `cockpit tls show`, or import `ca.pem` into the browser or system
   trust store to remove the warning.
@@ -316,8 +316,53 @@ Number keys `1`–`9` switch screens.
 
 ## Remote access
 
-By default TCP binds to `127.0.0.1` only. Remote access requires TLS.
-Cockpit can create its own certificate (D29):
+By default TCP binds to `127.0.0.1` only. Remote access requires TLS and
+an API key.
+
+### The simple way: `--lan`
+
+On the machine to watch:
+
+```sh
+cockpit agent --lan
+cockpit keys create --name laptop --scope all   # in another terminal; copy the key
+```
+
+`--lan` listens on every network interface and creates its own HTTPS
+certificate for this machine's name and addresses (D37). At startup it
+prints the addresses to open, for example `https://192.168.0.185:7878/`,
+and the certificate's fingerprint. On the other computer, open that
+address in a browser, check that the certificate warning shows the same
+SHA-256 fingerprint, continue, and paste the key. Or run the TUI command
+it prints:
+
+```sh
+export COCKPIT_API_KEY=<the key>
+cockpit tui --url https://192.168.0.185:7878 --tls-fingerprint <fingerprint>
+```
+
+To keep it on, put this in the configuration file (for the system
+service, `/etc/cockpit-monitor/config.yaml`, then
+`sudo systemctl restart cockpit-agent`; the addresses appear in
+`journalctl -u cockpit-agent`):
+
+```yaml
+api:
+  lan:
+    enabled: true
+```
+
+`COCKPIT_API_LAN=true` works too. The certificate is kept in
+`<state dir>/tls/` and reused, so the fingerprint stays the same. When
+this machine gets a new address, or the certificate is within 30 days of
+expiring, the next start issues a new one from the same CA, and pinned
+clients need the new fingerprint. If another computer cannot connect,
+check this machine's firewall allows TCP port 7878. On WSL, Windows must
+also let the connection through; see Microsoft's WSL networking guide.
+
+### Your own certificate
+
+Cockpit can create a certificate for names you choose (D29):
 
 ```sh
 cockpit tls init --host box.example --host 192.0.2.7   # system mode: sudo cockpit tls init --mode system ...

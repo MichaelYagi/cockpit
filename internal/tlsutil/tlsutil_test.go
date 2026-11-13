@@ -63,3 +63,34 @@ func TestInitRenewAndModes(t *testing.T) {
 		t.Errorf("renew without CA: %v", err)
 	}
 }
+
+// Ensure creates once, keeps a good certificate, and issues a new one from
+// the same CA for a new address or near expiry (D37).
+func TestEnsure(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "tls")
+	now := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
+	hosts := []string{"box", "localhost", "192.168.0.10"}
+	first, issued, err := Ensure(dir, hosts, now)
+	if err != nil || !issued {
+		t.Fatalf("create: %v %v", issued, err)
+	}
+	caPath, _, _, _ := Paths(dir)
+	ca, err := ReadCertificate(caPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, issued, err := Ensure(dir, []string{"BOX", "192.168.0.10"}, now.Add(24*time.Hour))
+	if err != nil || issued || !same.Equal(first) {
+		t.Fatalf("a covering certificate was replaced: %v %v", issued, err)
+	}
+	moved, issued, err := Ensure(dir, []string{"box", "192.168.0.22"}, now)
+	if err != nil || !issued || moved.Equal(first) {
+		t.Fatalf("new address not covered: %v %v", issued, err)
+	}
+	if err := moved.CheckSignatureFrom(ca); err != nil {
+		t.Errorf("not issued by the same CA: %v", err)
+	}
+	if _, issued, _ := Ensure(dir, []string{"box", "192.168.0.22"}, moved.NotAfter.Add(-RenewBefore+time.Hour)); !issued {
+		t.Error("certificate near expiry not renewed")
+	}
+}

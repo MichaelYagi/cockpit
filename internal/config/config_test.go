@@ -386,3 +386,32 @@ func TestWebDashboardSetting(t *testing.T) {
 		t.Error("api.web.enabled: false was ignored")
 	}
 }
+
+// api.lan (D37) opens a loopback address to every interface and points TLS
+// at the agent's own certificate; explicit settings are kept.
+func TestLANSetting(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state")
+	res, err := Load(Source{ConfigPath: write(t, "agent:\n  state_dir: "+state+"\napi:\n  lan:\n    enabled: true\n"), Env: envMap(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := res.Config.API
+	if a.TCP.Address != "0.0.0.0:7878" || res.Paths.TLSAutoDir != filepath.Join(state, "tls") ||
+		a.TLS.CertFile != filepath.Join(state, "tls", "server.pem") || a.TLS.KeyFile != filepath.Join(state, "tls", "server-key.pem") {
+		t.Errorf("lan: %+v %+v %q", a.TCP, a.TLS, res.Paths.TLSAutoDir)
+	}
+
+	res, err = Load(Source{ConfigPath: write(t, "api:\n  tcp:\n    address: 192.0.2.7:9000\n  tls:\n    cert_file: /c.pem\n    key_file: /k.pem\n"),
+		Env: envMap(map[string]string{"COCKPIT_API_LAN": "true"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := res.Config.API; a.TCP.Address != "192.0.2.7:9000" || a.TLS.CertFile != "/c.pem" || res.Paths.TLSAutoDir != "" {
+		t.Errorf("explicit settings changed: %+v %+v", a.TCP, a.TLS)
+	}
+
+	on := true
+	if _, err := Load(Source{ConfigPath: write(t, "api:\n  tcp:\n    enabled: false\n"), Env: envMap(nil), Flags: Overrides{LAN: &on}}); err == nil || !strings.Contains(err.Error(), "api.lan.enabled") {
+		t.Errorf("lan without TCP: %v", err)
+	}
+}
