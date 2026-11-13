@@ -45,6 +45,9 @@ type TCPConfig struct {
 	// D38). Connections from outside private networks are then closed
 	// unanswered.
 	PlainLAN bool
+	// PlainPublic also accepts plain HTTP clients from any address
+	// (api.lan.public, D42). Requires PlainLAN.
+	PlainPublic bool
 }
 
 // Endpoints are the addresses actually listening.
@@ -171,6 +174,9 @@ func (s *Server) listenTCP() (net.Listener, bool, time.Time, error) {
 		l = tls.NewListener(l, tlsCfg)
 	}
 	switch {
+	case !loopback && !tlsOn && s.cfg.TCP.PlainPublic:
+		s.logger.Warn("API is listening over plain HTTP and accepts clients from ANY address, including the internet; API keys and data travel unencrypted",
+			"address", l.Addr().String())
 	case !loopback && !tlsOn:
 		l = &privateOnly{Listener: l, logger: s.logger}
 		s.logger.Warn("API is listening on the local network over plain HTTP; API keys and data travel unencrypted. Only private-network clients are accepted",

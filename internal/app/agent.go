@@ -248,7 +248,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	srvCfg := server.Config{
 		Socket: server.SocketConfig{Enabled: cfg.API.Socket.Enabled, Path: paths.SocketPath, Mode: socketMode},
 		TCP: server.TCPConfig{Enabled: cfg.API.TCP.Enabled, Address: cfg.API.TCP.Address,
-			CertFile: cfg.API.TLS.CertFile, KeyFile: cfg.API.TLS.KeyFile, PlainLAN: cfg.API.LAN.HTTP},
+			CertFile: cfg.API.TLS.CertFile, KeyFile: cfg.API.TLS.KeyFile, PlainLAN: cfg.API.LAN.HTTP, PlainPublic: cfg.API.LAN.Public},
 	}
 	var sockH, tcpH = noHandler, noHandler
 	if cfg.API.Socket.Enabled {

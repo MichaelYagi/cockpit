@@ -91,3 +91,15 @@ func TestLANNoticePlainHTTP(t *testing.T) {
 		t.Errorf("plain notice mentions TLS:\n%s", out)
 	}
 }
+
+func TestLANNoticePublic(t *testing.T) {
+	l := &lanInfo{addrs: []netip.Addr{netip.MustParseAddr("192.168.1.5")}, plain: true, public: true}
+	var b bytes.Buffer
+	l.write(&b, "0.0.0.0:7878", config.ModeUser)
+	out := b.String()
+	for _, want := range []string{"any address may connect", "internet", "unencrypted", "forward a port", "port 7878", "http://192.168.1.5:7878/"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+}

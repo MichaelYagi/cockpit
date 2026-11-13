@@ -139,7 +139,7 @@ type configFlags struct {
 	tcpAddress, socketPath    string
 	stateDir, runtimeDir      string
 	tcpEnabled, socketEnabled bool
-	lan, lanHTTP              bool
+	lan, lanHTTP, httpPublic  bool
 }
 
 func newConfigFlags(name string, env Env) *configFlags {
@@ -156,6 +156,7 @@ func newConfigFlags(name string, env Env) *configFlags {
 	f.fs.StringVar(&f.stateDir, "state-dir", "", "state directory")
 	f.fs.StringVar(&f.runtimeDir, "runtime-dir", "", "runtime directory (socket location)")
 	f.fs.BoolVar(&f.lan, "lan", false, "open the API and web dashboard to the local network over HTTPS (env COCKPIT_API_LAN)")
+	f.fs.BoolVar(&f.httpPublic, "http-public", false, "like --lan-http, but accept clients from any address, including the internet; keys and data travel unencrypted (env COCKPIT_API_LAN_PUBLIC)")
 	f.fs.BoolVar(&f.lanHTTP, "lan-http", false, "like --lan, but plain HTTP: keys and data travel unencrypted; private-network clients only (env COCKPIT_API_LAN_HTTP)")
 	return f
 }
@@ -194,6 +195,7 @@ func (f *configFlags) source(env Env) config.Source {
 			RuntimeDir:    str("runtime-dir", f.runtimeDir),
 			LAN:           boolean("lan", f.lan),
 			LANHTTP:       boolean("lan-http", f.lanHTTP),
+			HTTPPublic:    boolean("http-public", f.httpPublic),
 		},
 	}
 }
@@ -433,10 +435,18 @@ func connect(env Env, mode, cfgPath, socket string, r *remoteFlags) (*client.Cli
 			return nil, "", fmt.Errorf("TCP access needs an API key in %s", config.EnvAPIKey)
 		}
 		var opts []client.Option
-		if u, err := url.Parse(apiURL); err == nil && u.Scheme == "http" && client.IsPrivateAddress(u.Hostname()) {
-			// An agent started with --lan-http (D38).
-			fmt.Fprintf(env.Stderr, "warning: plain http to %s; the API key and data travel unencrypted on this network\n", u.Hostname())
-			opts = append(opts, client.WithPlainHTTPOnPrivateNetwork())
+		if u, err := url.Parse(apiURL); err == nil && u.Scheme == "http" {
+			switch h := u.Hostname(); {
+			case client.IsPrivateAddress(h):
+				// An agent started with --lan-http (D38).
+				fmt.Fprintf(env.Stderr, "warning: plain http to %s; the API key and data travel unencrypted on this network\n", h)
+				opts = append(opts, client.WithPlainHTTPOnPrivateNetwork())
+			case h != "localhost" && h != "127.0.0.1" && h != "::1":
+				// An agent started with --http-public (D42): the URL asks
+				// for plain http, so honour it, loudly.
+				fmt.Fprintf(env.Stderr, "warning: plain http to %s; the API key and data travel unencrypted and can be read and reused by anyone on the way\n", h)
+				opts = append(opts, client.WithPlainHTTP())
+			}
 		}
 		if pin != "" {
 			opts = append(opts, client.WithPinnedCertificate(pin))

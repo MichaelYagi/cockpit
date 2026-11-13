@@ -488,3 +488,23 @@ func TestEndpointsSetting(t *testing.T) {
 		}
 	}
 }
+
+func TestLANPublicSetting(t *testing.T) {
+	for _, src := range []Source{
+		{ConfigPath: write(t, "api:\n  lan:\n    public: true\n"), Env: envMap(nil)},
+		{Env: envMap(map[string]string{"COCKPIT_API_LAN_PUBLIC": "true"})},
+		{Env: envMap(nil), Flags: Overrides{HTTPPublic: ptr(true)}},
+	} {
+		res, err := Load(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := res.Config.API
+		if !a.LAN.Public || !a.LAN.HTTP || !a.LAN.Enabled || a.TCP.Address != "0.0.0.0:7878" || a.TLS.Enabled() {
+			t.Errorf("public: %+v %+v", a.LAN, a.TCP)
+		}
+	}
+	if _, err := Load(Source{ConfigPath: write(t, "api:\n  lan:\n    public: true\n  tls:\n    cert_file: /c.pem\n    key_file: /k.pem\n"), Env: envMap(nil)}); err == nil {
+		t.Error("public with tls accepted")
+	}
+}

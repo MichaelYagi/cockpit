@@ -84,6 +84,10 @@ type LAN struct {
 	// and data travel unencrypted. Only private-network clients are
 	// accepted. Implies Enabled.
 	HTTP bool `yaml:"http"`
+	// Public accepts plain HTTP clients from any address, including the
+	// internet (D42). Implies HTTP. API keys are still required, but they
+	// and all data travel unencrypted.
+	Public bool `yaml:"public"`
 }
 
 // Web is the browser dashboard served on the TCP listener (D35).

@@ -54,6 +54,7 @@ type options struct {
 	pinErr    error
 	caPEM     []byte
 	plainLAN  bool
+	plainAny  bool
 }
 
 // Option customizes a Client.
@@ -83,6 +84,12 @@ func WithCAPEM(pemCerts []byte) Option { return func(o *options) { o.caPEM = pem
 // network can read it. Host names are still refused, since a name could
 // resolve anywhere.
 func WithPlainHTTPOnPrivateNetwork() Option { return func(o *options) { o.plainLAN = true } }
+
+// WithPlainHTTP allows sending the API key over plain http to any host,
+// including over the internet, for an agent started with --http-public
+// (D42). Anyone between the client and the agent can read and reuse the
+// key. Prefer https.
+func WithPlainHTTP() Option { return func(o *options) { o.plainAny = true } }
 
 // WithUserAgent sets the User-Agent header.
 func WithUserAgent(ua string) Option { return func(o *options) { o.userAgent = ua } }
@@ -135,7 +142,7 @@ func NewTCP(baseURL, apiKey string, opts ...Option) (*Client, error) {
 		return nil, errors.New("base URL must be scheme://host:port with no path, query or credentials")
 	}
 	o := build(opts)
-	if u.Scheme == "http" && !isLoopback(u.Hostname()) && !(o.plainLAN && IsPrivateAddress(u.Hostname())) {
+	if u.Scheme == "http" && !o.plainAny && !isLoopback(u.Hostname()) && !(o.plainLAN && IsPrivateAddress(u.Hostname())) {
 		return nil, fmt.Errorf("refusing to send an API key over plain http to %s; use https", u.Hostname())
 	}
 	if apiKey != "" && (!strings.HasPrefix(apiKey, "ckp_") || strings.ContainsAny(apiKey, " \t\r\n")) {

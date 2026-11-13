@@ -960,3 +960,34 @@ otherwise). File entries stay read-only. In the TUI, `e` opens the add
 dialog with the current values. The certificate step keeps the current
 choice on Enter, and `expect_status` is kept as it is. A changed check
 restarts its background loop, so its failure count starts over.
+
+## D42 — Plain HTTP from any address, opt-in
+
+**Status:** Accepted (2026-11-13)
+
+**Decision.** This amends D4 and D38. `api.lan.public` (also
+`cockpit agent --http-public` and `COCKPIT_API_LAN_PUBLIC`) serves the TCP
+listener over plain HTTP on every interface and accepts clients from
+**any** address, including the internet. The private-network filter of
+D38 is skipped. It implies `api.lan.http` and `api.lan.enabled`, and
+cannot be combined with `api.tls`. It is off by default.
+
+- Every request still needs an API key. Scopes, rate limits (including
+  the per-IP limit on failed keys), the Host check and the web
+  dashboard's protections are unchanged.
+- The agent logs a warning at startup that any address may connect and
+  that keys and data are unencrypted. Its notice says the same and how
+  to forward a router port.
+- `pkg/client` sends a key over plain HTTP to a public host only with the
+  new `WithPlainHTTP()`. The CLI and TUI use it when a `--url` explicitly
+  starts with `http://` for a non-private host, and print a warning.
+
+**Why.** The owner wants to reach the API from outside the home network
+without a VPN or certificates, and accepts the risk.
+
+**Risk.** Anyone on the path (public Wi-Fi, the ISP, any network in
+between) can read the API key and every response, and reuse the key until
+it is revoked. A reachable port is found by internet scanners within
+minutes; only the API key stands between them and the data. Use keys with
+the fewest scopes needed, revoke them when unused, and prefer `--lan`
+(HTTPS) where possible.
