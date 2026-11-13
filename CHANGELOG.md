@@ -33,6 +33,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Edit service checks.** On the Network screen, `e` opens the selected
+  check with its name and address filled in. Changes apply within a few
+  seconds. API: `PUT /endpoint-checks/{name}` (admin socket);
+  `pkg/client` adds `UpdateEndpointCheck`.
 - **Services that ask for a login count as up.** A service check that
   gets 401 or 403 now reports the service up (it answered; it just wants
   a password), so login-protected apps no longer show as failing.

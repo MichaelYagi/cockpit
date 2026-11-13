@@ -951,3 +951,12 @@ restarting the agent was the only way.
 
 **Limits.** `expect_status` is set only through the API or the file, not
 in the TUI form. There are no CLI subcommands yet.
+
+**Amended (2026-11-13).** Runtime checks can be edited:
+`PUT /endpoint-checks/{name}` replaces a check's name, URL, expected
+statuses and certificate setting, validated like a new one. The check
+keeps its place and added time, and a new name must be free (`409`
+otherwise). File entries stay read-only. In the TUI, `e` opens the add
+dialog with the current values. The certificate step keeps the current
+choice on Enter, and `expect_status` is kept as it is. A changed check
+restarts its background loop, so its failure count starts over.

@@ -63,8 +63,20 @@ func TestEndpointChecksRoutes(t *testing.T) {
 	if b := check(do(t, sock, "DELETE", "/api/v1/endpoint-checks/Router"), 409); !strings.Contains(string(b), "configuration file") {
 		t.Errorf("file entry: %s", b)
 	}
+	// Edit: rename and change the address in place.
+	var changed apiv1.EndpointCheck
+	_ = json.Unmarshal(check(do(t, sock, "PUT", "/api/v1/endpoint-checks/Home%20Assistant", jsonBody(`{"name":"HA","url":"https://192.0.2.50:8123/","tls_skip_verify":true}`)), 200), &changed)
+	if changed.Name != "HA" || !changed.TLSSkipVerify || changed.AddedAt == nil || !changed.AddedAt.Equal(*added.AddedAt) {
+		t.Errorf("changed %+v", changed)
+	}
+	check(do(t, sock, "PUT", "/api/v1/endpoint-checks/Router", jsonBody(`{"name":"Router","url":"tcp://192.0.2.1:22"}`)), 409)
+	check(do(t, sock, "PUT", "/api/v1/endpoint-checks/HA", jsonBody(`{"name":"router","url":"tcp://192.0.2.1:22"}`)), 409)
+	check(do(t, sock, "PUT", "/api/v1/endpoint-checks/nope", jsonBody(`{"name":"nope","url":"tcp://192.0.2.1:22"}`)), 404)
+	if r := do(t, tcp, "PUT", "/api/v1/endpoint-checks/HA", bearer(systemKey), jsonBody(`{"name":"x","url":"tcp://h:1"}`)); r.status != 404 && r.status != 405 {
+		t.Errorf("PUT over TCP: %d", r.status)
+	}
 	check(do(t, sock, "DELETE", "/api/v1/endpoint-checks/nope"), 404)
-	check(do(t, sock, "DELETE", "/api/v1/endpoint-checks/Home%20Assistant"), 204)
+	check(do(t, sock, "DELETE", "/api/v1/endpoint-checks/ha"), 204)
 	if l := list(); len(l.Items) != 1 {
 		t.Errorf("after remove %+v", l)
 	}
