@@ -222,6 +222,8 @@ api:
     allowed_origins: []        # exact origins, e.g. ["https://hoppscotch.io"]
   web:
     enabled: true              # web dashboard at /ui/ on the TCP listener (D35)
+  lan:
+    enabled: false             # one-step LAN access over HTTPS (D37); --lan, COCKPIT_API_LAN
 collection:
   defaults: { interval: 2s, timeout: 1s }   # samplers; inventory collectors keep their own
   collectors:                  # per-collector overrides, e.g.

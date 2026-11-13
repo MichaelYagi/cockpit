@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -53,6 +54,10 @@ type Options struct {
 	OnReady func(server.Endpoints)
 	// Now is the clock; defaults to time.Now.
 	Now func() time.Time
+	// Notice receives a short plain-text note for the person who started
+	// the agent, e.g. the addresses to open when api.lan is on. Nil
+	// discards it.
+	Notice io.Writer
 }
 
 // Permissions per mode (D3). System mode lets the cockpit-monitor group
@@ -211,6 +216,12 @@ func Run(ctx context.Context, o Options) (err error) {
 	limits := middleware.NewLimits(middleware.LimitConfig{PerKeyRPS: rl.PerKeyRPS, PerKeyBurst: rl.PerKeyBurst,
 		GlobalRPS: rl.GlobalRPS, GlobalBurst: rl.GlobalBurst})
 
+	var lan *lanInfo
+	if cfg.API.LAN.Enabled && cfg.API.TCP.Enabled {
+		if lan, err = prepareLAN(cfg, paths, log, o.Now()); err != nil {
+			return err
+		}
+	}
 	srvCfg := server.Config{
 		Socket: server.SocketConfig{Enabled: cfg.API.Socket.Enabled, Path: paths.SocketPath, Mode: socketMode},
 		TCP: server.TCPConfig{Enabled: cfg.API.TCP.Enabled, Address: cfg.API.TCP.Address,
@@ -257,7 +268,11 @@ func Run(ctx context.Context, o Options) (err error) {
 			t := ep.TLSExpiresAt
 			l.TLSExpiresAt = &t
 			bg.Add(1)
-			go func() { defer bg.Done(); watchCertificate(bgCtx, log, t, o.Now) }()
+			renew := "Run: cockpit tls renew"
+			if paths.TLSAutoDir != "" {
+				renew = "Restart the agent to renew it"
+			}
+			go func() { defer bg.Done(); watchCertificate(bgCtx, log, t, o.Now, renew) }()
 		}
 		open = append(open, l)
 	}
@@ -270,6 +285,9 @@ func Run(ctx context.Context, o Options) (err error) {
 		"socket", ep.SocketPath,
 		"tcp", ep.TCPAddress,
 		"tls", ep.TCPTLS)
+	if lan != nil && o.Notice != nil {
+		lan.write(o.Notice, ep.TCPAddress, paths.Mode)
+	}
 	if o.OnReady != nil {
 		o.OnReady(ep)
 	}
@@ -365,13 +383,13 @@ const certWarnBefore = 30 * 24 * time.Hour
 
 // watchCertificate logs a warning at start and daily while the TLS
 // certificate is within certWarnBefore of expiring, or has expired (D29).
-func watchCertificate(ctx context.Context, log *slog.Logger, expires time.Time, now func() time.Time) {
+func watchCertificate(ctx context.Context, log *slog.Logger, expires time.Time, now func() time.Time, renew string) {
 	check := func() {
 		switch left := expires.Sub(now()); {
 		case left <= 0:
-			log.Error("TLS certificate has expired; clients will refuse it. Run: cockpit tls renew", "expired_at", expires)
+			log.Error("TLS certificate has expired; clients will refuse it. "+renew, "expired_at", expires)
 		case left < certWarnBefore:
-			log.Warn("TLS certificate expires soon. Run: cockpit tls renew", "expires_at", expires, "days_left", int(left.Hours()/24))
+			log.Warn("TLS certificate expires soon. "+renew, "expires_at", expires, "days_left", int(left.Hours()/24))
 		}
 	}
 	check()

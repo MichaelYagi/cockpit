@@ -23,6 +23,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **One-step LAN access (D37).** `cockpit agent --lan` (or
+  `api.lan.enabled: true`) listens on the network, creates and renews
+  its own HTTPS certificate for this machine's addresses, and prints the
+  address to open in a browser, the certificate fingerprint and the TUI
+  command. API keys are still required.
 - **Web dashboard (D35).** The agent serves a read-only dashboard at
   `http://127.0.0.1:7878/` (or your TLS address): Overview, Performance
   (live and stored history), Health, Storage, Network, Processes,

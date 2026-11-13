@@ -131,6 +131,7 @@ type configFlags struct {
 	tcpAddress, socketPath    string
 	stateDir, runtimeDir      string
 	tcpEnabled, socketEnabled bool
+	lan                       bool
 }
 
 func newConfigFlags(name string, env Env) *configFlags {
@@ -146,6 +147,7 @@ func newConfigFlags(name string, env Env) *configFlags {
 	f.fs.BoolVar(&f.socketEnabled, "socket-enabled", true, "enable the Unix socket listener")
 	f.fs.StringVar(&f.stateDir, "state-dir", "", "state directory")
 	f.fs.StringVar(&f.runtimeDir, "runtime-dir", "", "runtime directory (socket location)")
+	f.fs.BoolVar(&f.lan, "lan", false, "open the API and web dashboard to the local network over HTTPS (env COCKPIT_API_LAN)")
 	return f
 }
 
@@ -181,6 +183,7 @@ func (f *configFlags) source(env Env) config.Source {
 			SocketPath:    str("socket", f.socketPath),
 			StateDir:      str("state-dir", f.stateDir),
 			RuntimeDir:    str("runtime-dir", f.runtimeDir),
+			LAN:           boolean("lan", f.lan),
 		},
 	}
 }
@@ -220,7 +223,7 @@ func runAgent(ctx context.Context, args []string, env Env) int {
 	if res.ConfigFileFound {
 		log.Info("loaded configuration", "file", res.Paths.ConfigFile)
 	}
-	if err := app.Run(ctx, app.Options{Config: res.Config, Paths: res.Paths, Logger: log, Collectors: env.collectors()}); err != nil {
+	if err := app.Run(ctx, app.Options{Config: res.Config, Paths: res.Paths, Logger: log, Collectors: env.collectors(), Notice: env.Stderr}); err != nil {
 		log.Error("agent failed", "error", err)
 		return ExitError
 	}

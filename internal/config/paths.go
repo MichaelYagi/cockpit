@@ -15,6 +15,9 @@ type Paths struct {
 	StateDir   string
 	RuntimeDir string
 	SocketPath string
+	// TLSAutoDir is where the agent keeps the certificate it creates for
+	// api.lan (D37); empty when api.lan is off or api.tls names files.
+	TLSAutoDir string
 }
 
 // maxSocketPath is the usable length of sockaddr_un.sun_path: 108 bytes

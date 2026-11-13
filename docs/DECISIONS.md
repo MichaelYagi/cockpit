@@ -748,3 +748,31 @@ conformance suite.
 **Why.** Without CPU usage and processes, the macOS agent misses the most
 basic monitoring. cgo would have meant building macOS binaries on a Mac;
 purego keeps the single static binary and cross-compilation (D7, D32).
+
+## D37 — One-step LAN access
+
+**Status:** Proposed (2026-11-13)
+
+**Decision.** `api.lan.enabled` (also `cockpit agent --lan` and
+`COCKPIT_API_LAN`) opens the TCP listener to the local network in one
+step. It changes a loopback `api.tcp.address` to `0.0.0.0` on the same
+port; an explicit non-loopback address is kept. When `api.tls` names no
+files, the agent keeps its own private CA and server certificate in
+`<state dir>/tls` (D29 format, keys `0600`, owned by the agent's user)
+for the host name, `localhost`, the loopback addresses and every IPv4
+address other machines can reach. At each start it reuses the
+certificate, or issues a new one from the same CA when an address is not
+covered or expiry is within 30 days. It prints the URLs, the SHA-256
+fingerprint and the commands to create a key and connect; it never
+prints or creates a key. TLS and API keys stay required (D4); the
+startup warning for remote listeners stays.
+
+**Why.** Remote access needed `tls init` with the right `--host` values,
+a pasted configuration block and a restart. `--lan` does the same in one
+flag, with a certificate for the addresses the machine really has.
+
+**Trade-off.** The agent can read its own CA key, so a compromised agent
+could issue certificates under that CA. Clients that pin the fingerprint
+are unaffected; the documentation recommends pinning, and `cockpit tls
+init` (root-only CA key in system mode) remains for anyone who wants to
+import the CA.

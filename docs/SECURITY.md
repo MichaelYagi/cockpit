@@ -26,9 +26,13 @@ Threats:
 |---|---|---|
 | Unix socket | on | Filesystem permissions (D3) |
 | TCP loopback `127.0.0.1:7878` | on | API key always (D4), `Host` check, CORS only for listed origins (D34); also serves the keyless dashboard files at `/ui/` (D35) |
-| TCP remote | off | Explicit configuration + TLS + API key |
+| TCP remote | off | Explicit configuration (`api.tcp.address` + `api.tls`, or `api.lan`, D37) + TLS + API key |
 
 - Never bind to `0.0.0.0` or `::` unless explicitly configured.
+  `api.lan` (or `cockpit agent --lan`) is that explicit step: it binds
+  every interface and, without configured files, uses a certificate the
+  agent issues itself from a private CA in `<state dir>/tls` (keys `0600`,
+  owned by the agent). It never turns off TLS or the API key (D37).
 - A non-loopback bind without valid TLS configuration is a **startup
   error**, never a warning or fallback.
 - Log a prominent warning at startup whenever a remote listener is active.

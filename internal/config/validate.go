@@ -81,6 +81,8 @@ func validate(c *Config, p *Paths, v *validator) {
 	}
 	if c.API.TCP.Enabled {
 		validateTCP(v, c.API)
+	} else if c.API.LAN.Enabled {
+		v.add("api.lan.enabled", "needs the TCP listener (api.tcp.enabled: true)")
 	}
 	validateCORS(v, c.API.CORS)
 	if c.API.TLS.Enabled() {

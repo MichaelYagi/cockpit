@@ -44,6 +44,15 @@ type API struct {
 	RateLimit RateLimit `yaml:"rate_limit"`
 	CORS      CORS      `yaml:"cors"`
 	Web       Web       `yaml:"web"`
+	LAN       LAN       `yaml:"lan"`
+}
+
+// LAN opens the TCP listener to the local network in one step (D37): it
+// listens on every interface and, unless api.tls names certificate files,
+// uses a certificate the agent creates and renews itself in
+// <state dir>/tls. API keys are still required.
+type LAN struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // Web is the browser dashboard served on the TCP listener (D35).
