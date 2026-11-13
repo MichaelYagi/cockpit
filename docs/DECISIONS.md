@@ -366,7 +366,7 @@ others, and writes only relative to the opened directory.
 **Why.** Resolves Q1 without giving the long-running, network-facing
 agent elevated privileges.
 
-**Amended (2026-11-13, proposed).** `deploy/install.sh` installs
+**Amended (2026-11-13, accepted).** `deploy/install.sh` installs
 smartmontools from the distribution's packages when `smartctl` is
 missing and enables the timer by default; `--no-smart` opts out. The
 agent still detects `smartctl` at runtime and works without it.
@@ -659,7 +659,7 @@ keeping the single static binary and the "unsupported, not fatal" rule.
 
 ## D33 — Removing revoked and expired API keys
 
-**Status:** Proposed (2026-11-12)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** `POST /api/v1/keys/{id}/remove` (admin, local socket only)
 deletes the record of a key that is revoked or expired. A key that still
@@ -676,7 +676,7 @@ history is kept by the `key.revoked` and `key.removed` events and the logs.
 
 ## D34 — Opt-in browser access (CORS) to the TCP listener
 
-**Status:** Proposed (2026-11-12)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** A new setting, `api.cors.allowed_origins`, lists exact web
 origins (`scheme://host[:port]`, lower case, http or https; no wildcards,
@@ -698,7 +698,7 @@ API.
 
 ## D35 — Web dashboard served by the agent
 
-**Status:** Proposed (2026-11-12)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** The agent serves a read-only web dashboard on its TCP
 listener at `/ui/`; `/` redirects there. It is on by default and turned off
@@ -728,7 +728,7 @@ already exist. Serving it from the same origin needs no CORS (D34).
 
 ## D36 — macOS system libraries through purego
 
-**Status:** Proposed (2026-11-12)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** This amends D32. The macOS collectors may call system
 libraries (`libSystem`, IOKit, CoreFoundation) through
@@ -756,7 +756,7 @@ purego keeps the single static binary and cross-compilation (D7, D32).
 
 ## D37 — One-step LAN access
 
-**Status:** Proposed (2026-11-13)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** `api.lan.enabled` (also `cockpit agent --lan` and
 `COCKPIT_API_LAN`) opens the TCP listener to the local network in one
@@ -784,7 +784,7 @@ import the CA.
 
 ## D38 — Plain HTTP on the local network, opt-in
 
-**Status:** Proposed (2026-11-13)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** This amends D4, D29 and D37. `api.lan.http` (also
 `cockpit agent --lan-http` and `COCKPIT_API_LAN_HTTP`) serves the TCP
@@ -816,7 +816,7 @@ against devices on the same LAN.
 
 ## D39 — Notifications through webhooks
 
-**Status:** Proposed (2026-11-13)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** The agent can send health findings to up to 8 webhooks,
 configured under `notifications.webhooks` in the configuration file. It
@@ -862,7 +862,7 @@ retries are logged, not stored.
 
 ## D40 — Checking services over HTTP and TCP
 
-**Status:** Proposed (2026-11-13)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** The agent can check services the operator lists under
 `collection.endpoints.targets` (at most 64; none by default):
@@ -914,7 +914,7 @@ only.
 
 ## D41 — Adding and removing service checks at runtime
 
-**Status:** Proposed (2026-11-13)
+**Status:** Accepted (2026-11-13)
 
 **Decision.** This extends D40. Service checks can be added and removed
 while the agent runs, from the TUI's Network screen or the admin API,
