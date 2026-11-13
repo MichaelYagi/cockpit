@@ -25,6 +25,7 @@ import (
 type EndpointChecksService interface {
 	List() []settings.EndpointEntry
 	Add(ctx context.Context, t config.EndpointTarget) (settings.EndpointEntry, error)
+	Update(ctx context.Context, name string, t config.EndpointTarget) (settings.EndpointEntry, error)
 	Remove(ctx context.Context, name string) error
 }
 
@@ -63,27 +64,8 @@ func (h *EndpointChecks) List(w http.ResponseWriter, r *http.Request) {
 
 // Add serves POST /endpoint-checks.
 func (h *EndpointChecks) Add(w http.ResponseWriter, r *http.Request) {
-	if !allowParams(w, r) {
-		return
-	}
-	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
-		httpx.WriteError(w, r, http.StatusBadRequest, apiv1.CodeInvalidRequest, "The request body must be JSON (Content-Type: application/json).")
-		return
-	}
-	var req apiv1.AddEndpointCheckRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			httpx.WriteError(w, r, http.StatusRequestEntityTooLarge, apiv1.CodeRequestTooLarge, "The request body is too large.")
-			return
-		}
-		httpx.WriteError(w, r, http.StatusBadRequest, apiv1.CodeInvalidRequest, "The request body is not a valid service check.")
-		return
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		httpx.WriteError(w, r, http.StatusBadRequest, apiv1.CodeInvalidRequest, "The request body must contain a single JSON object.")
+	req, ok := h.decode(w, r)
+	if !ok {
 		return
 	}
 	e, err := h.Service.Add(r.Context(), config.EndpointTarget{Name: req.Name, URL: req.URL, ExpectStatus: req.ExpectStatus, TLSSkipVerify: req.TLSSkipVerify})
@@ -94,16 +76,61 @@ func (h *EndpointChecks) Add(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusCreated, toAPICheck(e))
 }
 
+// Update serves PUT /endpoint-checks/{name}: replaces a runtime check.
+func (h *EndpointChecks) Update(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.decode(w, r)
+	if !ok {
+		return
+	}
+	e, err := h.Service.Update(r.Context(), pathName(r), config.EndpointTarget{Name: req.Name, URL: req.URL, ExpectStatus: req.ExpectStatus, TLSSkipVerify: req.TLSSkipVerify})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toAPICheck(e))
+}
+
+func (h *EndpointChecks) decode(w http.ResponseWriter, r *http.Request) (apiv1.AddEndpointCheckRequest, bool) {
+	var req apiv1.AddEndpointCheckRequest
+	if !allowParams(w, r) {
+		return req, false
+	}
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		httpx.WriteError(w, r, http.StatusBadRequest, apiv1.CodeInvalidRequest, "The request body must be JSON (Content-Type: application/json).")
+		return req, false
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			httpx.WriteError(w, r, http.StatusRequestEntityTooLarge, apiv1.CodeRequestTooLarge, "The request body is too large.")
+			return req, false
+		}
+		httpx.WriteError(w, r, http.StatusBadRequest, apiv1.CodeInvalidRequest, "The request body is not a valid service check.")
+		return req, false
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		httpx.WriteError(w, r, http.StatusBadRequest, apiv1.CodeInvalidRequest, "The request body must contain a single JSON object.")
+		return req, false
+	}
+	return req, true
+}
+
+func pathName(r *http.Request) string {
+	name := chi.URLParam(r, "name")
+	if n, err := url.PathUnescape(name); err == nil {
+		name = n
+	}
+	return name
+}
+
 // Remove serves DELETE /endpoint-checks/{name}.
 func (h *EndpointChecks) Remove(w http.ResponseWriter, r *http.Request) {
 	if !allowParams(w, r) {
 		return
 	}
-	name := chi.URLParam(r, "name")
-	if n, err := url.PathUnescape(name); err == nil {
-		name = n
-	}
-	if err := h.Service.Remove(r.Context(), name); err != nil {
+	if err := h.Service.Remove(r.Context(), pathName(r)); err != nil {
 		h.fail(w, r, err)
 		return
 	}

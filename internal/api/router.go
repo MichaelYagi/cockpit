@@ -161,6 +161,7 @@ func Routes(d Deps) []Route {
 		{Method: del, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Delete},
 		{Method: get, Path: "/endpoint-checks", Scope: adm, SocketOnly: true, Handler: checks.List},
 		{Method: post, Path: "/endpoint-checks", Scope: adm, SocketOnly: true, Handler: checks.Add},
+		{Method: http.MethodPut, Path: "/endpoint-checks/{name}", Scope: adm, SocketOnly: true, Handler: checks.Update},
 		{Method: del, Path: "/endpoint-checks/{name}", Scope: adm, SocketOnly: true, Handler: checks.Remove},
 	}
 }

@@ -56,6 +56,7 @@ type fakeAPI struct {
 	checks      []apiv1.EndpointCheck // nil: the default list below
 	addedChecks []apiv1.AddEndpointCheckRequest
 	removedChk  []string
+	updatedChk  []string
 	zfs         *apiv1.ZFS
 	power       *[]apiv1.PowerSupply
 	ups         *[]apiv1.UPS
@@ -350,6 +351,17 @@ func (f *fakeAPI) AddEndpointCheck(_ context.Context, req apiv1.AddEndpointCheck
 	c := apiv1.EndpointCheck{Name: req.Name, URL: req.URL, TLSSkipVerify: req.TLSSkipVerify, Source: "runtime"}
 	f.checks = append(f.checks, c)
 	return &c, nil
+}
+
+func (f *fakeAPI) UpdateEndpointCheck(_ context.Context, name string, req apiv1.AddEndpointCheckRequest) (*apiv1.EndpointCheck, error) {
+	f.updatedChk = append(f.updatedChk, name+" -> "+req.Name+" "+req.URL+fmt.Sprintf(" skip=%v expect=%v", req.TLSSkipVerify, req.ExpectStatus))
+	for i, c := range f.checks {
+		if c.Name == name {
+			f.checks[i] = apiv1.EndpointCheck{Name: req.Name, URL: req.URL, TLSSkipVerify: req.TLSSkipVerify, ExpectStatus: req.ExpectStatus, Source: "runtime"}
+			return &f.checks[i], nil
+		}
+	}
+	return nil, &client.APIError{StatusCode: 404, Code: "not_found", Message: "No service check has that name."}
 }
 
 func (f *fakeAPI) RemoveEndpointCheck(_ context.Context, name string) error {
@@ -1345,7 +1357,7 @@ func TestNetworkAddRemoveChecks(t *testing.T) {
 	press(t, m, key(scrNetwork))
 	drive(t, m, m.refresh(true))
 	out := screenText(m)
-	for _, want := range []string{"▶ Home Assistant", "[config.yaml]", "a add check", "d remove check"} {
+	for _, want := range []string{"▶ Home Assistant", "[config.yaml]", "a add check", "e edit", "d remove"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
 		}
@@ -1468,5 +1480,47 @@ func TestPasteIntoFields(t *testing.T) {
 	m.Update(tea.PasteMsg{Content: " 87.5 % "})
 	if m.input != "87.5" {
 		t.Errorf("threshold %q", m.input)
+	}
+}
+
+// e edits the selected runtime check with its current values filled in (D41).
+func TestNetworkEditCheck(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 140, 50)
+	press(t, m, key(scrNetwork))
+	drive(t, m, m.refresh(true))
+	press(t, m, "e") // the first row comes from config.yaml
+	if m.modal != modalNone || !strings.Contains(m.flash, "configuration file") {
+		t.Errorf("config entry: %v %q", m.modal, m.flash)
+	}
+	api.checks[3].TLSSkipVerify, api.checks[3].ExpectStatus = true, []int{200, 401}
+	drive(t, m, m.refetch("endpoint-checks"))
+	press(t, m, "down", "down", "down", "e")
+	if m.modal != modalEndpointName || m.input != "Wiki" || !strings.Contains(screenText(m), "Edit service check") {
+		t.Fatalf("name step: %v %q", m.modal, m.input)
+	}
+	typeText(t, m, " 2")
+	press(t, m, "enter")
+	if m.input != "https://wiki.lan/" || !strings.Contains(screenText(m), "enter save") {
+		t.Fatalf("address step: %q", m.input)
+	}
+	press(t, m, "backspace")
+	typeText(t, m, ":8443/")
+	press(t, m, "enter")
+	if m.modal != modalEndpointTLS || !strings.Contains(screenText(m), "enter keep") {
+		t.Fatalf("certificate step: %v", m.modal)
+	}
+	drive(t, m, m.key(tea.KeyPressMsg{Code: tea.KeyEnter})) // keep: any certificate
+	want := "Wiki -> Wiki 2 https://wiki.lan:8443/ skip=true expect=[200 401]"
+	if len(api.updatedChk) != 1 || api.updatedChk[0] != want {
+		t.Fatalf("updated %v", api.updatedChk)
+	}
+	if len(api.addedChecks) != 0 || !strings.Contains(m.flash, "Saved Wiki 2") || !strings.Contains(screenText(m), "Wiki 2") {
+		t.Errorf("after edit: %q\n%s", m.flash, screenText(m))
+	}
+	// After an edit, a plain a starts an empty add dialog again.
+	press(t, m, "a")
+	if m.input != "" || m.epEdit != nil || strings.Contains(screenText(m), "Edit service check") {
+		t.Errorf("add after edit: %q %v", m.input, m.epEdit)
 	}
 }

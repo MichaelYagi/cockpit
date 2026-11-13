@@ -161,6 +161,48 @@ func (e *Endpoints) Add(ctx context.Context, t config.EndpointTarget) (EndpointE
 	return EndpointEntry{Target: t, Source: SourceRuntime, AddedAt: s.AddedAt}, nil
 }
 
+// Update replaces a check added at runtime, keeping its place in the
+// list and its added time. The name may change if the new one is free.
+func (e *Endpoints) Update(ctx context.Context, name string, t config.EndpointTarget) (EndpointEntry, error) {
+	t.Name = strings.TrimSpace(t.Name)
+	t.URL = strings.TrimSpace(t.URL)
+	if err := config.ValidateEndpointTarget(t); err != nil {
+		return EndpointEntry{}, err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, f := range e.file {
+		if strings.EqualFold(f.Name, name) {
+			return EndpointEntry{}, ErrEndpointInFile
+		}
+	}
+	i := -1
+	for j, s := range e.runtime {
+		if strings.EqualFold(s.Target.Name, name) {
+			i = j
+		}
+	}
+	if i < 0 {
+		return EndpointEntry{}, ErrEndpointNotFound
+	}
+	old := e.runtime[i]
+	if !strings.EqualFold(t.Name, old.Target.Name) && e.taken(t.Name) {
+		return EndpointEntry{}, ErrEndpointExists
+	}
+	next := append([]storedEndpoint(nil), e.runtime...)
+	next[i] = storedEndpoint{Target: t, AddedAt: old.AddedAt}
+	if err := e.save(ctx, next); err != nil {
+		return EndpointEntry{}, err
+	}
+	e.runtime = next
+	msg := "Service check changed: " + t.Name
+	if t.Name != old.Target.Name {
+		msg = "Service check changed: " + old.Target.Name + " is now " + t.Name
+	}
+	e.event(msg)
+	return EndpointEntry{Target: t, Source: SourceRuntime, AddedAt: old.AddedAt}, nil
+}
+
 // Remove deletes a check added at runtime.
 func (e *Endpoints) Remove(ctx context.Context, name string) error {
 	e.mu.Lock()

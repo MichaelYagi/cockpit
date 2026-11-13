@@ -528,8 +528,9 @@ open the Network screen (`6`), press `a`, type or paste a name, then the address
 (`http://192.168.0.50:8123/`, `https://nas.lan/` or
 `tcp://192.168.0.10:22`). For `https://` addresses it asks whether to
 accept a self-signed certificate. The check starts within a few seconds
-and is kept across restarts. Select a check with `↑`/`↓` and press `d`
-to remove it (D41).
+and is kept across restarts. Select a check with `↑`/`↓` and press `e`
+to edit it (its current name and address are filled in) or `d` to remove
+it (D41).
 
 **In the configuration file**, for checks you want under version
 control or need `expect_status` for:

@@ -112,6 +112,7 @@ need `metrics:read`. It does not open a route by itself.
 | GET | `/network` | `metrics:read` | Gains `endpoints`: configured service checks with `up`, `consecutive_failures`, `status_code`, `response_ms`, `error`, `checked_at`, `cert_expires_at` and `target` (needs `network:read`) (D40) |
 | GET | `/health` | `metrics:read` | Gains the `endpoints` check: critical after 2 failed checks in a row, warning when a certificate expires within 14 days (D40) |
 | GET, POST | `/endpoint-checks` | `admin` (socket only) | List service checks with their `source` (`configuration` or `runtime`); add one (`name`, `url`, optional `expect_status`, `tls_skip_verify`), validated like the file; `409 conflict` for a duplicate name or the 64-check limit (D41) |
+| PUT | `/endpoint-checks/{name}` | `admin` (socket only) | Change a runtime check (same body as POST; it may be renamed, keeps its place); `409` for file entries or a name in use (D41) |
 | DELETE | `/endpoint-checks/{name}` | `admin` (socket only) | Remove a runtime check (name URL-encoded, case-insensitive); `409` for checks from the configuration file (D41) |
 | GET | `/metrics?sections=custom` | `metrics:read` | Generic metrics from extension collectors (D22): one set per collector with availability, `dropped_series` and `problem`; each metric has `name`, `kind`, `unit`, `labels`, `value`, and for counters `rate_per_second` and `rate_unit` |
 

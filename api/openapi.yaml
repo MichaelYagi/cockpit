@@ -740,6 +740,40 @@ paths:
         "413": { $ref: "#/components/responses/TooLarge" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/endpoint-checks/{name}:
+    put:
+      operationId: updateEndpointCheck
+      tags: [keys]
+      summary: Change a service check added at runtime
+      description: >-
+        Replaces the check's name, URL, expected statuses and certificate setting, validated like a new check;
+        it keeps its place in the list. The new name must not be used by another check. Checks from the
+        configuration file cannot be changed here (409). Unix socket only (D41).
+      x-cockpit-scope: admin
+      x-cockpit-socket-only: true
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: The check's current name, URL-encoded; matched case-insensitively.
+          schema: { type: string, minLength: 1, maxLength: 64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddEndpointCheckRequest" }
+      responses:
+        "200":
+          description: Changed.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EndpointCheck" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
     delete:
       operationId: removeEndpointCheck
       tags: [keys]

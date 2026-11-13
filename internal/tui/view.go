@@ -163,7 +163,7 @@ func (m *Model) footer(w int) string {
 		hints = []string{"v severity:" + f, "m older", "tab next", "q quit"}
 	case scrNetwork:
 		if m.isAdmin() {
-			hints = []string{"↑↓ select", "a add check", "d remove check", "tab next", "? help", "q quit"}
+			hints = []string{"↑↓ select", "a add check", "e edit", "d remove", "tab next", "? help", "q quit"}
 		}
 	case scrSettings:
 		hints = []string{"[ ]\ttheme", "↑↓ select", "enter edit", "w save", "d reset", "esc discard", "+/- refresh"}
@@ -1040,20 +1040,41 @@ func (m *Model) modalView(w int) string {
 		lines = append(lines, "", fmt.Sprintf("Type the first %d characters of the key ID to confirm:", confirmChars), m.st.accent.Render("› ")+m.input+m.st.accent.Render("█"), "", m.st.muted.Render("enter confirm · esc cancel"))
 	case modalEndpointName:
 		title = "New service check · name"
+		if m.epEdit != nil {
+			title = "Edit service check · name"
+		}
 		lines = []string{"A name for the service (e.g. Home Assistant, NAS SSH):", "", m.st.accent.Render("› ") + m.input + m.st.accent.Render("█"), "", m.st.muted.Render("enter next · esc cancel")}
 	case modalEndpointURL:
 		title = "New service check · address"
+		if m.epEdit != nil {
+			title = "Edit service check · address"
+		}
 		lines = []string{"Address of " + m.st.bold.Render(truncate(m.epName, inner-12)) + ", for example:"}
 		for _, ex := range []string{"http://192.168.0.50:8123/", "https://nas.lan/health", "tcp://192.168.0.10:22   (port only)"} {
 			lines = append(lines, m.st.muted.Render("  "+ex))
 		}
 		lines = append(lines, "", m.st.accent.Render("› ")+truncateLeft(m.input, inner-3)+m.st.accent.Render("█"), "")
 		lines = append(lines, wrapText("A web address is up when it answers with 2xx, 3xx, or a login prompt (401, 403); tcp:// only needs the port to accept a connection. Don't include passwords.", inner)...)
-		lines = append(lines, "", m.st.muted.Render("enter add · esc cancel"))
+		verb := "add"
+		if m.epEdit != nil {
+			verb = "save"
+		}
+		lines = append(lines, "", m.st.muted.Render("enter "+verb+" · esc cancel"))
 	case modalEndpointTLS:
 		title = "New service check · certificate"
 		lines = wrapText("Accept any certificate for "+truncate(m.epURL, 60)+"? Choose yes for a server with a self-signed certificate (common on home servers such as Proxmox or a NAS). The check then cannot detect an impostor.", inner)
-		lines = append(lines, "", m.st.muted.Render("y accept any certificate · n verify it (default) · esc cancel"))
+		hint := "y accept any certificate · n verify it (default) · esc cancel"
+		if m.epEdit != nil {
+			now := "verified"
+			if m.epEdit.TLSSkipVerify {
+				now = "any certificate accepted"
+			}
+			hint = "y accept any certificate · n verify it · enter keep (" + now + ") · esc cancel"
+		}
+		lines = append(lines, "")
+		for _, l := range wrapText(hint, inner) {
+			lines = append(lines, m.st.muted.Render(l))
+		}
 	case modalEndpointRemove:
 		title = "Remove service check"
 		lines = wrapText("Stop checking "+truncate(m.pendingID, 40)+" and remove it? Its results disappear from this screen; past events are kept.", inner)
@@ -1118,7 +1139,7 @@ func (m *Model) helpView(w, h int) string {
 		kv(m.st, "enter", "edit threshold") + "   " + kv(m.st, "w", "save") + "  " + kv(m.st, "d", "reset to file"),
 		"",
 		m.st.bold.Render("Services · Network"),
-		kv(m.st, "f", "failed only / all") + "  " + kv(m.st, "a", "add service check") + "  " + kv(m.st, "d", "remove check"),
+		kv(m.st, "f", "failed only / all") + "  " + kv(m.st, "a", "add service check") + "  " + kv(m.st, "e", "edit") + "  " + kv(m.st, "d", "remove check"),
 		"",
 		m.st.bold.Render("API Access"),
 		kv(m.st, "↑/↓", "select key") + "        " + kv(m.st, "n", "create key"),

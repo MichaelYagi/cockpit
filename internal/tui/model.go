@@ -42,6 +42,7 @@ type API interface {
 	ResetSettings(ctx context.Context) (*apiv1.SettingsResponse, error)
 	EndpointChecks(ctx context.Context) (*apiv1.EndpointChecksResponse, error)
 	AddEndpointCheck(ctx context.Context, req apiv1.AddEndpointCheckRequest) (*apiv1.EndpointCheck, error)
+	UpdateEndpointCheck(ctx context.Context, name string, req apiv1.AddEndpointCheckRequest) (*apiv1.EndpointCheck, error)
 	RemoveEndpointCheck(ctx context.Context, name string) error
 }
 
@@ -163,8 +164,9 @@ type Model struct {
 	epChecks *apiv1.EndpointChecksResponse
 	epErr    string
 	epSel    int
-	epName   string // name typed in the add dialog
+	epName   string // name typed in the add or edit dialog
 	epURL    string
+	epEdit   *apiv1.EndpointCheck // the check being edited; nil when adding
 
 	// Live events: history from /events plus the SSE stream, newest first.
 	eventList  []apiv1.Event
@@ -769,7 +771,18 @@ func (m *Model) networkKey(s string) tea.Cmd {
 			m.flashMsg(lvWarn, "Adding service checks needs the local admin socket (run cockpit tui on the agent's host).")
 			return nil
 		}
-		m.modal, m.input, m.flash, m.epName, m.epURL = modalEndpointName, "", "", "", ""
+		m.modal, m.input, m.flash, m.epName, m.epURL, m.epEdit = modalEndpointName, "", "", "", "", nil
+	case "e":
+		if !m.isAdmin() || n == 0 {
+			return nil
+		}
+		c := m.epChecks.Items[m.epSel]
+		if c.Source != "runtime" {
+			m.flashMsg(lvWarn, c.Name+" is defined in the configuration file; change it there and restart the agent.")
+			return nil
+		}
+		m.epEdit = &c
+		m.modal, m.input, m.flash, m.epName, m.epURL = modalEndpointName, c.Name, "", "", ""
 	case "d":
 		if !m.isAdmin() || n == 0 {
 			return nil
@@ -794,6 +807,9 @@ func (m *Model) endpointModalKey(k tea.KeyPressMsg) tea.Cmd {
 		case "enter":
 			if name := strings.TrimSpace(m.input); name != "" {
 				m.epName, m.input, m.modal = name, "", modalEndpointURL
+				if m.epEdit != nil {
+					m.input = m.epEdit.URL
+				}
 			}
 		case "backspace":
 			m.input = dropLast(m.input)
@@ -822,8 +838,10 @@ func (m *Model) endpointModalKey(k tea.KeyPressMsg) tea.Cmd {
 		switch s {
 		case "y":
 			return m.addEndpoint(true)
-		case "n", "enter":
+		case "n":
 			return m.addEndpoint(false)
+		case "enter": // keep the current choice when editing; verify when adding
+			return m.addEndpoint(m.epEdit != nil && m.epEdit.TLSSkipVerify)
 		}
 	case modalEndpointRemove:
 		switch s {
@@ -843,12 +861,20 @@ func (m *Model) endpointModalKey(k tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
+// addEndpoint sends the add or edit dialog's result. An edit keeps
+// settings the dialog does not show (expect_status).
 func (m *Model) addEndpoint(skipVerify bool) tea.Cmd {
 	req := apiv1.AddEndpointCheckRequest{Name: m.epName, URL: m.epURL, TLSSkipVerify: skipVerify}
-	m.modal = modalNone
+	editing := m.epEdit
+	m.modal, m.epEdit = modalNone, nil
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		if editing != nil {
+			req.ExpectStatus = editing.ExpectStatus
+			_, err := m.api.UpdateEndpointCheck(ctx, editing.Name, req)
+			return actionMsg{action: "endpoint-edit", id: req.Name, err: err}
+		}
 		_, err := m.api.AddEndpointCheck(ctx, req)
 		return actionMsg{action: "endpoint-add", id: req.Name, err: err}
 	}
@@ -1120,10 +1146,13 @@ func (m *Model) applyAction(a actionMsg) tea.Cmd {
 		return nil
 	}
 	switch a.action {
-	case "endpoint-add", "endpoint-remove":
-		if a.action == "endpoint-add" {
+	case "endpoint-add", "endpoint-edit", "endpoint-remove":
+		switch a.action {
+		case "endpoint-add":
 			m.flashMsg(lvOK, "Added "+cleanText(a.id)+". The first check runs within a few seconds.")
-		} else {
+		case "endpoint-edit":
+			m.flashMsg(lvOK, "Saved "+cleanText(a.id)+". It is checked again within a few seconds.")
+		default:
 			m.flashMsg(lvOK, "Removed "+cleanText(a.id)+"; it is no longer checked.")
 		}
 		return tea.Batch(m.refetch("endpoint-checks"), m.refetch("network"))

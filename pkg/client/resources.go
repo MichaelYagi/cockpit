@@ -277,6 +277,16 @@ func (c *Client) AddEndpointCheck(ctx context.Context, req apiv1.AddEndpointChec
 	return &out, nil
 }
 
+// UpdateEndpointCheck replaces the service check called name (added at
+// runtime); it may be renamed. Unix socket only.
+func (c *Client) UpdateEndpointCheck(ctx context.Context, name string, req apiv1.AddEndpointCheckRequest) (*apiv1.EndpointCheck, error) {
+	var out apiv1.EndpointCheck
+	if err := c.do(ctx, "PUT", "/endpoint-checks/"+url.PathEscape(name), req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // RemoveEndpointCheck removes a service check added at runtime (Unix
 // socket only). Checks from the configuration file cannot be removed.
 func (c *Client) RemoveEndpointCheck(ctx context.Context, name string) error {
