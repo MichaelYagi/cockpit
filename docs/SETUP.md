@@ -383,6 +383,28 @@ request. The Go client and `cockpit tui` accept a plain `http://` URL only
 for a private IP address, not a host name. It cannot be combined with
 `api.tls`.
 
+### Plain HTTP from outside your network: `--http-public`
+
+```sh
+cockpit agent --http-public
+```
+
+Like `--lan-http`, but any address may connect, including the internet
+(D42). To reach it from outside, forward a port on your router to this
+machine's Cockpit port (7878 by default), then use your public address:
+
+```sh
+curl -H "Authorization: Bearer $COCKPIT_API_KEY" http://<public-ip>:7878/api/v1/health
+cockpit tui --url http://<public-ip>:7878
+```
+
+An API key is still required. Over plain HTTP the key and every response
+are readable by anyone on the way (public Wi-Fi, ISPs), and internet
+scanners find open ports within minutes. Give the key only the scopes
+you need and revoke it when you stop using it (`cockpit keys revoke
+<id>`). The setting is `api.lan.public: true` (or
+`COCKPIT_API_LAN_PUBLIC=true`).
+
 ### Your own certificate
 
 Cockpit can create a certificate for names you choose (D29):

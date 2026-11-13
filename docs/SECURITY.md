@@ -28,6 +28,7 @@ Threats:
 | TCP loopback `127.0.0.1:7878` | on | API key always (D4), `Host` check, CORS only for listed origins (D34); also serves the keyless dashboard files at `/ui/` (D35) |
 | TCP remote | off | Explicit configuration (`api.tcp.address` + `api.tls`, or `api.lan`, D37) + TLS + API key |
 | TCP LAN, plain HTTP | off | Explicit `api.lan.http` (D38) + API key; private-network clients only; no encryption |
+| TCP public, plain HTTP | off | Explicit `api.lan.public` (D42) + API key; any client, including the internet; no encryption |
 
 - Never bind to `0.0.0.0` or `::` unless explicitly configured.
   `api.lan` (or `cockpit agent --lan`) is that explicit step: it binds
@@ -43,6 +44,12 @@ Threats:
   every request. Clients send a key over plain HTTP only to a
   private-network IP address, never to a host name. Prefer `--lan` on
   networks you do not fully control (shared Wi-Fi, offices).
+- **Plain HTTP from anywhere (D42).** `api.lan.public` (`--http-public`)
+  drops the private-network filter: any address may connect, and keys and
+  data cross the internet unencrypted. An API key is still required, and
+  failed keys are rate limited per client IP. Anyone on the path can
+  read and replay a key, so use narrow scopes and revoke keys you do not
+  need.
 - A non-loopback bind without valid TLS configuration is a **startup
   error**, never a warning or fallback.
 - Log a prominent warning at startup whenever a remote listener is active.

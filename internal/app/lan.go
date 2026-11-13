@@ -23,13 +23,14 @@ type lanInfo struct {
 	addrs       []netip.Addr
 	fingerprint string // colon-separated upper-case hex, as browsers show it
 	plain       bool   // api.lan.http: no TLS (D38)
+	public      bool   // api.lan.public: any address may connect (D42)
 }
 
 // prepareLAN makes sure the agent's own certificate covers this machine's
 // current names and addresses (when api.tls names no files), and collects
 // the addresses to show.
 func prepareLAN(cfg config.Config, paths config.Paths, log *slog.Logger, now time.Time) (*lanInfo, error) {
-	info := &lanInfo{addrs: netaddr.LANAddresses(), plain: cfg.API.LAN.HTTP}
+	info := &lanInfo{addrs: netaddr.LANAddresses(), plain: cfg.API.LAN.HTTP, public: cfg.API.LAN.Public}
 	if h, err := os.Hostname(); err == nil {
 		info.hostname = h
 	}
@@ -115,6 +116,28 @@ func (l *lanInfo) write(w io.Writer, listen string, mode config.Mode) {
 	keys := "cockpit keys create --name laptop --scope all"
 	if mode == config.ModeSystem {
 		keys = "cockpit keys create --mode system --name laptop --scope all"
+	}
+	if l.public {
+		fmt.Fprintf(w, `
+Public access is on over plain HTTP: any address may connect, including
+the internet. API keys and data travel unencrypted, so anyone between you
+and this machine can read them and reuse the key. Every request still
+needs an API key. To reach it from outside, forward a port on your
+router to this machine's port %s. On this network, open:
+  %s
+
+Sign in with an API key. Create one on this machine (shown once):
+  %s
+
+Or call the API:
+  curl -H "Authorization: Bearer $COCKPIT_API_KEY" %s/api/v1/health
+
+Or use the TUI from another computer:
+  export COCKPIT_API_KEY=<the key>
+  cockpit tui --url %s
+
+`, port, strings.Join(urls, "\n  "), keys, first, first)
+		return
 	}
 	if l.plain {
 		fmt.Fprintf(w, `

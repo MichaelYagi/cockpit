@@ -321,3 +321,15 @@ func TestPlainHTTPOnPrivateNetwork(t *testing.T) {
 		}
 	}
 }
+
+// WithPlainHTTP (D42) allows any host; nothing else does.
+func TestPlainHTTPAnywhere(t *testing.T) {
+	for _, u := range []string{"http://agent.example:7878", "http://203.0.113.9:7878", "http://192.168.1.5:7878"} {
+		if _, err := NewTCP(u, testKey, WithPlainHTTP()); err != nil {
+			t.Errorf("%s rejected: %v", u, err)
+		}
+	}
+	if _, err := NewTCP("http://203.0.113.9:7878", testKey); err == nil {
+		t.Error("public http accepted without the option")
+	}
+}

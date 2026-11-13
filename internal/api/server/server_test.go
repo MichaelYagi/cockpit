@@ -339,3 +339,22 @@ func TestPrivateOnlyListener(t *testing.T) {
 		t.Error("listener error not passed on")
 	}
 }
+
+// --http-public (D42) skips the private-network filter; --lan-http keeps it.
+func TestPlainPublicListener(t *testing.T) {
+	for _, c := range []struct {
+		public  bool
+		wrapped bool
+	}{{false, true}, {true, false}} {
+		s := New(Config{TCP: TCPConfig{Enabled: true, Address: "0.0.0.0:0", PlainLAN: true, PlainPublic: c.public}}, nil, echoPeer, quiet)
+		l, tlsOn, _, err := s.listenTCP()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, wrapped := l.(*privateOnly)
+		l.Close()
+		if wrapped != c.wrapped || tlsOn {
+			t.Errorf("public=%v: filtered=%v tls=%v", c.public, wrapped, tlsOn)
+		}
+	}
+}

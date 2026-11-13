@@ -33,6 +33,12 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Plain HTTP from outside the network, opt-in (D42).**
+  `cockpit agent --http-public` (or `api.lan.public: true`) works like
+  `--lan-http` but accepts clients from any address, so the API and
+  dashboard can be reached over the internet through a router port
+  forward without HTTPS. API keys are still required; they and all data
+  travel unencrypted. `pkg/client` adds `WithPlainHTTP()`.
 - **Edit service checks.** On the Network screen, `e` opens the selected
   check with its name and address filled in. Changes apply within a few
   seconds. API: `PUT /endpoint-checks/{name}` (admin socket);
