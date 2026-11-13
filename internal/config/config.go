@@ -53,6 +53,10 @@ type API struct {
 // <state dir>/tls. API keys are still required.
 type LAN struct {
 	Enabled bool `yaml:"enabled"`
+	// HTTP serves plain HTTP instead (D38): no certificate, but API keys
+	// and data travel unencrypted. Only private-network clients are
+	// accepted. Implies Enabled.
+	HTTP bool `yaml:"http"`
 }
 
 // Web is the browser dashboard served on the TCP listener (D35).

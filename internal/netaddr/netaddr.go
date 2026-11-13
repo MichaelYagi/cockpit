@@ -90,3 +90,24 @@ func lanAddresses(in []net.Addr) []netip.Addr {
 	slices.SortFunc(other, netip.Addr.Compare)
 	return append(private, other...)
 }
+
+// IsPrivateClient reports whether a connection's remote address is on this
+// machine or a private network: loopback, RFC 1918 and fc00::/7, or
+// link-local.
+func IsPrivateClient(a net.Addr) bool {
+	var ip net.IP
+	switch v := a.(type) {
+	case *net.TCPAddr:
+		ip = v.IP
+	case *net.IPAddr:
+		ip = v.IP
+	case *net.UDPAddr:
+		ip = v.IP
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	addr = addr.Unmap()
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast()
+}

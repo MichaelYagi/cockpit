@@ -57,3 +57,16 @@ func TestLANAddresses(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestIsPrivateClient(t *testing.T) {
+	for ip, want := range map[string]bool{"127.0.0.1": true, "::1": true, "192.168.0.9": true, "10.1.2.3": true, "172.20.0.1": true,
+		"fd12::1": true, "fe80::1": true, "169.254.0.5": true, "::ffff:192.168.0.9": true,
+		"203.0.113.9": false, "8.8.8.8": false, "2001:db8::1": false, "172.32.0.1": false} {
+		if got := IsPrivateClient(&net.TCPAddr{IP: net.ParseIP(ip)}); got != want {
+			t.Errorf("%s: %v", ip, got)
+		}
+	}
+	if IsPrivateClient(&net.UnixAddr{Name: "x"}) {
+		t.Error("unix address counted as private")
+	}
+}

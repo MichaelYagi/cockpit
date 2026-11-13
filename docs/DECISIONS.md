@@ -781,3 +781,35 @@ could issue certificates under that CA. Clients that pin the fingerprint
 are unaffected; the documentation recommends pinning, and `cockpit tls
 init` (root-only CA key in system mode) remains for anyone who wants to
 import the CA.
+
+## D38 — Plain HTTP on the local network, opt-in
+
+**Status:** Proposed (2026-11-13)
+
+**Decision.** This amends D4, D29 and D37. `api.lan.http` (also
+`cockpit agent --lan-http` and `COCKPIT_API_LAN_HTTP`) serves the TCP
+listener over plain HTTP on every interface, as `api.lan` does, with no
+certificate. It implies `api.lan.enabled` and cannot be combined with
+`api.tls`. Safeguards:
+
+- The listener closes connections whose source is not loopback, private
+  (RFC 1918, `fc00::/7`) or link-local, before reading a byte.
+- Every request still needs an API key; the web dashboard, scopes and
+  rate limits are unchanged.
+- The agent logs a warning at startup and its notice says that keys and
+  data are unencrypted.
+- `pkg/client` sends a key over plain HTTP to a non-loopback host only
+  with `WithPlainHTTPOnPrivateNetwork()`, and only to a private IP
+  address, never a name. `cockpit tui --url http://<private IP>` uses it
+  and prints a warning.
+
+`--lan` (HTTPS) stays the default way and the documented recommendation.
+
+**Why.** On a home network the certificate step (browser warning,
+`--cacert` for curl) was the main obstacle to using the API from another
+machine, and the owner chose to accept the risk on networks they trust.
+
+**Risk.** Anyone on the same network can read the key and data and reuse
+the key until it is revoked. The private-address filter does not protect
+against devices on the same LAN.
+

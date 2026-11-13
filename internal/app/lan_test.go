@@ -76,3 +76,18 @@ func TestLANNotice(t *testing.T) {
 		t.Errorf("colonHex %q", got)
 	}
 }
+
+func TestLANNoticePlainHTTP(t *testing.T) {
+	l := &lanInfo{addrs: []netip.Addr{netip.MustParseAddr("192.168.1.5")}, plain: true}
+	var b bytes.Buffer
+	l.write(&b, "[::]:7878", config.ModeUser)
+	out := b.String()
+	for _, want := range []string{"plain HTTP", "unencrypted", "http://192.168.1.5:7878/", "cockpit tui --url http://192.168.1.5:7878"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "https://") || strings.Contains(out, "fingerprint") {
+		t.Errorf("plain notice mentions TLS:\n%s", out)
+	}
+}

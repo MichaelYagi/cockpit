@@ -35,7 +35,9 @@ decision entry before deviating from one.
    mutating operation must be separately authorized and explicitly
    confirmed.
 6. **Secure by default:** TCP access always requires an API key, including
-   from localhost (D4). Remote access additionally requires TLS. Key
+   from localhost (D4). Remote access additionally requires TLS, except
+   the explicit plain-HTTP LAN opt-in (`--lan-http`, private-network
+   clients only, D38). Key
    management is available only on the local Unix socket (D3). A plaintext
    key is shown only once.
 7. **Graceful degradation:** unavailable sensors, permissions, commands or
@@ -213,7 +215,8 @@ Propose changes before changing a public contract.
   Phase 1 keys may hold only read scopes.
 - Rotation and revocation require explicit confirmation in the TUI and CLI.
 - Never enable remote binding without TLS and an explicit configuration
-  change.
+  change. The one exception is `api.lan.http` (D38), which is itself an
+  explicit opt-in and accepts only private-network clients.
 
 ## TUI design direction
 

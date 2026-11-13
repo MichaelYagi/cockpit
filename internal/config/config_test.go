@@ -415,3 +415,23 @@ func TestLANSetting(t *testing.T) {
 		t.Errorf("lan without TCP: %v", err)
 	}
 }
+
+// api.lan.http (D38) implies api.lan, binds every interface, uses no
+// certificate, and conflicts with api.tls.
+func TestLANHTTPSetting(t *testing.T) {
+	res, err := Load(Source{ConfigPath: write(t, "api:\n  lan:\n    http: true\n"), Env: envMap(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := res.Config.API
+	if !a.LAN.Enabled || a.TCP.Address != "0.0.0.0:7878" || a.TLS.Enabled() || res.Paths.TLSAutoDir != "" {
+		t.Errorf("lan http: %+v %+v %q", a.LAN, a.TLS, res.Paths.TLSAutoDir)
+	}
+	if _, err := Load(Source{ConfigPath: write(t, "api:\n  lan:\n    http: true\n  tls:\n    cert_file: /c.pem\n    key_file: /k.pem\n"), Env: envMap(nil)}); err == nil || !strings.Contains(err.Error(), "api.lan.http") {
+		t.Errorf("http with tls: %v", err)
+	}
+	// Without api.lan.http, a plain non-loopback address is still refused.
+	if _, err := Load(Source{ConfigPath: write(t, "api:\n  tcp:\n    address: 0.0.0.0:7878\n"), Env: envMap(nil)}); err == nil {
+		t.Error("non-loopback without TLS accepted")
+	}
+}

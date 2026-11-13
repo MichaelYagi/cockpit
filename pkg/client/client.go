@@ -53,6 +53,7 @@ type options struct {
 	pin       string // normalized SHA-256 fingerprint, or "" (D29)
 	pinErr    error
 	caPEM     []byte
+	plainLAN  bool
 }
 
 // Option customizes a Client.
@@ -75,6 +76,13 @@ func WithPinnedCertificate(fingerprint string) Option {
 // WithCAPEM trusts certificates issued by the PEM-encoded CA (for example
 // the ca.pem from cockpit tls init) in addition to nothing else.
 func WithCAPEM(pemCerts []byte) Option { return func(o *options) { o.caPEM = pemCerts } }
+
+// WithPlainHTTPOnPrivateNetwork allows a plain http URL whose host is a
+// private-network IP address (e.g. 192.168.1.5), for an agent started
+// with --lan-http. The API key then travels unencrypted; anyone on that
+// network can read it. Host names are still refused, since a name could
+// resolve anywhere.
+func WithPlainHTTPOnPrivateNetwork() Option { return func(o *options) { o.plainLAN = true } }
 
 // WithUserAgent sets the User-Agent header.
 func WithUserAgent(ua string) Option { return func(o *options) { o.userAgent = ua } }
@@ -126,14 +134,14 @@ func NewTCP(baseURL, apiKey string, opts ...Option) (*Client, error) {
 	if u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
 		return nil, errors.New("base URL must be scheme://host:port with no path, query or credentials")
 	}
-	if u.Scheme == "http" && !isLoopback(u.Hostname()) {
+	o := build(opts)
+	if u.Scheme == "http" && !isLoopback(u.Hostname()) && !(o.plainLAN && IsPrivateAddress(u.Hostname())) {
 		return nil, fmt.Errorf("refusing to send an API key over plain http to %s; use https", u.Hostname())
 	}
 	if apiKey != "" && (!strings.HasPrefix(apiKey, "ckp_") || strings.ContainsAny(apiKey, " \t\r\n")) {
 		// Never include the key itself in the error.
 		return nil, errors.New("API key is malformed (expected ckp_...)")
 	}
-	o := build(opts)
 	if o.pinErr != nil {
 		return nil, o.pinErr
 	}
@@ -181,6 +189,17 @@ func isLoopback(host string) bool {
 	}
 	a, err := netip.ParseAddr(host)
 	return err == nil && a.IsLoopback()
+}
+
+// IsPrivateAddress reports whether host is an IP address on a private
+// network (RFC 1918, fc00::/7) or link-local. Names are not resolved.
+func IsPrivateAddress(host string) bool {
+	a, err := netip.ParseAddr(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]"))
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	return a.IsPrivate() || a.IsLinkLocalUnicast()
 }
 
 // Close releases idle connections.
