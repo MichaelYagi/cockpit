@@ -29,6 +29,7 @@ type Overrides struct {
 	StateDir      *string
 	RuntimeDir    *string
 	LAN           *bool
+	LANHTTP       *bool
 }
 
 // Source describes where configuration comes from.
@@ -76,6 +77,7 @@ const (
 	envStateDir      = "COCKPIT_STATE_DIR"
 	envRuntimeDir    = "COCKPIT_RUNTIME_DIR"
 	envLAN           = "COCKPIT_API_LAN"
+	envLANHTTP       = "COCKPIT_API_LAN_HTTP"
 )
 
 // Load builds the effective configuration. All validation problems are
@@ -190,6 +192,7 @@ func applyEnv(env func(string) (string, bool), cfg *Config, v *validator) {
 	str(envStateDir, &cfg.Agent.StateDir)
 	str(envRuntimeDir, &cfg.Agent.RuntimeDir)
 	boolean(envLAN, &cfg.API.LAN.Enabled)
+	boolean(envLANHTTP, &cfg.API.LAN.HTTP)
 }
 
 func applyFlags(f Overrides, cfg *Config) {
@@ -212,13 +215,14 @@ func applyFlags(f Overrides, cfg *Config) {
 	set(f.StateDir, &cfg.Agent.StateDir)
 	set(f.RuntimeDir, &cfg.Agent.RuntimeDir)
 	setB(f.LAN, &cfg.API.LAN.Enabled)
+	setB(f.LANHTTP, &cfg.API.LAN.HTTP)
 }
 
 var knownEnv = map[string]bool{
 	EnvMode: true, EnvConfig: true, EnvAPIKey: true, EnvAPIURL: true, EnvTLSPin: true, EnvTLSCA: true,
 	envLogLevel: true, envLogFormat: true, envTCPEnabled: true, envTCPAddress: true,
 	envSocketEnabled: true, envSocketPath: true, envTLSCert: true, envTLSKey: true,
-	envStateDir: true, envRuntimeDir: true, envLAN: true,
+	envStateDir: true, envRuntimeDir: true, envLAN: true, envLANHTTP: true,
 }
 
 // unknownEnv warns about likely typos. It reports names only, never values.
@@ -245,6 +249,9 @@ func Marshal(cfg Config) ([]byte, error) {
 // <state dir>/tls is used. An explicit non-loopback address or explicit
 // files are kept.
 func applyLAN(cfg *Config, paths *Paths) {
+	if cfg.API.LAN.HTTP {
+		cfg.API.LAN.Enabled = true
+	}
 	if !cfg.API.LAN.Enabled || !cfg.API.TCP.Enabled {
 		return
 	}
@@ -253,7 +260,7 @@ func applyLAN(cfg *Config, paths *Paths) {
 			cfg.API.TCP.Address = net.JoinHostPort(LANHost, port)
 		}
 	}
-	if !cfg.API.TLS.Enabled() {
+	if !cfg.API.TLS.Enabled() && !cfg.API.LAN.HTTP {
 		paths.TLSAutoDir = filepath.Join(paths.StateDir, "tls")
 		cfg.API.TLS.CertFile = filepath.Join(paths.TLSAutoDir, "server.pem")
 		cfg.API.TLS.KeyFile = filepath.Join(paths.TLSAutoDir, "server-key.pem")

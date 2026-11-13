@@ -22,18 +22,22 @@ type lanInfo struct {
 	hostname    string
 	addrs       []netip.Addr
 	fingerprint string // colon-separated upper-case hex, as browsers show it
+	plain       bool   // api.lan.http: no TLS (D38)
 }
 
 // prepareLAN makes sure the agent's own certificate covers this machine's
 // current names and addresses (when api.tls names no files), and collects
 // the addresses to show.
 func prepareLAN(cfg config.Config, paths config.Paths, log *slog.Logger, now time.Time) (*lanInfo, error) {
-	info := &lanInfo{addrs: netaddr.LANAddresses()}
+	info := &lanInfo{addrs: netaddr.LANAddresses(), plain: cfg.API.LAN.HTTP}
 	if h, err := os.Hostname(); err == nil {
 		info.hostname = h
 	}
 	if len(info.addrs) == 0 {
 		log.Warn("api.lan is on but no network address was found; check that this machine is connected")
+	}
+	if info.plain {
+		return info, nil
 	}
 	certPath := cfg.API.TLS.CertFile
 	if paths.TLSAutoDir != "" {
@@ -93,20 +97,44 @@ func (l *lanInfo) write(w io.Writer, listen string, mode config.Mode) {
 	if err != nil {
 		port = "7878"
 	}
+	scheme := "https://"
+	if l.plain {
+		scheme = "http://"
+	}
 	var urls []string
 	for _, a := range l.addrs {
-		urls = append(urls, "https://"+net.JoinHostPort(a.String(), port)+"/")
+		urls = append(urls, scheme+net.JoinHostPort(a.String(), port)+"/")
 	}
 	if l.hostname != "" {
-		urls = append(urls, "https://"+net.JoinHostPort(l.hostname, port)+"/   (if this name works on your network)")
+		urls = append(urls, scheme+net.JoinHostPort(l.hostname, port)+"/   (if this name works on your network)")
 	}
-	first := "https://HOST:" + port
+	first := scheme + "HOST:" + port
 	if len(l.addrs) > 0 {
-		first = "https://" + net.JoinHostPort(l.addrs[0].String(), port)
+		first = scheme + net.JoinHostPort(l.addrs[0].String(), port)
 	}
 	keys := "cockpit keys create --name laptop --scope all"
 	if mode == config.ModeSystem {
 		keys = "cockpit keys create --mode system --name laptop --scope all"
+	}
+	if l.plain {
+		fmt.Fprintf(w, `
+LAN access is on over plain HTTP. API keys and data travel unencrypted:
+anyone on this network can read them. Only private-network addresses may
+connect. From another computer on this network, open:
+  %s
+
+Sign in with an API key. Create one on this machine (shown once):
+  %s
+
+Or call the API:
+  curl -H "Authorization: Bearer $COCKPIT_API_KEY" %s/api/v1/health
+
+Or use the TUI from another computer:
+  export COCKPIT_API_KEY=<the key>
+  cockpit tui --url %s
+
+`, strings.Join(urls, "\n  "), keys, first, first)
+		return
 	}
 	fmt.Fprintf(w, `
 LAN access is on. From another computer on this network, open:

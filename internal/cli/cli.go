@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -131,7 +132,7 @@ type configFlags struct {
 	tcpAddress, socketPath    string
 	stateDir, runtimeDir      string
 	tcpEnabled, socketEnabled bool
-	lan                       bool
+	lan, lanHTTP              bool
 }
 
 func newConfigFlags(name string, env Env) *configFlags {
@@ -148,6 +149,7 @@ func newConfigFlags(name string, env Env) *configFlags {
 	f.fs.StringVar(&f.stateDir, "state-dir", "", "state directory")
 	f.fs.StringVar(&f.runtimeDir, "runtime-dir", "", "runtime directory (socket location)")
 	f.fs.BoolVar(&f.lan, "lan", false, "open the API and web dashboard to the local network over HTTPS (env COCKPIT_API_LAN)")
+	f.fs.BoolVar(&f.lanHTTP, "lan-http", false, "like --lan, but plain HTTP: keys and data travel unencrypted; private-network clients only (env COCKPIT_API_LAN_HTTP)")
 	return f
 }
 
@@ -184,6 +186,7 @@ func (f *configFlags) source(env Env) config.Source {
 			StateDir:      str("state-dir", f.stateDir),
 			RuntimeDir:    str("runtime-dir", f.runtimeDir),
 			LAN:           boolean("lan", f.lan),
+			LANHTTP:       boolean("lan-http", f.lanHTTP),
 		},
 	}
 }
@@ -386,6 +389,11 @@ func connect(env Env, mode, cfgPath, socket string, r *remoteFlags) (*client.Cli
 			return nil, "", fmt.Errorf("TCP access needs an API key in %s", config.EnvAPIKey)
 		}
 		var opts []client.Option
+		if u, err := url.Parse(apiURL); err == nil && u.Scheme == "http" && client.IsPrivateAddress(u.Hostname()) {
+			// An agent started with --lan-http (D38).
+			fmt.Fprintf(env.Stderr, "warning: plain http to %s; the API key and data travel unencrypted on this network\n", u.Hostname())
+			opts = append(opts, client.WithPlainHTTPOnPrivateNetwork())
+		}
 		if pin != "" {
 			opts = append(opts, client.WithPinnedCertificate(pin))
 		}

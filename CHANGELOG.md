@@ -33,6 +33,13 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Plain HTTP on the LAN, opt-in (D38).** `cockpit agent --lan-http`
+  (or `api.lan.http: true`) serves `http://` on the network with no
+  certificate, accepts only private-network clients and still requires an
+  API key. Keys and data travel unencrypted; `--lan` (HTTPS) remains the
+  recommended way. `pkg/client` adds `WithPlainHTTPOnPrivateNetwork()`
+  and `IsPrivateAddress()`; `cockpit tui --url http://<private IP>` uses
+  them with a warning.
 - **One-step LAN access (D37).** `cockpit agent --lan` (or
   `api.lan.enabled: true`) listens on the network, creates and renews
   its own HTTPS certificate for this machine's addresses, and prints the

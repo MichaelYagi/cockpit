@@ -164,7 +164,10 @@ func validateTCP(v *validator, api API) {
 		v.add("api.tcp.address", "host must be an IP address or \"localhost\" (got %q)", host)
 		return
 	}
-	if !loopback && (api.TLS.CertFile == "" || api.TLS.KeyFile == "") {
+	if api.LAN.HTTP && api.TLS.Enabled() {
+		v.add("api.lan.http", "plain HTTP and api.tls cannot both be set; remove one")
+	}
+	if !loopback && !api.LAN.HTTP && (api.TLS.CertFile == "" || api.TLS.KeyFile == "") {
 		v.add("api.tcp.address", "%q is not a loopback address; remote access requires api.tls.cert_file and api.tls.key_file", api.TCP.Address)
 	}
 }

@@ -350,6 +350,7 @@ service, `/etc/cockpit-monitor/config.yaml`, then
 api:
   lan:
     enabled: true
+    # http: true   # plain HTTP instead of HTTPS (D38), see below
 ```
 
 `COCKPIT_API_LAN=true` works too. The certificate is kept in
@@ -359,6 +360,28 @@ expiring, the next start issues a new one from the same CA, and pinned
 clients need the new fingerprint. If another computer cannot connect,
 check this machine's firewall allows TCP port 7878. On WSL, Windows must
 also let the connection through; see Microsoft's WSL networking guide.
+
+### Plain HTTP on a trusted LAN: `--lan-http`
+
+If you trust everyone on your network and do not want the certificate
+step, start the agent with `--lan-http` instead (or set
+`api.lan.http: true`, or `COCKPIT_API_LAN_HTTP=true`). It serves plain
+`http://` on every interface, needs no certificate, and prints the
+addresses:
+
+```sh
+cockpit agent --lan-http
+curl -H "Authorization: Bearer $COCKPIT_API_KEY" http://192.168.0.185:7878/api/v1/health
+cockpit tui --url http://192.168.0.185:7878   # prints a warning
+```
+
+The API key and all data travel **unencrypted**: anyone on the same
+network can read them and use the key. The agent only accepts
+connections from private-network addresses (`192.168.x.x`, `10.x.x.x`,
+`172.16–31.x.x`, `fc00::/7`, link-local) and still requires a key on every
+request. The Go client and `cockpit tui` accept a plain `http://` URL only
+for a private IP address, not a host name. It cannot be combined with
+`api.tls`.
 
 ### Your own certificate
 
@@ -399,9 +422,10 @@ api:
     key_file: /etc/cockpit-monitor/tls/server-key.pem   # must be chmod 600
 ```
 
-Without both files, the agent refuses to start on a non-loopback
-address. Clients refuse to send a key over plain HTTP to a non-loopback
-host.
+Without both files (or `api.lan.http`), the agent refuses to start on a
+non-loopback address. Clients refuse to send a key over plain HTTP to a
+non-loopback host, except to a private-network address of an agent
+started with `--lan-http`.
 
 ## Watching several machines
 

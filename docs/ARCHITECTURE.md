@@ -224,6 +224,7 @@ api:
     enabled: true              # web dashboard at /ui/ on the TCP listener (D35)
   lan:
     enabled: false             # one-step LAN access over HTTPS (D37); --lan, COCKPIT_API_LAN
+    http: false                # plain HTTP instead, private-network clients only (D38); --lan-http
 collection:
   defaults: { interval: 2s, timeout: 1s }   # samplers; inventory collectors keep their own
   collectors:                  # per-collector overrides, e.g.

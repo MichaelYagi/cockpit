@@ -303,3 +303,21 @@ func TestStreamEventsHTTPError(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+// Plain http to a private address needs the explicit option (D38); names
+// are refused even then.
+func TestPlainHTTPOnPrivateNetwork(t *testing.T) {
+	for _, u := range []string{"http://192.168.1.5:7878", "http://10.0.0.2:7878", "http://[fd00::1]:7878"} {
+		if _, err := NewTCP(u, testKey); err == nil {
+			t.Errorf("%s accepted without the option", u)
+		}
+		if _, err := NewTCP(u, testKey, WithPlainHTTPOnPrivateNetwork()); err != nil {
+			t.Errorf("%s rejected with the option: %v", u, err)
+		}
+	}
+	for _, u := range []string{"http://agent.example:7878", "http://203.0.113.9:7878", "http://8.8.8.8:7878"} {
+		if _, err := NewTCP(u, testKey, WithPlainHTTPOnPrivateNetwork()); err == nil {
+			t.Errorf("%s accepted", u)
+		}
+	}
+}

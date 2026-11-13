@@ -276,3 +276,66 @@ func TestTLSListener(t *testing.T) {
 		t.Errorf("TLS request: %q", got)
 	}
 }
+
+// --lan-http (D38): plain HTTP on every interface is allowed only when
+// asked for, and still answers loopback clients.
+func TestPlainLANListener(t *testing.T) {
+	s := New(Config{TCP: TCPConfig{Enabled: true, Address: "0.0.0.0:0", PlainLAN: true}}, nil, echoPeer, quiet)
+	ep, err := s.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shutdown(t, s)
+	_, port, _ := net.SplitHostPort(ep.TCPAddress)
+	resp, err := http.Get("http://127.0.0.1:" + port + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	http.DefaultClient.CloseIdleConnections()
+	if ep.TCPTLS {
+		t.Error("plain LAN listener reports TLS")
+	}
+}
+
+type fakeConn struct {
+	net.Conn
+	remote net.Addr
+	closed bool
+}
+
+func (c *fakeConn) RemoteAddr() net.Addr { return c.remote }
+func (c *fakeConn) Close() error         { c.closed = true; return nil }
+
+type fakeListener struct {
+	net.Listener
+	conns []*fakeConn
+}
+
+func (l *fakeListener) Accept() (net.Conn, error) {
+	if len(l.conns) == 0 {
+		return nil, net.ErrClosed
+	}
+	c := l.conns[0]
+	l.conns = l.conns[1:]
+	return c, nil
+}
+
+// Connections from outside private networks are closed unanswered.
+func TestPrivateOnlyListener(t *testing.T) {
+	tcp := func(ip string) net.Addr { return &net.TCPAddr{IP: net.ParseIP(ip), Port: 5000} }
+	public := &fakeConn{remote: tcp("203.0.113.9")}
+	public6 := &fakeConn{remote: tcp("2001:db8::1")}
+	lan := &fakeConn{remote: tcp("192.168.0.20")}
+	l := &privateOnly{Listener: &fakeListener{conns: []*fakeConn{public, public6, lan}}, logger: quiet}
+	c, err := l.Accept()
+	if err != nil || c != lan {
+		t.Fatalf("got %v %v", c, err)
+	}
+	if !public.closed || !public6.closed || lan.closed {
+		t.Errorf("closed: public %v public6 %v lan %v", public.closed, public6.closed, lan.closed)
+	}
+	if _, err := l.Accept(); err == nil {
+		t.Error("listener error not passed on")
+	}
+}
