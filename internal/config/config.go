@@ -156,7 +156,7 @@ type EndpointTarget struct {
 	// user name or password.
 	URL string `yaml:"url"`
 	// ExpectStatus lists HTTP status codes that count as up; empty means
-	// 200-399.
+	// 200-399, 401 and 403 (a login prompt means the service is running).
 	ExpectStatus []int `yaml:"expect_status,omitempty"`
 	// TLSSkipVerify accepts any certificate (self-signed home servers).
 	TLSSkipVerify bool `yaml:"tls_skip_verify,omitempty"`

@@ -145,7 +145,7 @@ type EndpointTarget struct {
 	// URL is http://, https:// or tcp://host:port.
 	URL string
 	// ExpectStatus lists the HTTP status codes that count as up; empty
-	// means 200-399.
+	// means 200-399, 401 and 403.
 	ExpectStatus []int
 	// SkipTLSVerify accepts any certificate (self-signed home servers).
 	SkipTLSVerify bool

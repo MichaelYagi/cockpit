@@ -48,6 +48,14 @@ func TestEndpointChecks(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
+		if r.URL.Path == "/login" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/forbidden" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 		if r.URL.Path == "/moved" {
 			http.Redirect(w, r, "/elsewhere", http.StatusFound)
 			return
@@ -77,13 +85,16 @@ func TestEndpointChecks(t *testing.T) {
 		{Name: "broken", URL: ok.URL + "/broken"},
 		{Name: "accept 503", URL: ok.URL + "/broken", ExpectStatus: []int{503}},
 		{Name: "redirect", URL: ok.URL + "/moved"},
+		{Name: "login", URL: ok.URL + "/login"},
+		{Name: "forbidden", URL: ok.URL + "/forbidden"},
+		{Name: "login strict", URL: ok.URL + "/login", ExpectStatus: []int{200}},
 		{Name: "self-signed", URL: self.URL},
 		{Name: "self-signed ok", URL: self.URL, SkipTLSVerify: true},
 		{Name: "tcp", URL: "tcp://" + ln.Addr().String()},
 	}}})
 	defer c.Close(context.Background())
 	got := collect(t, c, nil)
-	for name, want := range map[string]bool{"web": true, "broken": false, "accept 503": true, "redirect": true, "self-signed": false, "self-signed ok": true, "tcp": true} {
+	for name, want := range map[string]bool{"web": true, "broken": false, "accept 503": true, "redirect": true, "login": true, "forbidden": true, "login strict": false, "self-signed": false, "self-signed ok": true, "tcp": true} {
 		if got[name].Up != want {
 			t.Errorf("%s: up %v, want %v (%+v)", name, got[name].Up, want, got[name])
 		}
@@ -259,5 +270,16 @@ func TestEndpointTargetsChange(t *testing.T) {
 	// With a Source, an empty list is temporary: checks may be added.
 	if p := c.Probe(context.Background()); p[core.CapNetworkEndpoints].Availability != core.TemporarilyUnavailable {
 		t.Errorf("probe %+v", p)
+	}
+}
+
+func TestExpectedStatus(t *testing.T) {
+	for code, want := range map[int]bool{200: true, 204: true, 302: true, 399: true, 401: true, 403: true, 404: false, 500: false, 503: false, 199: false} {
+		if got := expected(code, nil); got != want {
+			t.Errorf("default %d: %v", code, got)
+		}
+	}
+	if expected(401, []int{200}) || !expected(503, []int{503}) {
+		t.Error("expect_status must replace the default")
 	}
 }

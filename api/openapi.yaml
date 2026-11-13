@@ -1657,7 +1657,7 @@ components:
       properties:
         name: { type: string }
         url: { type: string, description: "http(s):// URL or tcp://host:port." }
-        expect_status: { type: array, items: { type: integer }, description: HTTP codes that count as up; empty means 200-399. }
+        expect_status: { type: array, items: { type: integer }, description: "HTTP codes that count as up; empty means 200-399, 401 and 403 (a login prompt means the service is running)." }
         tls_skip_verify: { type: boolean }
         source: { type: string, enum: [configuration, runtime], description: configuration entries are read-only here. }
         added_at: { type: [string, "null"], format: date-time }

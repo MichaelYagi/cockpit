@@ -1048,7 +1048,7 @@ func (m *Model) modalView(w int) string {
 			lines = append(lines, m.st.muted.Render("  "+ex))
 		}
 		lines = append(lines, "", m.st.accent.Render("› ")+truncateLeft(m.input, inner-3)+m.st.accent.Render("█"), "")
-		lines = append(lines, wrapText("Web addresses must answer with a 2xx or 3xx status; tcp:// only needs the port to accept a connection. Don't include passwords.", inner)...)
+		lines = append(lines, wrapText("A web address is up when it answers with 2xx, 3xx, or a login prompt (401, 403); tcp:// only needs the port to accept a connection. Don't include passwords.", inner)...)
 		lines = append(lines, "", m.st.muted.Render("enter add · esc cancel"))
 	case modalEndpointTLS:
 		title = "New service check · certificate"

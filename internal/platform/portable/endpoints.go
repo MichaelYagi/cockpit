@@ -323,9 +323,12 @@ func (c *Endpoints) result(t collector.EndpointTarget, up bool, msg string) core
 	return core.EndpointResult{Name: t.Name, Kind: kind, Target: t.URL, Up: up, Error: msg, CheckedAt: c.now().UTC()}
 }
 
+// expected reports whether an HTTP status counts as up. By default any
+// 2xx or 3xx does, and so do 401 and 403: a service asking for a login
+// is running, and checks never send credentials.
 func expected(code int, want []int) bool {
 	if len(want) == 0 {
-		return code >= 200 && code < 400
+		return code >= 200 && code < 400 || code == http.StatusUnauthorized || code == http.StatusForbidden
 	}
 	for _, w := range want {
 		if w == code {
