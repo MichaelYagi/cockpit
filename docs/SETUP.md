@@ -518,6 +518,44 @@ The Overview shows each UPS. The `ups` health check warns when a UPS runs
 on battery and reports critical at low battery. Batteries and power adapters
 (laptops) and ZFS pools need no setup.
 
+## Checking your services
+
+Cockpit can check that your services answer: web apps, APIs, or
+anything listening on a TCP port (D40). List them in the configuration
+file:
+
+```yaml
+collection:
+  endpoints:
+    interval: 30s               # default; 10s to 1h
+    timeout: 5s                 # default; at most half the interval
+    targets:
+      - name: Home Assistant
+        url: http://192.168.0.50:8123/
+      - name: Proxmox
+        url: https://192.168.0.20:8006/
+        tls_skip_verify: true     # self-signed certificate
+      - name: Jellyfin
+        url: http://192.168.0.30:8096/health
+        expect_status: [200]      # default: any 2xx or 3xx
+      - name: NAS SSH
+        url: tcp://192.168.0.10:22    # just the port must accept connections
+```
+
+Restart the agent. The Network screen (TUI key `6`, and the web
+dashboard's Network page) shows each service as up, failing (one failed
+check) or down (two in a row), with its response time and the reason it
+failed. The `endpoints` health check turns critical when a service is
+down and warns when an HTTPS certificate expires within 14 days, so
+notifications cover your services too.
+
+Each service is checked in its own background loop, so one that hangs
+only waits out its own timeout and never delays the others or the rest
+of Cockpit. Results show what *this* machine can reach. Don't put passwords or
+tokens in these URLs: the configuration file is not secret. API keys
+need the `network:read` scope to see the URLs; without it they see names
+and states only.
+
 ## Notifications
 
 Cockpit can send its health findings to your phone or chat: when a

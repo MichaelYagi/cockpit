@@ -1574,6 +1574,42 @@ components:
             - type: array
               items: { $ref: "#/components/schemas/Route" }
             - type: "null"
+    EndpointsSection:
+      type: object
+      additionalProperties: false
+      description: Data with its availability (see docs/API.md §5). not_configured when no endpoints are listed.
+      required: [status, collected_at, stale, source, data]
+      properties:
+        status: { $ref: "#/components/schemas/Availability" }
+        collected_at: { type: [string, "null"], format: date-time }
+        stale: { type: boolean }
+        source: { type: string }
+        reason: { type: string }
+        data:
+          anyOf:
+            - type: array
+              maxItems: 64
+              items: { $ref: "#/components/schemas/Endpoint" }
+            - type: "null"
+    Endpoint:
+      type: object
+      additionalProperties: false
+      description: >-
+        The latest check of one configured service (D40). target needs the network:read scope;
+        without it the field is left out and listed in redacted.
+      required: [name, kind, up, consecutive_failures, status_code, response_ms, checked_at, cert_expires_at]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [http, tcp] }
+        target: { type: string, description: "The URL, or tcp://host:port." }
+        up: { type: boolean, description: Outcome of the latest check. }
+        consecutive_failures: { type: integer, minimum: 0, description: "Failed checks in a row; the health check reports the endpoint down from 2." }
+        status_code: { type: [integer, "null"], description: HTTP status of the latest check; null for TCP or when no response arrived. }
+        response_ms: { type: [number, "null"], description: Time to the response headers (HTTP) or to the connection (TCP). }
+        error: { type: string, description: Why the latest check failed. }
+        checked_at: { $ref: "#/components/schemas/Timestamp" }
+        cert_expires_at: { type: [string, "null"], format: date-time, description: Expiry of the server certificate (HTTPS). }
+        redacted: { $ref: "#/components/schemas/Redacted" }
     DNSSection:
       type: object
       additionalProperties: false
@@ -1704,8 +1740,8 @@ components:
     NetworkResponse:
       type: object
       additionalProperties: false
-      description: GET /network. Routes and DNS are read passively; nothing is probed.
-      required: [schema_version, machine_id, generated_at, interfaces, routes, dns]
+      description: GET /network. Routes and DNS are read passively. Endpoints are the services listed in collection.endpoints, checked by the agent (D40).
+      required: [schema_version, machine_id, generated_at, interfaces, routes, dns, endpoints]
       properties:
         schema_version: { $ref: "#/components/schemas/SchemaVersion" }
         machine_id: { $ref: "#/components/schemas/MachineID" }
@@ -1713,6 +1749,7 @@ components:
         interfaces: { $ref: "#/components/schemas/NetworkInterfacesSection" }
         routes: { $ref: "#/components/schemas/RoutesSection" }
         dns: { $ref: "#/components/schemas/DNSSection" }
+        endpoints: { $ref: "#/components/schemas/EndpointsSection" }
     SensorsResponse:
       type: object
       additionalProperties: false
@@ -1743,7 +1780,7 @@ components:
       additionalProperties: false
       required: [id, name, status, availability, findings]
       properties:
-        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health, services, network_errors, zfs_pools, ups] }
+        id: { type: string, enum: [cpu_temperature, memory, storage_capacity, disk_health, services, network_errors, zfs_pools, ups, endpoints] }
         name: { type: string }
         status: { $ref: "#/components/schemas/HealthStatus" }
         availability:

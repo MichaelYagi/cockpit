@@ -52,8 +52,9 @@ func healthy() *core.Snapshot {
 			{NetInterface: core.NetInterface{Name: "eth0", RxErrors: 5}},
 			{NetInterface: core.NetInterface{Name: "lo", Loopback: true, RxErrors: 999}},
 		}},
-		ZFS: core.Section[core.ZFSInfo]{Meta: ok(t0), Data: &core.ZFSInfo{Pools: []core.ZFSPool{{Name: "tank", State: "ONLINE"}}}},
-		UPS: core.Section[core.UPSList]{Meta: ok(t0), Data: &core.UPSList{{Name: "rack", Status: []string{"OL"}}}},
+		ZFS:       core.Section[core.ZFSInfo]{Meta: ok(t0), Data: &core.ZFSInfo{Pools: []core.ZFSPool{{Name: "tank", State: "ONLINE"}}}},
+		UPS:       core.Section[core.UPSList]{Meta: ok(t0), Data: &core.UPSList{{Name: "rack", Status: []string{"OL"}}}},
+		Endpoints: core.Section[core.EndpointList]{Meta: ok(t0), Data: &core.EndpointList{{Name: "web", Kind: "http", Up: true, StatusCode: ptr(200)}}},
 	}
 }
 
@@ -89,7 +90,7 @@ func check(t *testing.T, r *Report, id string) CheckResult {
 func TestAllHealthy(t *testing.T) {
 	e, _, evs := newEval(t, healthy(), 1)
 	r := e.Evaluate()
-	if r.Status != StatusOK || len(r.Checks) != 8 {
+	if r.Status != StatusOK || len(r.Checks) != 9 {
 		t.Fatalf("report %+v", r)
 	}
 	for _, c := range r.Checks {
@@ -437,6 +438,44 @@ func TestUPSCheck(t *testing.T) {
 	}
 	s.UPS = core.Section[core.UPSList]{Meta: core.SectionMeta{Status: core.NotConfigured, Reason: "UPS monitoring is off."}}
 	if c := check(t, e.Evaluate(), CheckUPS); c.Status != StatusUnknown || c.Availability != core.NotConfigured {
+		t.Errorf("off: %+v", c)
+	}
+}
+
+func TestEndpointsCheck(t *testing.T) {
+	s := healthy()
+	soon, old := t0.Add(5*24*time.Hour), t0.Add(-time.Hour)
+	later := t0.Add(90 * 24 * time.Hour)
+	*s.Endpoints.Data = core.EndpointList{
+		{Name: "blip", Kind: "http", Up: false, ConsecutiveFailures: 1, Error: "no answer before the timeout"},
+		{Name: "nas", Kind: "tcp", Up: false, ConsecutiveFailures: 2, Error: "the connection was refused (nothing listening on that port)"},
+		{Name: "cert soon", Kind: "http", Up: true, StatusCode: ptr(200), CertExpiresAt: &soon},
+		{Name: "cert expired", Kind: "http", Up: true, StatusCode: ptr(200), CertExpiresAt: &old},
+		{Name: "fine", Kind: "http", Up: true, StatusCode: ptr(200), CertExpiresAt: &later},
+	}
+	e, _, evs := newEval(t, s, 1)
+	c := check(t, e.Evaluate(), CheckEndpoints)
+	got := map[string]core.Severity{}
+	for _, f := range c.Findings {
+		got[f.Subject] = f.Severity
+	}
+	want := map[string]core.Severity{"endpoint:nas": core.SeverityCritical, "endpoint:cert soon": core.SeverityWarning, "endpoint:cert expired": core.SeverityCritical}
+	if c.Status != StatusCritical || len(got) != len(want) {
+		t.Fatalf("%+v", c)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: %s, want %s", k, got[k], v)
+		}
+	}
+	if c.Findings[0].Summary != "cert expired's TLS certificate has expired" && c.Findings[1].Summary != "nas is down: the connection was refused (nothing listening on that port)" {
+		t.Errorf("summaries %+v", c.Findings)
+	}
+	if len(*evs) != 3 {
+		t.Errorf("events %+v", *evs)
+	}
+	s.Endpoints = core.Section[core.EndpointList]{Meta: core.SectionMeta{Status: core.NotConfigured, Reason: "No endpoints are configured."}}
+	if c := check(t, e.Evaluate(), CheckEndpoints); c.Status != StatusUnknown || c.Availability != core.NotConfigured {
 		t.Errorf("off: %+v", c)
 	}
 }

@@ -124,6 +124,28 @@ type Env struct {
 	// UPSAddress is the Network UPS Tools server (host:port); empty when
 	// UPS monitoring is off (D25).
 	UPSAddress string
+	// Endpoints are the services to check (D40); empty when none are
+	// configured.
+	Endpoints EndpointSettings
+}
+
+// EndpointSettings configure the endpoint checker (D40).
+type EndpointSettings struct {
+	Interval time.Duration
+	Timeout  time.Duration // per check
+	Targets  []EndpointTarget
+}
+
+// EndpointTarget is one service to check.
+type EndpointTarget struct {
+	Name string
+	// URL is http://, https:// or tcp://host:port.
+	URL string
+	// ExpectStatus lists the HTTP status codes that count as up; empty
+	// means 200-399.
+	ExpectStatus []int
+	// SkipTLSVerify accepts any certificate (self-signed home servers).
+	SkipTLSVerify bool
 }
 
 // FilesystemFilter adjusts the filesystem collector's built-in skip list.

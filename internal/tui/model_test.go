@@ -52,6 +52,7 @@ type fakeAPI struct {
 	procQueries []client.ProcessesQuery
 	custom      *[]apiv1.CustomMetricsSet
 	containers  *apiv1.ContainersResponse
+	noEndpoints bool
 	zfs         *apiv1.ZFS
 	power       *[]apiv1.PowerSupply
 	ups         *[]apiv1.UPS
@@ -238,7 +239,21 @@ func (f *fakeAPI) Network(context.Context) (*apiv1.NetworkResponse, error) {
 		Interfaces: avail([]apiv1.NetworkInterface{{Name: "eth0", Addresses: []string{"192.168.1.10/24"}}}),
 		Routes:     avail([]apiv1.Route{{Family: "ipv4", Destination: "0.0.0.0/0", Gateway: "192.168.1.1", Interface: "eth0", Metric: 100, Default: true}}),
 		DNS:        avail(apiv1.DNS{Nameservers: []string{"1.1.1.1"}, Search: []string{}, Resolver: "systemd-resolved"}),
+		Endpoints:  f.endpoints(),
 	}, nil
+}
+
+func (f *fakeAPI) endpoints() apiv1.Section[[]apiv1.Endpoint] {
+	if f.noEndpoints {
+		return apiv1.Section[[]apiv1.Endpoint]{Status: apiv1.NotConfigured, Reason: "No endpoints are configured."}
+	}
+	ms, code, soon := 12.0, 200, t0.Add(3*24*time.Hour)
+	return avail([]apiv1.Endpoint{
+		{Name: "Home Assistant", Kind: "http", Target: "http://192.168.1.50:8123/", Up: true, StatusCode: &code, ResponseMillis: &ms},
+		{Name: "NAS SSH", Kind: "tcp", Target: "tcp://192.168.1.10:22", ConsecutiveFailures: 3, Error: "the connection was refused\x1b[31m"},
+		{Name: "Blip", Kind: "tcp", ConsecutiveFailures: 1, Error: "no answer before the timeout"},
+		{Name: "Wiki", Kind: "http", Up: true, StatusCode: &code, ResponseMillis: &ms, CertExpiresAt: &soon},
+	})
 }
 
 func (f *fakeAPI) StreamEvents(ctx context.Context, _ string, fn func(client.StreamMessage) error) error {
@@ -1258,5 +1273,28 @@ func TestNetworkWithoutNetworkScope(t *testing.T) {
 	}
 	if out := strings.Join(m.netConfigLines(80), "\n"); !strings.Contains(out, "network:read scope") || strings.Contains(out, "routes:") {
 		t.Errorf("%s", out)
+	}
+}
+
+// Configured service checks show on the Network screen (D40).
+func TestNetworkEndpoints(t *testing.T) {
+	m := setup(t, &fakeAPI{}, 140, 50)
+	press(t, m, key(scrNetwork))
+	drive(t, m, m.refresh(true))
+	out := screenText(m)
+	for _, want := range []string{"Endpoints", "Home Assistant", "● up", "200 12 ms", "http://192.168.1.50:8123/",
+		"NAS SSH", "✖ down", "connection was refused", "Blip", "▲ failing", "Wiki", "▲ cert", "certificate expires 2026-11-"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\x1b[31m") {
+		t.Error("control characters from the API reached the screen")
+	}
+	m = setup(t, &fakeAPI{noEndpoints: true}, 140, 50)
+	press(t, m, key(scrNetwork))
+	drive(t, m, m.refresh(true))
+	if out := screenText(m); !strings.Contains(out, "No services checked") {
+		t.Errorf("hint missing:\n%s", out)
 	}
 }

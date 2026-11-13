@@ -142,6 +142,10 @@ func testSnapshot() *core.Snapshot {
 		Power: core.Section[core.PowerSupplies]{Meta: meta(), Data: &core.PowerSupplies{{Name: "BAT0", Type: "battery", Status: "discharging", CapacityPercent: ptr(80.0), HoursRemaining: ptr(4.0)},
 			{Name: "AC", Type: "mains", Online: ptr(false)}}},
 		UPS: core.Section[core.UPSList]{Meta: core.SectionMeta{Status: core.NotConfigured, Source: "Network UPS Tools", Reason: "UPS monitoring is off."}},
+		Endpoints: core.Section[core.EndpointList]{Meta: meta(), Data: &core.EndpointList{
+			{Name: "Home Assistant", Kind: "http", Target: "http://ha.internal.example:8123/", Up: true, StatusCode: ptr(200), ResponseMillis: ptr(12.5), CheckedAt: t0},
+			{Name: "NAS SSH", Kind: "tcp", Target: "tcp://192.0.2.20:22", Up: false, ConsecutiveFailures: 1, Error: "no answer before the timeout", CheckedAt: t0},
+		}},
 		Custom: []core.CustomSet{
 			{Collector: "custom.demo", Meta: meta(), Dropped: 1, Problem: "metric \"x\" has an unknown unit", Metrics: []core.CustomMetric{
 				{Name: "custom.demo.open", Kind: core.Gauge, Unit: "count", Value: 42},
@@ -836,6 +840,10 @@ func TestNetworkScope(t *testing.T) {
 		return out
 	}
 	without := get(metricsKey, "/api/v1/network")
+	if eps := *without.Endpoints.Data; len(eps) != 2 || eps[0].Target != "" || !slices.Contains(eps[0].Redacted, "target") ||
+		!eps[0].Up || eps[1].ConsecutiveFailures != 1 || strings.Contains(string(do(t, tcp, "GET", "/api/v1/network", bearer(metricsKey)).body), "ha.internal") {
+		t.Errorf("endpoints without network:read: %+v", eps)
+	}
 	eth0 := (*without.Interfaces.Data)[0]
 	if len(eth0.Addresses) != 0 || !slices.Contains(eth0.Redacted, "addresses") || eth0.RxBytes != 10 {
 		t.Errorf("metrics-only interface %+v", eth0)
@@ -847,6 +855,9 @@ func TestNetworkScope(t *testing.T) {
 	with := get(networkKey, "/api/v1/network")
 	if a := (*with.Interfaces.Data)[0].Addresses; len(a) != 1 || a[0] != "192.0.2.10/24" || with.Routes.Data == nil || with.DNS.Data == nil {
 		t.Errorf("network key: %+v", with)
+	}
+	if eps := *with.Endpoints.Data; eps[0].Target != "http://ha.internal.example:8123/" || len(eps[0].Redacted) != 0 {
+		t.Errorf("endpoints with network:read: %+v", eps)
 	}
 	r := do(t, tcp, "GET", "/api/v1/metrics?sections=network", bearer(metricsKey))
 	if strings.Contains(string(r.body), "192.0.2.10") {

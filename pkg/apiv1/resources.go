@@ -415,6 +415,25 @@ type NetworkResponse struct {
 	Interfaces Section[[]NetworkInterface] `json:"interfaces"`
 	Routes     Section[[]Route]            `json:"routes"`
 	DNS        Section[DNS]                `json:"dns"`
+	// Endpoints are configured service checks (D40).
+	Endpoints Section[[]Endpoint] `json:"endpoints"`
+}
+
+// Endpoint is the latest check of one configured service (D40). Target
+// (the URL or host:port) needs the network:read scope; without it the
+// field is empty and listed in Redacted.
+type Endpoint struct {
+	Name                string     `json:"name"`
+	Kind                string     `json:"kind"` // http | tcp
+	Target              string     `json:"target,omitempty"`
+	Up                  bool       `json:"up"`
+	ConsecutiveFailures int        `json:"consecutive_failures"`
+	StatusCode          *int       `json:"status_code"`
+	ResponseMillis      *float64   `json:"response_ms"`
+	Error               string     `json:"error,omitempty"`
+	CheckedAt           time.Time  `json:"checked_at"`
+	CertExpiresAt       *time.Time `json:"cert_expires_at"`
+	Redacted            []string   `json:"redacted,omitempty"`
 }
 
 // Route is one routing table entry.

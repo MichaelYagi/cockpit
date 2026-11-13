@@ -35,6 +35,10 @@ func sampleReport() *apiv1.Report {
 				{Family: "ipv6", Destination: "ff00::/8", Interface: "eth0"},
 			}},
 			DNS: apiv1.Section[apiv1.DNS]{Status: st, CollectedAt: at, Data: &apiv1.DNS{Nameservers: []string{"192.168.1.1"}, Search: []string{"corp.example"}}},
+			Endpoints: apiv1.Section[[]apiv1.Endpoint]{Status: st, CollectedAt: at, Data: &[]apiv1.Endpoint{
+				{Name: "wiki", Kind: "http", Target: "https://wiki.intranet.example/health", Up: true, StatusCode: ptrInt(200), ResponseMillis: ptrFloat(41)},
+				{Name: "nas", Kind: "tcp", Target: "tcp://nas.intranet.example:22", ConsecutiveFailures: 4, Error: "no answer before the timeout"},
+			}},
 		},
 		Events: &apiv1.EventsResponse{Meta: meta, Items: []apiv1.Event{{ID: "01J", Time: t0, Type: "finding.raised", Severity: "warning",
 			Subject: "host:web01",
@@ -56,7 +60,7 @@ func TestAnonymize(t *testing.T) {
 	raw, _ := json.Marshal(out)
 	js := string(raw)
 	for _, secret := range []string{"web01", "Web01", "corp.example", "192.168.1.20\"", "192.168.1.20/", "192.168.1.20 ", "192.168.1.1\"",
-		"1234:5678", "00:11:22", "00-11-22", "alice", "3f0c6c1e"} {
+		"1234:5678", "00:11:22", "00-11-22", "alice", "3f0c6c1e", "intranet"} {
 		if strings.Contains(js, secret) {
 			t.Errorf("anonymized report still contains %q", secret)
 		}
@@ -98,6 +102,12 @@ func TestAnonymize(t *testing.T) {
 	want := "host-1 at 192.0.2.2 (not 192.168.1.200) saw 02:00:00:00:00:01 and 02:00:00:00:00:01 under /home/user-1/data; user-1 was told. Host host-1."
 	if msg != want {
 		t.Errorf("message\n got %s\nwant %s", msg, want)
+	}
+	if eps := *out.Network.Endpoints.Data; eps[0].Target != "" || eps[0].Redacted[0] != "target" || eps[0].Name != "wiki" {
+		t.Errorf("endpoints %+v", eps)
+	}
+	if (*in.Network.Endpoints.Data)[0].Target == "" {
+		t.Error("Anonymize changed the input's endpoints")
 	}
 	if s := out.Events.Items[0].Subject; s != "host:host-1" {
 		t.Errorf("subject %q", s)
@@ -153,9 +163,12 @@ func TestMarkdownSections(t *testing.T) {
 		}}}}
 	md := string(Markdown(r))
 	for _, want := range []string{"# Cockpit diagnostic report", "## System", "Web01.corp.example", "## Health", "WARNING", "No sensors.",
-		"used\\_percent: 90", "## ZFS pools", "| tank | DEGRADED | 512.0 GiB | 1.0 TiB |", "## Power", "| rack | OB | 42.0% |", "## Extension metrics", "custom.demo.read", "dev=a", "30 bytes\\_per\\_second", "1 metrics dropped", "## Storage", "## Network", "## Recent events", "## Not included", "settings: Socket only."} {
+		"used\\_percent: 90", "## ZFS pools", "| tank | DEGRADED | 512.0 GiB | 1.0 TiB |", "## Power", "| rack | OB | 42.0% |", "## Extension metrics", "custom.demo.read", "dev=a", "30 bytes\\_per\\_second", "1 metrics dropped", "## Storage", "## Network", "| wiki | up | 41 ms (HTTP 200) |", "| nas | down (4 in a row) |", "## Recent events", "## Not included", "settings: Socket only."} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown missing %q", want)
 		}
 	}
 }
+
+func ptrInt(v int) *int           { return &v }
+func ptrFloat(v float64) *float64 { return &v }

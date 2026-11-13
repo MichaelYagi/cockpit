@@ -821,11 +821,52 @@ func (m *Model) networkScreen(w, h int) string {
 	}
 	sw := max(10, inner-16)
 	trend := []string{kv(m.st, "rx", sparkline(m.st.series(0), m.rxHist, sw, 0)), kv(m.st, "tx", sparkline(m.st.series(1), m.txHist, sw, 0))}
-	return column(m.st, []box{
+	boxes := []box{}
+	if ep := m.endpointLines(inner); ep != nil {
+		boxes = append(boxes, box{title: "Endpoints", lines: ep})
+	}
+	return column(m.st, append(boxes, []box{
 		{title: "Interfaces" + staleMark(m.st, s), lines: lines, flex: true},
 		{title: "Throughput (all interfaces)", lines: trend},
 		{title: "Addresses, routes and DNS", lines: m.netConfigLines(inner), flex: true},
-	}, w, h)
+	}...), w, h)
+}
+
+// endpointLines lists configured service checks (D40), or one hint when
+// none are configured. Nil before the first /network response.
+func (m *Model) endpointLines(inner int) []string {
+	if m.network == nil {
+		return nil
+	}
+	s := m.network.Endpoints
+	if s.Status == apiv1.NotConfigured {
+		return []string{m.st.muted.Render(truncate("No services checked. List them under collection.endpoints.targets in config.yaml.", inner))}
+	}
+	if s.Data == nil {
+		return unavailable(m.st, s, inner)
+	}
+	lines := []string{m.st.muted.Render(pad("NAME", 22) + pad("STATE", 10) + padLeft("RESPONSE", 10) + "  " + "DETAIL")}
+	for _, e := range *s.Data {
+		state := badge(m.st, lvOK, "up")
+		detail := e.Target
+		switch {
+		case !e.Up && e.ConsecutiveFailures >= 2:
+			state, detail = badge(m.st, lvCrit, "down"), e.Error
+		case !e.Up:
+			state, detail = badge(m.st, lvWarn, "failing"), e.Error
+		case e.CertExpiresAt != nil && e.CertExpiresAt.Sub(m.opts.Now()) < 14*24*time.Hour:
+			state, detail = badge(m.st, lvWarn, "cert"), "certificate expires "+e.CertExpiresAt.Format("2006-01-02")
+		}
+		resp := "—"
+		if e.ResponseMillis != nil {
+			resp = fmt.Sprintf("%.0f ms", *e.ResponseMillis)
+		}
+		if e.StatusCode != nil {
+			resp = fmt.Sprintf("%d %s", *e.StatusCode, resp)
+		}
+		lines = append(lines, pad(truncate(e.Name, 21), 22)+pad(state, 10)+padLeft(resp, 10)+"  "+m.st.muted.Render(truncate(detail, max(0, inner-44))))
+	}
+	return lines
 }
 
 func (m *Model) accessScreen(w, h int) string {

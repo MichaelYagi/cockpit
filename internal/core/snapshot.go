@@ -57,6 +57,7 @@ type Snapshot struct {
 	ZFS            Section[ZFSInfo]
 	Power          Section[PowerSupplies]
 	UPS            Section[UPSList]
+	Endpoints      Section[EndpointList]
 
 	// Custom holds generic metrics, one set per collector that reports
 	// them (D22), in collector order.

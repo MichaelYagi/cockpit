@@ -47,7 +47,7 @@ origin_not_allowed`. Desktop tools and scripts are not affected.
 | *(public)* | `GET /livez`, `GET /openapi.json` |
 | `system:read` | `/status`, `/system`, `/hardware`, `/services`, `/report` (metric parts need `metrics:read` too) |
 | `metrics:read` | `/metrics`, `/metrics/history…`, `/storage`, `/network`, `/sensors`, `/health`, `/events`, `/events/stream` |
-| `network:read` | Interface addresses, routes and DNS inside `/network`, `/metrics` and `/report` (D27). Without it they are withheld: addresses become `[]` and appear in `redacted`, and routes and DNS report `permission_denied` |
+| `network:read` | Interface addresses, routes, DNS and endpoint targets inside `/network`, `/metrics` and `/report` (D27, D40). Without it they are withheld: addresses become `[]`, endpoint targets are left out, both appear in `redacted`, and routes and DNS report `permission_denied` |
 | `processes:read` | `/processes` (D14), `/containers` (D24) |
 | `admin` | `/keys…`, `/settings`, privileged fields in `/status` and `/report` |
 
@@ -76,7 +76,7 @@ need `metrics:read`. It does not open a route by itself.
 | GET | `/services` | `system:read` | systemd services with counts; `?state=active\|failed\|inactive` (Phase 2) |
 | GET | `/metrics` | `metrics:read` | Current snapshot. `?sections=cpu,memory,...,gpu` selects sections |
 | GET | `/storage` | `metrics:read` | Block devices, filesystems (capacity, inodes), SMART summary |
-| GET | `/network` | `metrics:read` | Interfaces (addresses, counters, rates), routes, DNS (passive; nothing is probed) |
+| GET | `/network` | `metrics:read` | Interfaces (addresses, counters, rates), routes, DNS (passive), and checks of configured endpoints (D40) |
 | GET | `/sensors` | `metrics:read` | Temperatures, fans, voltages |
 | GET | `/health` | `metrics:read` | Overall status, checks (D11 plus failed services and network errors), active findings |
 | GET | `/events` | `metrics:read` | Events, newest first, paginated, `?severity=&since=&until=&type=`; persisted since Phase 3 |
@@ -109,6 +109,8 @@ need `metrics:read`. It does not open a route by itself.
 | GET | `/metrics?sections=power,ups` | `metrics:read` | Batteries and mains from sysfs; UPS from a Network UPS Tools server when enabled (D25) |
 | GET | `/storage` | `metrics:read` | Gains `zfs`: pool state, capacity and error counts (OpenZFS 2.3+ JSON), ARC size and hit rate (D25) |
 | GET | `/health` | `metrics:read` | Gains the `zfs_pools` and `ups` checks |
+| GET | `/network` | `metrics:read` | Gains `endpoints`: configured service checks with `up`, `consecutive_failures`, `status_code`, `response_ms`, `error`, `checked_at`, `cert_expires_at` and `target` (needs `network:read`) (D40) |
+| GET | `/health` | `metrics:read` | Gains the `endpoints` check: critical after 2 failed checks in a row, warning when a certificate expires within 14 days (D40) |
 | GET | `/metrics?sections=custom` | `metrics:read` | Generic metrics from extension collectors (D22): one set per collector with availability, `dropped_series` and `problem`; each metric has `name`, `kind`, `unit`, `labels`, `value`, and for counters `rate_per_second` and `rate_unit` |
 
 WebSocket is not planned: all streaming is server-to-client, which SSE

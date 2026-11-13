@@ -33,6 +33,14 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Service checks (D40).** List services under
+  `collection.endpoints.targets` (`https://…`, `http://…` or
+  `tcp://host:port`) and the agent checks them every 30 seconds. The TUI
+  and web dashboard Network pages show each one as up, failing or down
+  with its response time. A new `endpoints` health check reports a
+  service down after two failed checks in a row and warns when its HTTPS
+  certificate expires within 14 days, so notifications cover them.
+  `GET /network` gains `endpoints`; targets need `network:read`.
 - **Notifications (D39).** The agent can send health findings to ntfy
   (phone push), Discord, Slack or any JSON webhook when a problem appears,
   gets worse or is resolved. Configure `notifications.webhooks`, with each

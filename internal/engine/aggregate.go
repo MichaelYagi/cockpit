@@ -35,6 +35,7 @@ const (
 	secZFS
 	secPower
 	secUPS
+	secEndpoints
 	numSections
 )
 
@@ -63,6 +64,7 @@ var sectionCaps = [numSections][]core.Capability{
 	secZFS:            {core.CapStorageZFS},
 	secPower:          {core.CapPowerSupplies},
 	secUPS:            {core.CapPowerUPS},
+	secEndpoints:      {core.CapNetworkEndpoints},
 }
 
 func sectionOf(r core.Record) (section, bool) {
@@ -111,6 +113,8 @@ func sectionOf(r core.Record) (section, bool) {
 		return secPower, true
 	case core.UPSList:
 		return secUPS, true
+	case core.EndpointList:
+		return secEndpoints, true
 	}
 	return 0, false
 }
@@ -332,6 +336,9 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 	case core.UPSList:
 		c := append(core.UPSList(nil), v...)
 		return &c
+	case core.EndpointList:
+		c := append(core.EndpointList(nil), v...)
+		return &c
 	case core.GPUs:
 		c := append(core.GPUs(nil), v...)
 		return &c
@@ -459,6 +466,7 @@ func (a *aggregator) publish() *core.Snapshot {
 	snap.ZFS = sec[core.ZFSInfo](a, secZFS)
 	snap.Power = sec[core.PowerSupplies](a, secPower)
 	snap.UPS = sec[core.UPSList](a, secUPS)
+	snap.Endpoints = sec[core.EndpointList](a, secEndpoints)
 
 	for _, r := range a.e.runners {
 		if cs := a.custom[r]; cs != nil {

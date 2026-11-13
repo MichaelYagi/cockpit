@@ -250,7 +250,13 @@ if any key material appears.
 - Collector and external-tool timeouts. External tools run without a shell,
   with absolute paths resolved at startup and fixed arguments.
 - No unbounded goroutines or queues.
-- **Notifications (D39)** are the agent's only outbound HTTP requests.
+- **Endpoint checks (D40)** connect only to targets in the configuration
+  file (at most 64), never to addresses from the API: 8 at a time, one
+  timeout each, no proxy, no redirects, a new connection per check and at
+  most 64 KiB read per response. Target URLs may name internal hosts, so
+  they need `network:read` and are dropped from anonymized reports. URLs
+  with a user name or password are refused.
+- **Notifications (D39)** are the agent's only other outbound HTTP requests.
   Destinations come only from the configuration file (at most 8), never
   from the API. Each webhook has a 64-message queue, a rate limit (20 a
   minute), a 10-second timeout and at most two retries; redirects are not

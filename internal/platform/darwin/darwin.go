@@ -35,6 +35,7 @@ var implemented = []core.Capability{
 	core.CapSystemIdentity, core.CapSystemUptime, core.CapCPUUsage, core.CapCPULoad, core.CapMemoryUsage,
 	core.CapStorageFilesystems, core.CapNetworkInterfaces, core.CapNetworkThroughput,
 	core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapPowerSupplies, core.CapSensorsThermal,
+	core.CapNetworkEndpoints,
 }
 
 // Collectors returns the macOS collector set.
@@ -65,6 +66,7 @@ func Collectors(env collector.Env) []collector.Collector {
 			func(r *collector.Result) { power(r, iok, ioErr) }), 10*time.Second),
 		withInterval(sampler("darwin.thermal", "IOKit HID", 0, now, []core.Capability{core.CapSensorsThermal},
 			func(r *collector.Result) { thermal(r, iok, ioErr) }), 5*time.Second),
+		portable.NewEndpoints(env),
 		unsupported.Rest("darwin.unsupported", implemented, "Not collected on macOS yet."),
 	}
 }

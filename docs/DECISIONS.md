@@ -859,3 +859,53 @@ or running a mail client, and ntfy needs no account.
 agent's health state is not kept across restarts, so a problem still
 present after a restart is announced again. Messages that fail all
 retries are logged, not stored.
+
+## D40 — Checking services over HTTP and TCP
+
+**Status:** Proposed (2026-11-13)
+
+**Decision.** The agent can check services the operator lists under
+`collection.endpoints.targets` (at most 64; none by default):
+
+- **Targets:** `http://` or `https://` URLs, checked with a GET that
+  must answer with an expected status (200-399 unless `expect_status`
+  lists codes), or `tcp://host:port`, which must accept a connection.
+  `tls_skip_verify` accepts any certificate for self-signed home
+  servers. URLs must not contain a user name or password, because the
+  configuration file is not a place for secrets; headers and request
+  bodies are not supported.
+- **How:** a cross-platform collector, `portable.endpoints`, starts one
+  background loop per target: connect, record the outcome or the
+  timeout, wait `interval` (30s by default, 10s to 1h), repeat. At most 8
+  connections are open at once and each check is bounded by `timeout`
+  (5s, 1s to 30s, at most half the interval). The collector's own
+  `Collect` only copies the latest results from memory every 2 seconds,
+  so a slow or unreachable service never delays the others, the engine,
+  health evaluation or the API. Each check opens a new connection, uses
+  no proxy, follows no redirect (a 3xx counts as up by default) and reads
+  at most 64 KiB of a response. It records up or down, consecutive
+  failures, HTTP status, time to the response, a short error and the
+  certificate's expiry. Loops stop when the agent shuts down.
+- **Health:** a new `endpoints` check reports an endpoint critical after
+  2 failed checks in a row, so one lost packet does not alert, and a
+  certificate warning within 14 days of expiry (critical once expired).
+  It is N/A when nothing is configured. Findings flow into events and
+  notifications (D39) like every other check.
+- **API:** `GET /network` gains an `endpoints` section; the health
+  check ID list gains `endpoints`. The target URL names hosts, so like
+  interface addresses (D27) it needs `network:read`; without it the
+  field is left out and listed in `redacted`. Anonymized reports drop
+  targets.
+- **Clients:** the TUI's Network screen and the web dashboard's Network
+  page show an Endpoints panel (name, state, response, detail).
+- Targets come only from the configuration file, never from the API, so
+  an API key cannot make the agent connect anywhere.
+
+**Why.** "Is my service up?" is the next question after "is my machine
+healthy?", and the owner asked for it. Checking from the agent also shows
+what that machine can reach.
+
+**Limits.** One interval and timeout for all targets. No response-time
+history or charts yet, no keyword matching in the body, no ICMP ping
+(it needs privileges). Results show reachability from this machine
+only.

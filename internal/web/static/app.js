@@ -763,6 +763,7 @@ function Network(el) {
     const rt = section(d.routes, 'Routes');
     const dns = section(d.dns, 'DNS');
     replace(body,
+      endpointsCard(d.endpoints),
       card('Interfaces', ifs.error || ifs.warn, ifs.data ? table([
         { label: 'Name', value: i => i.name },
         { label: 'State', value: i => h('span', { class: i.oper_state === 'up' ? 'ok' : 'muted' }, i.oper_state) },
@@ -788,6 +789,27 @@ function Network(el) {
         ]) : null)));
   }, 2000);
   return { destroy: () => poll.stop() };
+}
+
+// endpointsCard lists configured service checks (D40). Down needs two
+// failed checks in a row, as in the health check.
+function endpointsCard(s) {
+  if (s && s.status === 'not_configured') {
+    return card('Endpoints', note('No services are checked. List them under collection.endpoints.targets in the agent\'s config.yaml.'));
+  }
+  const ep = section(s, 'Endpoints');
+  const state = e => {
+    if (!e.up) return e.consecutive_failures >= 2 ? h('span', { class: 'pill crit' }, 'Down') : h('span', { class: 'pill warn' }, 'Failing');
+    if (e.cert_expires_at && new Date(e.cert_expires_at) - Date.now() < 14 * 86400e3) return h('span', { class: 'pill warn' }, 'Cert expiring');
+    return h('span', { class: 'pill ok' }, 'Up');
+  };
+  return card('Endpoints', ep.error || ep.warn, ep.data ? table([
+    { label: 'Name', value: e => e.name },
+    { label: 'State', value: state },
+    { label: 'Response', value: e => (e.status_code ? e.status_code + ' · ' : '') + (e.response_ms == null ? '—' : num(e.response_ms) + ' ms'), class: 'r' },
+    { label: 'Detail', value: e => (e.up ? (e.cert_expires_at ? 'certificate until ' + e.cert_expires_at.slice(0, 10) : '') : e.error) || '—', class: 'muted' },
+    { label: 'Target', value: e => e.target || (e.redacted?.includes('target') ? 'needs network:read' : '—'), class: 'addr' },
+  ], ep.data) : null);
 }
 
 function Processes(el) {
