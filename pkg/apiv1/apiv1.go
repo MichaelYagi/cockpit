@@ -90,6 +90,7 @@ const (
 	CodeInvalidCredentials     = "invalid_credentials"
 	CodeInsufficientScope      = "insufficient_scope"
 	CodeNotFound               = "not_found"
+	CodeConflict               = "conflict"
 	CodeMethodNotAllowed       = "method_not_allowed"
 	CodeRequestTooLarge        = "request_too_large"
 	CodeInternal               = "internal_error"

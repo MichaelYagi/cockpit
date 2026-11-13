@@ -53,6 +53,9 @@ type fakeAPI struct {
 	custom      *[]apiv1.CustomMetricsSet
 	containers  *apiv1.ContainersResponse
 	noEndpoints bool
+	checks      []apiv1.EndpointCheck // nil: the default list below
+	addedChecks []apiv1.AddEndpointCheckRequest
+	removedChk  []string
 	zfs         *apiv1.ZFS
 	power       *[]apiv1.PowerSupply
 	ups         *[]apiv1.UPS
@@ -323,6 +326,41 @@ func (f *fakeAPI) UpdateSettings(_ context.Context, h apiv1.HealthSettings) (*ap
 	f.saved = append(f.saved, h)
 	f.settings = &apiv1.SettingsResponse{Source: "override", Health: h, UpdatedAt: &t0}
 	return f.Settings(context.Background())
+}
+
+func (f *fakeAPI) EndpointChecks(context.Context) (*apiv1.EndpointChecksResponse, error) {
+	if f.checks == nil && !f.noEndpoints {
+		f.checks = []apiv1.EndpointCheck{
+			{Name: "Home Assistant", URL: "http://192.168.1.50:8123/", Source: "configuration"},
+			{Name: "NAS SSH", URL: "tcp://192.168.1.10:22", Source: "runtime"},
+			{Name: "Blip", URL: "tcp://192.168.1.11:22", Source: "runtime"},
+			{Name: "Wiki", URL: "https://wiki.lan/", Source: "runtime"},
+		}
+	}
+	return &apiv1.EndpointChecksResponse{Items: append([]apiv1.EndpointCheck{}, f.checks...), Max: 64}, nil
+}
+
+func (f *fakeAPI) AddEndpointCheck(_ context.Context, req apiv1.AddEndpointCheckRequest) (*apiv1.EndpointCheck, error) {
+	for _, c := range f.checks {
+		if strings.EqualFold(c.Name, req.Name) {
+			return nil, &client.APIError{StatusCode: 409, Code: "conflict", Message: "A service check with that name already exists."}
+		}
+	}
+	f.addedChecks = append(f.addedChecks, req)
+	c := apiv1.EndpointCheck{Name: req.Name, URL: req.URL, TLSSkipVerify: req.TLSSkipVerify, Source: "runtime"}
+	f.checks = append(f.checks, c)
+	return &c, nil
+}
+
+func (f *fakeAPI) RemoveEndpointCheck(_ context.Context, name string) error {
+	f.removedChk = append(f.removedChk, name)
+	for i, c := range f.checks {
+		if c.Name == name {
+			f.checks = append(f.checks[:i], f.checks[i+1:]...)
+			return nil
+		}
+	}
+	return &client.APIError{StatusCode: 404, Code: "not_found", Message: "No service check has that name."}
 }
 
 func (f *fakeAPI) ResetSettings(ctx context.Context) (*apiv1.SettingsResponse, error) {
@@ -1296,5 +1334,89 @@ func TestNetworkEndpoints(t *testing.T) {
 	drive(t, m, m.refresh(true))
 	if out := screenText(m); !strings.Contains(out, "No services checked") {
 		t.Errorf("hint missing:\n%s", out)
+	}
+}
+
+// On the admin socket, service checks are added and removed from the
+// Network screen (D41).
+func TestNetworkAddRemoveChecks(t *testing.T) {
+	api := &fakeAPI{admin: true}
+	m := setup(t, api, 140, 50)
+	press(t, m, key(scrNetwork))
+	drive(t, m, m.refresh(true))
+	out := screenText(m)
+	for _, want := range []string{"▶ Home Assistant", "[config.yaml]", "a add check", "d remove check"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	// A check from the configuration file cannot be removed here.
+	press(t, m, "d")
+	if m.modal != modalNone || !strings.Contains(m.flash, "configuration file") {
+		t.Errorf("config entry: modal %v flash %q", m.modal, m.flash)
+	}
+	// Add an https check that accepts a self-signed certificate.
+	press(t, m, "a")
+	typeText(t, m, "Proxmox")
+	press(t, m, "enter")
+	if !strings.Contains(screenText(m), "Address of Proxmox") {
+		t.Fatalf("no address step:\n%s", screenText(m))
+	}
+	typeText(t, m, "https://192.168.1.20:8006/")
+	press(t, m, "enter")
+	if m.modal != modalEndpointTLS || !strings.Contains(screenText(m), "self-signed") {
+		t.Fatalf("no certificate step: %v", m.modal)
+	}
+	drive(t, m, m.key(tea.KeyPressMsg{Code: 'y', Text: "y"}))
+	if len(api.addedChecks) != 1 || api.addedChecks[0].Name != "Proxmox" || api.addedChecks[0].URL != "https://192.168.1.20:8006/" || !api.addedChecks[0].TLSSkipVerify {
+		t.Fatalf("added %+v", api.addedChecks)
+	}
+	if !strings.Contains(m.flash, "Added Proxmox") || !strings.Contains(screenText(m), "Proxmox") || !strings.Contains(screenText(m), "… checking") {
+		t.Errorf("after add: %q\n%s", m.flash, screenText(m))
+	}
+	// A plain http check skips the certificate question; a duplicate name fails.
+	press(t, m, "a")
+	typeText(t, m, "nas ssh")
+	press(t, m, "enter")
+	typeText(t, m, "tcp://192.168.1.10:22")
+	drive(t, m, m.key(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	if !strings.Contains(m.flash, "already exists") {
+		t.Errorf("duplicate flash %q", m.flash)
+	}
+	// Remove the selected runtime check after confirming.
+	press(t, m, "down")
+	press(t, m, "d")
+	if m.modal != modalEndpointRemove || !strings.Contains(screenText(m), "Stop checking NAS SSH") {
+		t.Fatalf("no confirmation: %v", m.modal)
+	}
+	press(t, m, "n")
+	if len(api.removedChk) != 0 {
+		t.Error("removed without confirmation")
+	}
+	press(t, m, "d")
+	drive(t, m, m.key(tea.KeyPressMsg{Code: 'y', Text: "y"}))
+	if len(api.removedChk) != 1 || api.removedChk[0] != "NAS SSH" || !strings.Contains(m.flash, "Removed NAS SSH") {
+		t.Errorf("removed %v flash %q", api.removedChk, m.flash)
+	}
+	// esc cancels the add dialog at any step.
+	press(t, m, "a")
+	typeText(t, m, "x")
+	press(t, m, "esc")
+	if m.modal != modalNone || len(api.addedChecks) != 1 {
+		t.Errorf("esc: modal %v added %d", m.modal, len(api.addedChecks))
+	}
+}
+
+// Without the admin socket, the panel is read-only and says how to add checks.
+func TestNetworkChecksReadOnlyWithKey(t *testing.T) {
+	m := setup(t, &fakeAPI{noEndpoints: true}, 140, 50)
+	press(t, m, key(scrNetwork))
+	drive(t, m, m.refresh(true))
+	press(t, m, "a")
+	if m.modal != modalNone || !strings.Contains(m.flash, "admin socket") {
+		t.Errorf("modal %v flash %q", m.modal, m.flash)
+	}
+	if strings.Contains(screenText(m), "a add check") {
+		t.Error("add hint shown without admin access")
 	}
 }

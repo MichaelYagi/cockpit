@@ -39,6 +39,9 @@ type API interface {
 	Settings(ctx context.Context) (*apiv1.SettingsResponse, error)
 	UpdateSettings(ctx context.Context, h apiv1.HealthSettings) (*apiv1.SettingsResponse, error)
 	ResetSettings(ctx context.Context) (*apiv1.SettingsResponse, error)
+	EndpointChecks(ctx context.Context) (*apiv1.EndpointChecksResponse, error)
+	AddEndpointCheck(ctx context.Context, req apiv1.AddEndpointCheckRequest) (*apiv1.EndpointCheck, error)
+	RemoveEndpointCheck(ctx context.Context, name string) error
 }
 
 var _ API = (*client.Client)(nil)
@@ -100,6 +103,10 @@ const (
 	modalReveal
 	modalEditSetting
 	modalConfirmSettings
+	modalEndpointName   // add a service check: name
+	modalEndpointURL    // then its URL
+	modalEndpointTLS    // then, for https, whether to accept any certificate
+	modalEndpointRemove // confirm removing one
 )
 
 // issuableScopes are the scopes a key can be created with (D8).
@@ -150,6 +157,13 @@ type Model struct {
 	services *apiv1.ServicesResponse
 	svcErr   string
 	network  *apiv1.NetworkResponse
+
+	// Service checks on the Network screen (admin socket only, D41).
+	epChecks *apiv1.EndpointChecksResponse
+	epErr    string
+	epSel    int
+	epName   string // name typed in the add dialog
+	epURL    string
 
 	// Live events: history from /events plus the SSE stream, newest first.
 	eventList  []apiv1.Event
@@ -292,6 +306,9 @@ func (m *Model) refresh(all bool) tea.Cmd {
 		cmds = append(cmds, m.fetch("storage", wrap(m.api.Storage)))
 	case scrNetwork:
 		cmds = append(cmds, m.fetch("network", wrap(m.api.Network)))
+		if m.isAdmin() {
+			cmds = append(cmds, m.fetch("endpoint-checks", wrap(m.api.EndpointChecks)))
+		}
 	case scrProcesses:
 		if m.procContainers {
 			cmds = append(cmds, m.fetch("containers", wrap(m.api.Containers)))
@@ -498,6 +515,9 @@ func (m *Model) apply(r resultMsg) {
 		case "settings":
 			m.settingsErr = errText(r.err)
 			return
+		case "endpoint-checks":
+			m.epErr = errText(r.err)
+			return
 		case "events-more":
 			m.flashMsg(lvCrit, "Could not load older events: "+errText(r.err))
 			return
@@ -565,6 +585,9 @@ func (m *Model) apply(r resultMsg) {
 		}
 	case *apiv1.SettingsResponse:
 		m.settings, m.settingsErr = v, ""
+	case *apiv1.EndpointChecksResponse:
+		m.epChecks, m.epErr = v, ""
+		m.epSel = max(0, min(m.epSel, len(v.Items)-1))
 	case []apiv1.APIKey:
 		m.keys, m.keysErr = v, ""
 		if m.selected >= len(v) {
@@ -721,8 +744,111 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		}
 	case scrSettings:
 		return m.settingsKey(s)
+	case scrNetwork:
+		return m.networkKey(s)
 	}
 	return nil
+}
+
+// networkKey selects, adds and removes service checks (D41).
+func (m *Model) networkKey(s string) tea.Cmd {
+	n := 0
+	if m.epChecks != nil {
+		n = len(m.epChecks.Items)
+	}
+	switch s {
+	case "up", "k":
+		m.epSel = max(0, m.epSel-1)
+	case "down", "j":
+		m.epSel = max(0, min(n-1, m.epSel+1))
+	case "a":
+		if !m.isAdmin() {
+			m.flashMsg(lvWarn, "Adding service checks needs the local admin socket (run cockpit tui on the agent's host).")
+			return nil
+		}
+		m.modal, m.input, m.flash, m.epName, m.epURL = modalEndpointName, "", "", "", ""
+	case "d":
+		if !m.isAdmin() || n == 0 {
+			return nil
+		}
+		c := m.epChecks.Items[m.epSel]
+		if c.Source != "runtime" {
+			m.flashMsg(lvWarn, c.Name+" is defined in the configuration file; remove it there and restart the agent.")
+			return nil
+		}
+		m.pendingID = c.Name
+		m.modal, m.input, m.flash = modalEndpointRemove, "", ""
+	}
+	return nil
+}
+
+// endpointModalKey drives the add and remove dialogs.
+func (m *Model) endpointModalKey(k tea.KeyPressMsg) tea.Cmd {
+	s := k.String()
+	switch m.modal {
+	case modalEndpointName:
+		switch s {
+		case "enter":
+			if name := strings.TrimSpace(m.input); name != "" {
+				m.epName, m.input, m.modal = name, "", modalEndpointURL
+			}
+		case "backspace":
+			m.input = dropLast(m.input)
+		default:
+			m.typeText(k, 64)
+		}
+	case modalEndpointURL:
+		switch s {
+		case "enter":
+			u := strings.TrimSpace(m.input)
+			if u == "" {
+				return nil
+			}
+			m.epURL, m.input = u, ""
+			if strings.HasPrefix(strings.ToLower(u), "https://") {
+				m.modal = modalEndpointTLS
+				return nil
+			}
+			return m.addEndpoint(false)
+		case "backspace":
+			m.input = dropLast(m.input)
+		default:
+			m.typeText(k, 512)
+		}
+	case modalEndpointTLS:
+		switch s {
+		case "y":
+			return m.addEndpoint(true)
+		case "n", "enter":
+			return m.addEndpoint(false)
+		}
+	case modalEndpointRemove:
+		switch s {
+		case "y":
+			name := m.pendingID
+			m.modal = modalNone
+			return func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				return actionMsg{action: "endpoint-remove", id: name, err: m.api.RemoveEndpointCheck(ctx, name)}
+			}
+		case "n":
+			m.modal = modalNone
+			m.flashMsg(lvNeutral, "Cancelled; nothing was changed.")
+		}
+	}
+	return nil
+}
+
+func (m *Model) addEndpoint(skipVerify bool) tea.Cmd {
+	req := apiv1.AddEndpointCheckRequest{Name: m.epName, URL: m.epURL, TLSSkipVerify: skipVerify}
+	m.modal = modalNone
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := m.api.AddEndpointCheck(ctx, req)
+		return actionMsg{action: "endpoint-add", id: req.Name, err: err}
+	}
 }
 
 // searchKey edits the process search text.
@@ -803,6 +929,9 @@ func (m *Model) flashMsg(l level, s string) { m.flash, m.flashLevel = s, l }
 
 func (m *Model) modalKey(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
+	if s != "esc" && (m.modal == modalEndpointName || m.modal == modalEndpointURL || m.modal == modalEndpointTLS || m.modal == modalEndpointRemove) {
+		return m.endpointModalKey(k)
+	}
 	if m.modal == modalEditSetting || m.modal == modalConfirmSettings {
 		if s == "esc" {
 			m.modal, m.input = modalNone, ""
@@ -940,6 +1069,15 @@ func (m *Model) applyAction(a actionMsg) tea.Cmd {
 	if a.err != nil {
 		m.flashMsg(lvCrit, "Failed: "+errText(a.err))
 		return nil
+	}
+	switch a.action {
+	case "endpoint-add", "endpoint-remove":
+		if a.action == "endpoint-add" {
+			m.flashMsg(lvOK, "Added "+cleanText(a.id)+". The first check runs within a few seconds.")
+		} else {
+			m.flashMsg(lvOK, "Removed "+cleanText(a.id)+"; it is no longer checked.")
+		}
+		return tea.Batch(m.refetch("endpoint-checks"), m.refetch("network"))
 	}
 	sanitize(a.created)
 	sanitize(a.revoked)

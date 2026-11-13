@@ -73,6 +73,8 @@ type Deps struct {
 	History handlers.HistorySource
 	// Settings manages runtime settings (socket only).
 	Settings handlers.SettingsService
+	// EndpointChecks adds and removes service checks (socket only, D41).
+	EndpointChecks handlers.EndpointChecksService
 	// Event streaming (D17).
 	Subscriber      handlers.Subscriber
 	KeyChecker      handlers.KeyChecker
@@ -108,6 +110,7 @@ func Routes(d Deps) []Route {
 	keys := &handlers.Keys{Service: d.Keys, Now: d.Now, Logger: d.Logger}
 	hist := &handlers.History{Source: d.History, MachineID: machineID, Now: d.Now, Logger: d.Logger}
 	set := &handlers.Settings{Service: d.Settings, Logger: d.Logger}
+	checks := &handlers.EndpointChecks{Service: d.EndpointChecks, MachineID: machineID, Now: d.Now, Logger: d.Logger}
 	if d.Streams == nil {
 		d.Streams = handlers.NewStreamLimits()
 	}
@@ -156,6 +159,9 @@ func Routes(d Deps) []Route {
 		{Method: get, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Get},
 		{Method: http.MethodPut, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Put},
 		{Method: del, Path: "/settings", Scope: adm, SocketOnly: true, Handler: set.Delete},
+		{Method: get, Path: "/endpoint-checks", Scope: adm, SocketOnly: true, Handler: checks.List},
+		{Method: post, Path: "/endpoint-checks", Scope: adm, SocketOnly: true, Handler: checks.Add},
+		{Method: del, Path: "/endpoint-checks/{name}", Scope: adm, SocketOnly: true, Handler: checks.Remove},
 	}
 }
 

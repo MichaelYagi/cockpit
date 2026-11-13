@@ -134,6 +134,9 @@ type EndpointSettings struct {
 	Interval time.Duration
 	Timeout  time.Duration // per check
 	Targets  []EndpointTarget
+	// Source, if set, is called on every collection and replaces Targets,
+	// so checks can be added and removed while the agent runs (D41).
+	Source func() []EndpointTarget
 }
 
 // EndpointTarget is one service to check.

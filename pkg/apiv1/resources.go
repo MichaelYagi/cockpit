@@ -803,3 +803,30 @@ type Container struct {
 	IOWriteBytesPerSecond *float64 `json:"io_write_bytes_per_second"`
 	PIDs                  *uint64  `json:"pids"`
 }
+
+// EndpointCheck is one configured service check (D41): from the
+// configuration file (source "configuration", read-only) or added through
+// the admin socket (source "runtime").
+type EndpointCheck struct {
+	Name          string     `json:"name"`
+	URL           string     `json:"url"`
+	ExpectStatus  []int      `json:"expect_status"`
+	TLSSkipVerify bool       `json:"tls_skip_verify"`
+	Source        string     `json:"source"`
+	AddedAt       *time.Time `json:"added_at"`
+}
+
+// EndpointChecksResponse is GET /endpoint-checks.
+type EndpointChecksResponse struct {
+	Meta
+	Items []EndpointCheck `json:"items"`
+	Max   int             `json:"max"`
+}
+
+// AddEndpointCheckRequest is POST /endpoint-checks.
+type AddEndpointCheckRequest struct {
+	Name          string `json:"name"`
+	URL           string `json:"url"`
+	ExpectStatus  []int  `json:"expect_status,omitempty"`
+	TLSSkipVerify bool   `json:"tls_skip_verify,omitempty"`
+}

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,7 +37,7 @@ const (
 )
 
 var endpointsOff = core.CapabilityStatus{Availability: core.NotConfigured,
-	Reason: "No endpoints are configured. List services to check under collection.endpoints.targets."}
+	Reason: "No services are checked. Add them from the TUI's Network screen, or under collection.endpoints.targets."}
 
 // Endpoints checks the configured services. Every target has its own
 // background loop that connects, records the outcome (or the timeout)
@@ -51,13 +52,18 @@ type Endpoints struct {
 	dial    func(ctx context.Context, addr string) (net.Conn, error)
 	sem     chan struct{} // bounds concurrent connections
 
-	start  sync.Once
-	cancel context.CancelFunc
-	loops  sync.WaitGroup
-
 	mu       sync.Mutex
-	latest   map[string]core.EndpointResult // by target name; bounded by the configuration
+	closed   bool
+	running  map[string]*endpointLoop // by target name
+	wg       sync.WaitGroup
+	latest   map[string]core.EndpointResult // by target name; only running targets
 	failures map[string]int
+}
+
+// endpointLoop is one target's background check loop.
+type endpointLoop struct {
+	target collector.EndpointTarget
+	cancel context.CancelFunc
 }
 
 // NewEndpoints returns the endpoint collector for env.Endpoints. No
@@ -81,6 +87,7 @@ func NewEndpoints(env collector.Env) *Endpoints {
 		lenient:  endpointClient(true),
 		dial:     func(ctx context.Context, addr string) (net.Conn, error) { return d.DialContext(ctx, "tcp", addr) },
 		sem:      make(chan struct{}, endpointParallel),
+		running:  map[string]*endpointLoop{},
 		latest:   map[string]core.EndpointResult{},
 		failures: map[string]int{},
 	}
@@ -106,9 +113,23 @@ func (c *Endpoints) Descriptor() collector.Descriptor {
 	}
 }
 
-// Probe does not contact anything: it reports whether checks are configured.
+// targets is the current list: from Source when set (checks can be added
+// and removed at runtime, D41), otherwise the fixed list.
+func (c *Endpoints) targets() []collector.EndpointTarget {
+	if c.set.Source != nil {
+		return c.set.Source()
+	}
+	return c.set.Targets
+}
+
+// Probe does not contact anything: it reports whether checks are
+// configured. When checks can be added at runtime (Source set), an empty
+// list is temporary, so the engine keeps scheduling the collector.
 func (c *Endpoints) Probe(context.Context) map[core.Capability]core.CapabilityStatus {
-	if len(c.set.Targets) == 0 {
+	if len(c.targets()) == 0 {
+		if c.set.Source != nil {
+			return map[core.Capability]core.CapabilityStatus{core.CapNetworkEndpoints: {Availability: core.TemporarilyUnavailable, Reason: endpointsOff.Reason}}
+		}
 		return map[core.Capability]core.CapabilityStatus{core.CapNetworkEndpoints: endpointsOff}
 	}
 	return map[core.Capability]core.CapabilityStatus{core.CapNetworkEndpoints: Available()}
@@ -116,12 +137,14 @@ func (c *Endpoints) Probe(context.Context) map[core.Capability]core.CapabilitySt
 
 // Close stops the background checks and waits for them.
 func (c *Endpoints) Close(ctx context.Context) error {
-	c.start.Do(func() {}) // a never-started collector stays stopped
-	if c.cancel != nil {
-		c.cancel()
+	c.mu.Lock()
+	c.closed = true
+	for _, l := range c.running {
+		l.cancel()
 	}
+	c.mu.Unlock()
 	done := make(chan struct{})
-	go func() { c.loops.Wait(); close(done) }()
+	go func() { c.wg.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-ctx.Done():
@@ -132,52 +155,82 @@ func (c *Endpoints) Close(ctx context.Context) error {
 	return nil
 }
 
-// run starts one loop per target. The first checks are spread over the
-// first second so they do not all connect at once.
-func (c *Endpoints) run() {
-	ctx, cancel := context.WithCancel(context.Background())
-	c.cancel = cancel
-	for i, t := range c.set.Targets {
-		c.loops.Add(1)
-		go func() {
-			defer c.loops.Done()
-			delay := time.Duration(i) * time.Second / time.Duration(len(c.set.Targets))
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(delay):
-				}
-				select {
-				case c.sem <- struct{}{}:
-				case <-ctx.Done():
-					return
-				}
-				r := c.check(ctx, t)
-				<-c.sem
-				if ctx.Err() != nil {
-					return // shutting down: a cancelled check is not a failure
-				}
-				c.store(r)
-				delay = c.set.Interval
-			}
-		}()
+// reconcile starts a loop for each new target and stops the loops of
+// targets that were removed or changed. New targets' first checks are
+// spread over a second so they do not all connect at once.
+func (c *Endpoints) reconcile(ts []collector.EndpointTarget) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	want := make(map[string]collector.EndpointTarget, len(ts))
+	for _, t := range ts {
+		want[t.Name] = t
+	}
+	for name, l := range c.running {
+		if t, ok := want[name]; !ok || !sameTarget(t, l.target) {
+			l.cancel()
+			delete(c.running, name)
+			delete(c.latest, name)
+			delete(c.failures, name)
+		}
+	}
+	for i, t := range ts {
+		if _, ok := c.running[t.Name]; ok {
+			continue
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		l := &endpointLoop{target: t, cancel: cancel}
+		c.running[t.Name] = l
+		c.wg.Add(1)
+		go c.loop(ctx, l, time.Duration(i)*time.Second/time.Duration(len(ts)))
 	}
 }
 
-// Collect returns the latest result of every target that has been
-// checked at least once, in configuration order. It never blocks on the
-// network.
+func sameTarget(a, b collector.EndpointTarget) bool {
+	return a.Name == b.Name && a.URL == b.URL && a.SkipTLSVerify == b.SkipTLSVerify && slices.Equal(a.ExpectStatus, b.ExpectStatus)
+}
+
+// loop checks one target until its context is cancelled: connect, record
+// the outcome or the timeout, wait the interval.
+func (c *Endpoints) loop(ctx context.Context, l *endpointLoop, delay time.Duration) {
+	defer c.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		select {
+		case c.sem <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		r := c.check(ctx, l.target)
+		<-c.sem
+		if ctx.Err() != nil {
+			return // stopped or removed: a cancelled check is not a failure
+		}
+		c.store(l, r)
+		delay = c.set.Interval
+	}
+}
+
+// Collect follows the current target list and returns the latest result
+// of every target checked at least once, in list order. It never blocks
+// on the network.
 func (c *Endpoints) Collect(context.Context) collector.Result {
 	res := collector.Result{CollectedAt: c.now(), Status: map[core.Capability]core.CapabilityStatus{}}
-	if len(c.set.Targets) == 0 {
+	ts := c.targets()
+	c.reconcile(ts)
+	if len(ts) == 0 {
 		res.Status[core.CapNetworkEndpoints] = endpointsOff
 		return res
 	}
-	c.start.Do(c.run)
 	c.mu.Lock()
-	out := make(core.EndpointList, 0, len(c.set.Targets))
-	for _, t := range c.set.Targets {
+	out := make(core.EndpointList, 0, len(ts))
+	for _, t := range ts {
 		if r, ok := c.latest[t.Name]; ok {
 			out = append(out, r)
 		}
@@ -192,9 +245,13 @@ func (c *Endpoints) Collect(context.Context) collector.Result {
 	return res
 }
 
-func (c *Endpoints) store(r core.EndpointResult) {
+// store records a result if its loop is still the target's current one.
+func (c *Endpoints) store(l *endpointLoop, r core.EndpointResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.running[l.target.Name] != l {
+		return
+	}
 	if r.Up {
 		c.failures[r.Name] = 0
 	} else {

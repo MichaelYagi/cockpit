@@ -222,6 +222,22 @@ func TestTransientFailureKeepsStaleData(t *testing.T) {
 	}
 }
 
+// Data is dropped once its capability is no longer configured (the last
+// service check was removed, D41), instead of lingering as stale.
+func TestNotConfiguredClearsData(t *testing.T) {
+	a, r := testAggregator(t, collectortest.New("test.endpoints", core.CapNetworkEndpoints))
+	a.apply(outcome{runner: r, result: collector.Result{CollectedAt: t0,
+		Records: []core.Record{core.EndpointList{{Name: "web", Up: true}}}, Status: avail(core.CapNetworkEndpoints)}})
+	if s := a.publish(); s.Endpoints.Data == nil {
+		t.Fatal("no data")
+	}
+	a.apply(outcome{runner: r, result: collector.Result{CollectedAt: t0.Add(time.Second), Status: map[core.Capability]core.CapabilityStatus{
+		core.CapNetworkEndpoints: {Availability: core.NotConfigured, Reason: "none"}}}})
+	if s := a.publish(); s.Endpoints.Data != nil || s.Endpoints.Meta.Status != core.NotConfigured {
+		t.Errorf("after removal %+v", s.Endpoints)
+	}
+}
+
 func TestAvailableWithoutRecord(t *testing.T) {
 	a, r := testAggregator(t, collectortest.New("test.mem", core.CapMemoryUsage))
 	a.apply(outcome{runner: r, result: collector.Result{CollectedAt: t0, Status: avail(core.CapMemoryUsage)}})

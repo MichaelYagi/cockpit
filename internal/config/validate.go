@@ -337,24 +337,39 @@ func validateEndpoints(v *validator, e Endpoints) {
 	seen := map[string]bool{}
 	for i, t := range e.Targets {
 		field := fmt.Sprintf("%s.targets[%d]", base, i)
-		switch {
-		case !webhookNamePattern.MatchString(t.Name):
-			v.add(field+".name", "must be 1-64 letters, digits, spaces or . _ - (got %q)", t.Name)
-		case seen[strings.ToLower(t.Name)]:
+		if seen[strings.ToLower(t.Name)] {
 			v.add(field+".name", "%q is used twice", t.Name)
 		}
 		seen[strings.ToLower(t.Name)] = true
-		if msg := endpointURLProblem(t.URL); msg != "" {
-			v.add(field+".url", "%s", msg)
+		validateEndpointTarget(v, field, t)
+	}
+}
+
+// ValidateEndpointTarget checks one service check with the same rules as
+// the configuration file. It is used for checks added at runtime (D41).
+func ValidateEndpointTarget(t EndpointTarget) error {
+	var v validator
+	validateEndpointTarget(&v, "endpoint", t)
+	return v.err()
+}
+
+func validateEndpointTarget(v *validator, field string, t EndpointTarget) {
+	if !webhookNamePattern.MatchString(t.Name) {
+		v.add(field+".name", "must be 1-64 letters, digits, spaces or . _ - (got %q)", t.Name)
+	}
+	if msg := endpointURLProblem(t.URL); msg != "" {
+		v.add(field+".url", "%s", msg)
+	}
+	if len(t.ExpectStatus) > 16 {
+		v.add(field+".expect_status", "at most 16 codes")
+	}
+	for _, code := range t.ExpectStatus {
+		if code < 100 || code > 599 {
+			v.add(field+".expect_status", "%d is not an HTTP status code", code)
 		}
-		for _, code := range t.ExpectStatus {
-			if code < 100 || code > 599 {
-				v.add(field+".expect_status", "%d is not an HTTP status code", code)
-			}
-		}
-		if strings.HasPrefix(t.URL, "tcp://") && (len(t.ExpectStatus) > 0 || t.TLSSkipVerify) {
-			v.add(field, "expect_status and tls_skip_verify apply only to http:// and https:// targets")
-		}
+	}
+	if strings.HasPrefix(t.URL, "tcp://") && (len(t.ExpectStatus) > 0 || t.TLSSkipVerify) {
+		v.add(field, "expect_status and tls_skip_verify apply only to http:// and https:// targets")
 	}
 }
 

@@ -33,6 +33,15 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Add and remove service checks from the TUI (D41).** On the agent's
+  machine, the Network screen's Endpoints panel takes `a` to add a check
+  (name, address, and for `https://` whether to accept a self-signed
+  certificate) and `d` to remove one, with no restart. Checks from the
+  configuration file are shown as `[config.yaml]` and stay read-only.
+  New admin-socket routes: `GET`/`POST /endpoint-checks` and
+  `DELETE /endpoint-checks/{name}`; `pkg/client` adds `EndpointChecks`,
+  `AddEndpointCheck` and `RemoveEndpointCheck`. Errors gain the
+  `conflict` code (409).
 - **Service checks (D40).** List services under
   `collection.endpoints.targets` (`https://…`, `http://…` or
   `tcp://host:port`) and the agent checks them every 30 seconds. The TUI
