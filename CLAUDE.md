@@ -17,7 +17,7 @@ The product helps users understand:
 - What has changed or gone wrong over time.
 - How other applications and machines can consume its data securely.
 
-**Approved decisions live in `docs/DECISIONS.md` (D1–D12). They override
+**Approved decisions live in `docs/DECISIONS.md` (D1–D41). They override
 anything else in this file if the two ever disagree.** Propose a new
 decision entry before deviating from one.
 
