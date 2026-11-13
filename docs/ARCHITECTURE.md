@@ -245,6 +245,13 @@ health:
   disk: { warn_percentage_used: 90 }
   network: { warn_errors_per_minute: 10, critical_errors_per_minute: 100 }
   # Thresholds can be overridden at runtime over the socket (D19).
+notifications:                 # D39; off until a webhook is listed
+  machine_name: ""             # default: host name
+  webhooks:                    # at most 8
+    - name: phone
+      url_file: /etc/cockpit-monitor/ntfy.url   # absolute; file holds only the URL, mode 0600
+      format: ntfy             # json (default) | ntfy | discord | slack
+      min_severity: warning    # warning (default) | critical
 history:                       # D18
   enabled: true
   retention: { raw: 24h, minute: 168h, hour: 2160h }

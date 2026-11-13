@@ -250,6 +250,13 @@ if any key material appears.
 - Collector and external-tool timeouts. External tools run without a shell,
   with absolute paths resolved at startup and fixed arguments.
 - No unbounded goroutines or queues.
+- **Notifications (D39)** are the agent's only outbound HTTP requests.
+  Destinations come only from the configuration file (at most 8), never
+  from the API. Each webhook has a 64-message queue, a rate limit (20 a
+  minute), a 10-second timeout and at most two retries; redirects are not
+  followed. A slow or failing webhook never blocks health evaluation.
+  Messages contain finding summaries (mount points, service and disk
+  names) and the machine name, which go to the service behind the URL.
 
 ## 11. Privileges
 
@@ -289,6 +296,7 @@ if any key material appears.
 | `smart/*.json` | `0640` | `smartctl` output per disk, bounded to 1 MiB |
 | Report files (`cockpit report -o`) | `0600` | Tightened if the file existed |
 | TLS private key | must be `0600` | Agent refuses group/other access |
+| Webhook URL files (`notifications.webhooks[].url_file`) | must be `0600` | The URL is a credential; never logged, and removed from delivery errors (D39) |
 
 A newly created key is printed once: on stdout by `cockpit keys create`
 (so it can be redirected to a file), or in a dialog in the TUI. The TUI

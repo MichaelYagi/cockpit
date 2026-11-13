@@ -5,6 +5,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -633,5 +635,45 @@ func TestTUIPrefsPath(t *testing.T) {
 	env.Home, env.LookupEnv = "", func(string) (string, bool) { return "", false }
 	if p := tuiPrefsPath(env); p != "" {
 		t.Errorf("relative path used: %q", p)
+	}
+}
+
+func TestNotifyTest(t *testing.T) {
+	var got []string
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("Title"))
+	}))
+	defer hook.Close()
+	dir := t.TempDir()
+	urlPath := filepath.Join(dir, "hook.url")
+	if err := os.WriteFile(urlPath, []byte(hook.URL+"/topic\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "c.yaml")
+	yaml := "notifications:\n  machine_name: box\n  webhooks:\n    - name: phone\n      url_file: " + urlPath + "\n      format: ntfy\n"
+	if err := os.WriteFile(cfg, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := run(t, "", "notify", "test", "--config", cfg)
+	if code != ExitOK || !strings.Contains(out, "phone: sent") || len(got) != 1 || got[0] != "Cockpit on box: TEST" {
+		t.Errorf("%d %q %q %v", code, out, errs, got)
+	}
+	// config check reads the URL file too.
+	if err := os.Chmod(urlPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := run(t, "", "config", "check", "--config", cfg); code != ExitError || !strings.Contains(errs, "chmod 600") {
+		t.Errorf("config check: %d %s", code, errs)
+	}
+	if code, _, errs := run(t, "", "notify", "test", "--config", filepath.Join(dir, "missing.yaml")); code != ExitError {
+		t.Errorf("missing config: %d %s", code, errs)
+	}
+	empty := filepath.Join(dir, "empty.yaml")
+	_ = os.WriteFile(empty, nil, 0o600)
+	if code, _, errs := run(t, "", "notify", "test", "--config", empty); code != ExitError || !strings.Contains(errs, "No webhooks") {
+		t.Errorf("no webhooks: %d %s", code, errs)
+	}
+	if code, _, _ := run(t, "", "notify"); code != ExitUsage {
+		t.Errorf("usage: %d", code)
 	}
 }

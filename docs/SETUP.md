@@ -518,6 +518,59 @@ The Overview shows each UPS. The `ups` health check warns when a UPS runs
 on battery and reports critical at low battery. Batteries and power adapters
 (laptops) and ZFS pools need no setup.
 
+## Notifications
+
+Cockpit can send its health findings to your phone or chat: when a
+problem appears or gets worse, and again when it is resolved (D39). It
+works with [ntfy](https://ntfy.sh) (phone push, no account needed),
+Discord, Slack, or any service that accepts JSON.
+
+1. Put the webhook URL in a private file. The URL is the password, so it
+   does not go in the configuration file:
+
+   ```sh
+   # user mode
+   echo 'https://ntfy.sh/pick-a-long-random-topic' > ~/.config/cockpit-monitor/ntfy.url
+   chmod 600 ~/.config/cockpit-monitor/ntfy.url
+   # system mode: the agent's user must be able to read it
+   echo 'https://ntfy.sh/pick-a-long-random-topic' | sudo tee /etc/cockpit-monitor/ntfy.url >/dev/null
+   sudo chown cockpit-monitor: /etc/cockpit-monitor/ntfy.url && sudo chmod 600 /etc/cockpit-monitor/ntfy.url
+   ```
+
+2. List it in the configuration file (`~/.config/cockpit-monitor/config.yaml`
+   or `/etc/cockpit-monitor/config.yaml`). `url_file` must be an absolute
+   path:
+
+   ```yaml
+   notifications:
+     machine_name: nas            # optional; default is the host name
+     webhooks:
+       - name: phone
+         url_file: /home/me/.config/cockpit-monitor/ntfy.url
+         format: ntfy             # ntfy | discord | slack | json (default)
+         min_severity: warning    # warning (default) | critical
+   ```
+
+3. Send a test message, then restart the agent:
+
+   ```sh
+   cockpit notify test
+   ```
+
+   It prints `phone: sent`, or the reason it failed. Subscribe to the same
+   topic in the ntfy app to receive it.
+
+For Discord, create a webhook in the channel's settings (Integrations) and
+use `format: discord`; for Slack, an incoming webhook with
+`format: slack`. With `format: json` Cockpit POSTs an object with
+`machine`, `title`, `status` (`warning`, `critical` or `resolved`),
+`subject`, `message` and `time`.
+
+A problem is announced once and again when it clears, not repeatedly. A
+problem still present when the agent restarts is announced again. If a
+webhook is down, the agent retries twice and logs the failure; it never
+affects monitoring.
+
 ## Configuration reference
 
 See `docs/ARCHITECTURE.md` §8 for the schema and defaults, or run

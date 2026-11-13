@@ -153,6 +153,12 @@ func TestEventsDependsOnDomainOnly(t *testing.T) {
 	rule(t, "internal/events/...", hasPrefix("internal/core", "internal/ulid"))
 }
 
+// Notifications read events through an interface and send HTTP
+// requests; they never reach the engine, storage or the API (D39).
+func TestNotifyDependsOnDomainOnly(t *testing.T) {
+	rule(t, "internal/notify/...", hasPrefix("internal/core"))
+}
+
 // Storage implements interfaces owned by domain packages.
 func TestStorageDependsOnDomainOnly(t *testing.T) {
 	rule(t, "internal/storage/...", hasPrefix("internal/core", "internal/auth", "internal/history", "internal/events", "internal/ulid", "internal/settings", "internal/config", "internal/netaddr"))

@@ -74,6 +74,7 @@ Commands:
   tls            Create the agent's TLS certificate for remote access
   fleet          Watch several machines from one console
   smart-helper   Read disk health as root for the agent (run by cockpit-smart.timer)
+  notify test    Send a test message to every configured webhook
   config check   Validate configuration and print the effective settings
   version        Print version information
   help           Show this help
@@ -108,6 +109,12 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return runFleet(ctx, rest, env)
 	case "smart-helper":
 		return runSMARTHelper(ctx, rest, env)
+	case "notify":
+		if len(rest) == 0 || rest[0] != "test" {
+			fmt.Fprintln(env.Stderr, `usage: cockpit notify test [flags]`)
+			return ExitUsage
+		}
+		return runNotifyTest(ctx, rest[1:], env)
 	case "config":
 		if len(rest) == 0 || rest[0] != "check" {
 			fmt.Fprintln(env.Stderr, `usage: cockpit config check [flags]`)
@@ -246,6 +253,12 @@ func runConfigCheck(args []string, env Env) int {
 	for _, w := range res.Warnings {
 		fmt.Fprintln(env.Stderr, "warning:", w)
 	}
+	// Webhook URL files are read here too, so a bad one shows up before
+	// the agent refuses to start.
+	if _, err := app.NotificationTargets(res.Config.Notifications); err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return ExitError
+	}
 	out, err := config.Marshal(res.Config)
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
@@ -258,6 +271,37 @@ func runConfigCheck(args []string, env Env) int {
 	fmt.Fprintf(env.Stdout, "# Configuration is valid.\n# mode:        %s\n# config file: %s (%s)\n# state dir:   %s\n# socket:      %s\n\n%s",
 		res.Paths.Mode, res.Paths.ConfigFile, found, res.Paths.StateDir, res.Paths.SocketPath, out)
 	return ExitOK
+}
+
+func runNotifyTest(ctx context.Context, args []string, env Env) int {
+	f := newConfigFlags("cockpit notify test", env)
+	if ok, code := parse(f.fs, args); !ok {
+		return code
+	}
+	res, err := config.Load(f.source(env))
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return ExitError
+	}
+	if len(res.Config.Notifications.Webhooks) == 0 {
+		fmt.Fprintf(env.Stderr, "No webhooks are configured in %s. Add them under notifications.webhooks; see docs/SETUP.md.\n", res.Paths.ConfigFile)
+		return ExitError
+	}
+	results, err := app.TestNotifications(ctx, res.Config.Notifications, time.Now())
+	if err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return ExitError
+	}
+	code := ExitOK
+	for _, r := range results {
+		if r.Err != nil {
+			fmt.Fprintf(env.Stdout, "%s: FAILED: %v\n", r.Name, r.Err)
+			code = ExitError
+		} else {
+			fmt.Fprintf(env.Stdout, "%s: sent\n", r.Name)
+		}
+	}
+	return code
 }
 
 func runVersion(env Env) int {
