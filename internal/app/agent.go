@@ -168,6 +168,7 @@ func Run(ctx context.Context, o Options) (err error) {
 	if cfg.Collection.UPS.Enabled {
 		env.UPSAddress = cfg.Collection.UPS.Address
 	}
+	env.Endpoints = EndpointSettings(cfg.Collection.Endpoints)
 	fsf := cfg.Collection.Filesystems
 	env.Filesystems = collector.FilesystemFilter{ExcludeTypes: fsf.ExcludeTypes, IncludeTypes: fsf.IncludeTypes, ExcludeMountPoints: fsf.ExcludeMountPoints}
 	eng, err := engine.New(o.Collectors(env), engine.Options{
@@ -419,4 +420,14 @@ func watchCertificate(ctx context.Context, log *slog.Logger, expires time.Time, 
 			check()
 		}
 	}
+}
+
+// EndpointSettings maps the configuration to the endpoint checker (D40).
+func EndpointSettings(e config.Endpoints) collector.EndpointSettings {
+	out := collector.EndpointSettings{Interval: e.Interval, Timeout: e.Timeout}
+	for _, t := range e.Targets {
+		out.Targets = append(out.Targets, collector.EndpointTarget{Name: t.Name, URL: t.URL,
+			ExpectStatus: append([]int(nil), t.ExpectStatus...), SkipTLSVerify: t.TLSSkipVerify})
+	}
+	return out
 }

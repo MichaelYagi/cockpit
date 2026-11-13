@@ -106,6 +106,7 @@ func validate(c *Config, p *Paths, v *validator) {
 			v.add("collection.ups.address", "must be host:port, e.g. %s (got %q)", DefaultUPSAddress, u.Address)
 		}
 	}
+	validateEndpoints(v, c.Collection.Endpoints)
 	for id, o := range c.Collection.Collectors {
 		field := "collection.collectors." + id
 		if !collectorIDPattern.MatchString(id) {
@@ -320,4 +321,62 @@ func validateNotifications(v *validator, n Notifications) {
 			v.add(field+".min_severity", "must be warning or critical (got %q)", w.MinSeverity)
 		}
 	}
+}
+
+func validateEndpoints(v *validator, e Endpoints) {
+	const base = "collection.endpoints"
+	inRange(v, base+".interval", e.Interval, 10*time.Second, time.Hour)
+	inRange(v, base+".timeout", e.Timeout, time.Second, 30*time.Second)
+	if e.Timeout > e.Interval/2 {
+		v.add(base+".timeout", "must be at most half the interval (got %s for %s)", e.Timeout, e.Interval)
+	}
+	if len(e.Targets) > MaxEndpoints {
+		v.add(base+".targets", "at most %d targets are allowed (got %d)", MaxEndpoints, len(e.Targets))
+		return
+	}
+	seen := map[string]bool{}
+	for i, t := range e.Targets {
+		field := fmt.Sprintf("%s.targets[%d]", base, i)
+		switch {
+		case !webhookNamePattern.MatchString(t.Name):
+			v.add(field+".name", "must be 1-64 letters, digits, spaces or . _ - (got %q)", t.Name)
+		case seen[strings.ToLower(t.Name)]:
+			v.add(field+".name", "%q is used twice", t.Name)
+		}
+		seen[strings.ToLower(t.Name)] = true
+		if msg := endpointURLProblem(t.URL); msg != "" {
+			v.add(field+".url", "%s", msg)
+		}
+		for _, code := range t.ExpectStatus {
+			if code < 100 || code > 599 {
+				v.add(field+".expect_status", "%d is not an HTTP status code", code)
+			}
+		}
+		if strings.HasPrefix(t.URL, "tcp://") && (len(t.ExpectStatus) > 0 || t.TLSSkipVerify) {
+			v.add(field, "expect_status and tls_skip_verify apply only to http:// and https:// targets")
+		}
+	}
+}
+
+func endpointURLProblem(raw string) string {
+	if len(raw) > 2048 {
+		return "is longer than 2048 characters"
+	}
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || u.Host == "":
+		return fmt.Sprintf("%q is not a URL like https://example.com/health or tcp://host:port", raw)
+	case u.User != nil:
+		return "must not contain a user name or password: the configuration file is not a place for secrets"
+	case u.Scheme == "tcp":
+		if _, port, err := net.SplitHostPort(u.Host); err != nil || port == "" {
+			return fmt.Sprintf("%q needs a port, e.g. tcp://192.168.1.10:22", raw)
+		}
+		if (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+			return fmt.Sprintf("%q: a tcp:// target is only host:port", raw)
+		}
+	case u.Scheme != "http" && u.Scheme != "https":
+		return fmt.Sprintf("%q must start with http://, https:// or tcp://", raw)
+	}
+	return ""
 }

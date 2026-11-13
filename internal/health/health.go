@@ -52,6 +52,16 @@ const (
 	CheckNetworkErrors   = "network_errors"
 	CheckZFSPools        = "zfs_pools"
 	CheckUPS             = "ups"
+	CheckEndpoints       = "endpoints"
+)
+
+// Endpoint check limits (D40).
+const (
+	// EndpointFailures is how many checks in a row must fail before an
+	// endpoint is reported down, so one lost packet does not alert.
+	EndpointFailures = 2
+	// certWarnDays is how early an expiring certificate is a warning.
+	certWarnDays = 14
 )
 
 // CheckResult is one check's outcome.
@@ -204,6 +214,7 @@ var checks = []checkDef{
 	{CheckNetworkErrors, "Network errors", (*Evaluator).networkErrors},
 	{CheckZFSPools, "ZFS pools", (*Evaluator).zfsPools},
 	{CheckUPS, "UPS", (*Evaluator).ups},
+	{CheckEndpoints, "Endpoints", (*Evaluator).endpoints},
 }
 
 // Evaluate runs every check once, updates findings and publishes events.
@@ -698,6 +709,51 @@ func (e *Evaluator) ups(s *core.Snapshot, now time.Time) ([]observation, core.Av
 		out = append(out, observation{subject: "ups:" + u.Name, finding: core.Finding{
 			Severity: sev, Summary: summary, Evidence: ev,
 			Recommendation: "Check the mains supply. If power does not return before the battery runs out, shut down cleanly (upsmon can do this automatically).",
+		}})
+	}
+	return out, core.Available, ""
+}
+
+// endpoints reports configured services that are down (critical, after
+// EndpointFailures failed checks in a row) or whose HTTPS certificate
+// expires within certWarnDays (warning) or has expired (critical) (D40).
+func (e *Evaluator) endpoints(s *core.Snapshot, now time.Time) ([]observation, core.Availability, string) {
+	avail, reason, ok := usable(s.Endpoints.Meta, s.Endpoints.Data != nil, now)
+	if !ok {
+		return nil, avail, reason
+	}
+	var out []observation
+	for _, ep := range *s.Endpoints.Data {
+		var sev core.Severity
+		summary := ep.Name + " is up"
+		ev := map[string]string{"kind": ep.Kind, "consecutive_failures": strconv.Itoa(ep.ConsecutiveFailures)}
+		if ep.StatusCode != nil {
+			ev["status_code"] = strconv.Itoa(*ep.StatusCode)
+		}
+		if ep.ResponseMillis != nil {
+			ev["response_ms"] = f1(*ep.ResponseMillis)
+		}
+		rec := "Check that the service is running and reachable from this machine (firewall, DNS, port)."
+		switch {
+		case !ep.Up && ep.ConsecutiveFailures >= EndpointFailures:
+			sev = core.SeverityCritical
+			summary = ep.Name + " is down: " + ep.Error
+			ev["error"] = ep.Error
+		case ep.CertExpiresAt != nil:
+			days := ep.CertExpiresAt.Sub(now).Hours() / 24
+			ev["certificate_expires_at"] = ep.CertExpiresAt.UTC().Format(time.RFC3339)
+			switch {
+			case days <= 0:
+				sev, summary = core.SeverityCritical, ep.Name+"'s TLS certificate has expired"
+			case days < certWarnDays:
+				sev, summary = core.SeverityWarning, fmt.Sprintf("%s's TLS certificate expires in %d days", ep.Name, int(math.Ceil(days)))
+			}
+			if sev != "" {
+				rec = "Renew the service's certificate (for example with certbot or your reverse proxy) before clients start refusing it."
+			}
+		}
+		out = append(out, observation{subject: "endpoint:" + ep.Name, finding: core.Finding{
+			Severity: sev, Summary: summary, Evidence: ev, Recommendation: rec,
 		}})
 	}
 	return out, core.Available, ""

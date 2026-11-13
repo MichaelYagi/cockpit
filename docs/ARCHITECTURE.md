@@ -236,6 +236,14 @@ collection:
   ups:                         # D25; Network UPS Tools, read-only
     enabled: false
     address: 127.0.0.1:3493
+  endpoints:                   # D40; service checks, none by default
+    interval: 30s              # 10s-1h
+    timeout: 5s                # per check; at most half the interval
+    targets:                   # at most 64
+      - name: Home Assistant
+        url: http://192.168.0.50:8123/   # http(s)://… or tcp://host:port; no user:password
+        expect_status: []      # default: 200-399
+        tls_skip_verify: false
 health:
   interval: 5s
   confirm: 2                   # evaluations a change must hold (anti-flapping)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/MichaelYagi/cockpit/internal/collector"
 	"github.com/MichaelYagi/cockpit/internal/core"
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 const version = "1.0.0"
@@ -287,6 +288,7 @@ func Collectors(env collector.Env) []collector.Collector {
 		newDMI(env),
 		newGPU(env),
 		newNetConfig(env),
+		portable.NewEndpoints(env),
 	}
 }
 

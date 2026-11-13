@@ -460,3 +460,31 @@ func TestNotificationsSetting(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointsSetting(t *testing.T) {
+	ok := "collection:\n  endpoints:\n    interval: 1m\n    targets:\n      - name: Home Assistant\n        url: http://192.168.0.50:8123/\n      - name: NAS SSH\n        url: tcp://192.168.0.10:22\n      - name: Proxmox\n        url: https://pve.lan:8006\n        tls_skip_verify: true\n        expect_status: [200, 401]\n"
+	res, err := Load(Source{ConfigPath: write(t, ok), Env: envMap(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := res.Config.Collection.Endpoints
+	if e.Interval != time.Minute || e.Timeout != 5*time.Second || len(e.Targets) != 3 || !e.Targets[2].TLSSkipVerify {
+		t.Errorf("%+v", e)
+	}
+	for bad, want := range map[string]string{
+		"collection:\n  endpoints:\n    targets:\n      - name: x\n        url: ftp://h/\n":                                         "must start with",
+		"collection:\n  endpoints:\n    targets:\n      - name: x\n        url: https://user:pw@h/\n":                               "password",
+		"collection:\n  endpoints:\n    targets:\n      - name: x\n        url: tcp://h\n":                                          "needs a port",
+		"collection:\n  endpoints:\n    targets:\n      - name: x\n        url: tcp://h:22/path\n":                                  "only host:port",
+		"collection:\n  endpoints:\n    targets:\n      - name: x\n        url: tcp://h:22\n        tls_skip_verify: true\n":        "apply only",
+		"collection:\n  endpoints:\n    targets:\n      - name: x\n        url: http://h\n        expect_status: [42]\n":            "not an HTTP status",
+		"collection:\n  endpoints:\n    targets:\n      - name: x\n        url: http://a\n      - name: X\n        url: http://b\n": "used twice",
+		"collection:\n  endpoints:\n    targets:\n      - name: x\n        url: not a url\n":                                        "not a URL",
+		"collection:\n  endpoints:\n    interval: 5s\n":                                                                             "interval",
+		"collection:\n  endpoints:\n    interval: 10s\n    timeout: 6s\n":                                                           "half the interval",
+	} {
+		if _, err := Load(Source{ConfigPath: write(t, bad), Env: envMap(nil)}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}

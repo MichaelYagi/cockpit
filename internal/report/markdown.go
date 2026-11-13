@@ -249,6 +249,25 @@ func Markdown(r *apiv1.Report) []byte {
 				w.kv("DNS search", strings.Join(d.Search, ", "))
 			}
 		}
+		if e := n.Endpoints; e.Data != nil && len(*e.Data) > 0 {
+			w.line("")
+			w.table([]string{"Endpoint", "State", "Response", "Detail"}, func(row func(...string)) {
+				for _, ep := range *e.Data {
+					state, detail := "up", ""
+					if !ep.Up {
+						state, detail = fmt.Sprintf("down (%d in a row)", ep.ConsecutiveFailures), ep.Error
+					}
+					resp := "—"
+					if ep.ResponseMillis != nil {
+						resp = fmt.Sprintf("%.0f ms", *ep.ResponseMillis)
+					}
+					if ep.StatusCode != nil {
+						resp += fmt.Sprintf(" (HTTP %d)", *ep.StatusCode)
+					}
+					row(ep.Name, state, resp, detail)
+				}
+			})
+		}
 	}
 
 	if s := r.Services; s != nil {

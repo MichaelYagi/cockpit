@@ -138,7 +138,32 @@ type Collection struct {
 	Collectors  map[string]CollectorOverride `yaml:"collectors"`
 	Filesystems Filesystems                  `yaml:"filesystems"`
 	UPS         UPS                          `yaml:"ups"`
+	Endpoints   Endpoints                    `yaml:"endpoints"`
 }
+
+// Endpoints are services the agent checks over HTTP(S) or TCP (D40).
+// None by default.
+type Endpoints struct {
+	Interval time.Duration    `yaml:"interval"` // between checks of every target
+	Timeout  time.Duration    `yaml:"timeout"`  // per check
+	Targets  []EndpointTarget `yaml:"targets"`
+}
+
+// EndpointTarget is one service to check.
+type EndpointTarget struct {
+	Name string `yaml:"name"`
+	// URL is http://, https:// or tcp://host:port. It must not contain a
+	// user name or password.
+	URL string `yaml:"url"`
+	// ExpectStatus lists HTTP status codes that count as up; empty means
+	// 200-399.
+	ExpectStatus []int `yaml:"expect_status,omitempty"`
+	// TLSSkipVerify accepts any certificate (self-signed home servers).
+	TLSSkipVerify bool `yaml:"tls_skip_verify,omitempty"`
+}
+
+// MaxEndpoints bounds collection.endpoints.targets.
+const MaxEndpoints = 64
 
 // UPS configures reading a Network UPS Tools server (D25). Off by default.
 type UPS struct {
@@ -268,8 +293,9 @@ func Defaults() Config {
 		},
 		History: History{Enabled: true, Retention: HistoryRetention{Raw: 24 * time.Hour, Minute: 7 * 24 * time.Hour, Hour: 90 * 24 * time.Hour}},
 		Collection: Collection{
-			Defaults: CollectorSettings{Interval: 2 * time.Second, Timeout: time.Second},
-			UPS:      UPS{Address: DefaultUPSAddress},
+			Defaults:  CollectorSettings{Interval: 2 * time.Second, Timeout: time.Second},
+			UPS:       UPS{Address: DefaultUPSAddress},
+			Endpoints: Endpoints{Interval: 30 * time.Second, Timeout: 5 * time.Second},
 		},
 		Logging: Logging{Level: "info", Format: "text"},
 		TUI:     TUI{Refresh: time.Second},

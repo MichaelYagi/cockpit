@@ -159,6 +159,7 @@ A collector declares what it can **potentially** provide. `Probe` and each
 | `linux.power` | 4 | `power.supplies` | `/sys/class/power_supply` (serial numbers are never read), every 10s |
 | `linux.ups` | 4 | `power.ups` | Network UPS Tools protocol, read-only (`LIST UPS`, `LIST VAR`), off unless `collection.ups.enabled` |
 | `linux.netconfig` | 2 | `network.routes`, `network.dns` | `/proc/net/route`, `/proc/net/ipv6_route`, `resolv.conf` |
+| `portable.endpoints` | 5 | `network.endpoints` | HTTP(S) GET or TCP connect to `collection.endpoints.targets` (D40); every platform; off until targets are listed |
 
 Filesystem collection skips pseudo, in-memory and image filesystems
 (`proc`, `sysfs`, `cgroup2`, `tmpfs`, `squashfs`, `rootfs`, …), overlays

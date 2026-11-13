@@ -403,6 +403,7 @@ func (h *Resources) networkResponse(s *core.Snapshot, now time.Time, withNet boo
 			return d
 		}),
 	}
+	out.Endpoints = section(s.Endpoints, now, func(v *core.EndpointList) *[]apiv1.Endpoint { return endpoints(v, withNet) })
 	if !withNet {
 		out.Routes = needsScope[[]apiv1.Route](s.Routes.Meta.Source, auth.ScopeNetworkRead)
 		out.DNS = needsScope[apiv1.DNS](s.DNS.Meta.Source, auth.ScopeNetworkRead)
@@ -537,4 +538,21 @@ func hasScope(r *http.Request, s auth.Scope) bool {
 // needsScope is a section withheld because the caller lacks a scope.
 func needsScope[T any](source string, s auth.Scope) apiv1.Section[T] {
 	return apiv1.Section[T]{Status: apiv1.PermissionDenied, Source: source, Reason: "Requires the " + string(s) + " scope."}
+}
+
+// endpoints maps endpoint checks. Targets name hosts and need
+// network:read, like interface addresses (D27, D40).
+func endpoints(v *core.EndpointList, withTarget bool) *[]apiv1.Endpoint {
+	out := make([]apiv1.Endpoint, 0, len(*v))
+	for _, e := range *v {
+		ep := apiv1.Endpoint{Name: e.Name, Kind: e.Kind, Up: e.Up, ConsecutiveFailures: e.ConsecutiveFailures,
+			StatusCode: e.StatusCode, ResponseMillis: e.ResponseMillis, Error: e.Error, CheckedAt: e.CheckedAt.UTC(), CertExpiresAt: e.CertExpiresAt}
+		if withTarget {
+			ep.Target = e.Target
+		} else {
+			ep.Redacted = []string{"target"}
+		}
+		out = append(out, ep)
+	}
+	return &out
 }

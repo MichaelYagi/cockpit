@@ -58,6 +58,17 @@ func Anonymize(r *apiv1.Report) (*apiv1.Report, error) {
 	if err := json.Unmarshal(raw, out); err != nil {
 		return nil, err
 	}
+	// Endpoint targets are URLs that may name internal hosts the
+	// collected identifiers do not cover; drop them (D40).
+	if out.Network != nil && out.Network.Endpoints.Data != nil {
+		for i := range *out.Network.Endpoints.Data {
+			ep := &(*out.Network.Endpoints.Data)[i]
+			if ep.Target != "" {
+				ep.Target = ""
+				ep.Redacted = append(ep.Redacted, "target")
+			}
+		}
+	}
 	out.Anonymized = true
 	return out, nil
 }
