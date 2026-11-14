@@ -34,6 +34,9 @@ fingerprint and pins it after you confirm (--yes accepts it, for scripts
 that have checked the fingerprint another way). A machine whose ID or
 certificate changes is refused until it is added again with --replace.
 
+URL may be http:// for an agent started with --lan-http (private
+addresses) or --http-public; the key then travels unencrypted.
+
 Keys need system:read and metrics:read; add network:read only if you want
 network detail. Key files must be chmod 600.
 `
@@ -96,8 +99,8 @@ func runFleet(ctx context.Context, args []string, env Env) int {
 				trust = "pinned " + m.TLSFingerprint[:16] + "…"
 			case m.TLSCA != "":
 				trust = "CA " + m.TLSCA
-			case strings.HasPrefix(m.URL, "http://"):
-				trust = "loopback http"
+			case m.Transport() != fleet.TransportHTTPS:
+				trust = m.Transport()
 			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", m.Name, m.URL, trust, m.MachineID, m.AddedAt.Local().Format("2006-01-02"))
 		}
@@ -214,6 +217,12 @@ func fleetAdd(ctx context.Context, path string, args []string, env Env) int {
 		m.TLSFingerprint = fp
 	}
 
+	switch m.Transport() {
+	case fleet.TransportPlainLAN:
+		fmt.Fprintln(env.Stderr, "warning: plain http; the API key and data travel unencrypted on this network")
+	case fleet.TransportPlainPublic:
+		fmt.Fprintln(env.Stderr, "warning: plain http to a public address; the API key and data can be read and reused by anyone on the way")
+	}
 	c, err := m.Client(env.LookupEnv, client.WithTimeout(10*time.Second))
 	if err != nil {
 		fmt.Fprintln(env.Stderr, "error:", err)

@@ -33,6 +33,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **The fleet console works with plain-HTTP machines (D43).**
+  `cockpit fleet add NAME http://192.168.x.y:7878` accepts a machine
+  started with `--lan-http` (private addresses) or `--http-public`; it
+  used to refuse every `http://` address except loopback. `fleet list`
+  shows the transport.
 - **The Cockpit version is shown everywhere.** The TUI header shows it
   next to `COCKPIT`, and the help screen (`?`) also names the TUI's own
   version when it differs from the machine it is watching. The web
