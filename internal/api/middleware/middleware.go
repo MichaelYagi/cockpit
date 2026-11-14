@@ -138,7 +138,7 @@ func CORS(origins []string) func(http.Handler) http.Handler {
 			h := w.Header()
 			h.Add("Vary", "Origin")
 			h.Set("Access-Control-Allow-Origin", origin)
-			h.Set("Access-Control-Expose-Headers", "X-Request-ID, Retry-After")
+			h.Set("Access-Control-Expose-Headers", "X-Request-ID, Retry-After, X-Cockpit-Version")
 			if preflight {
 				h.Set("Access-Control-Allow-Methods", "GET")
 				h.Set("Access-Control-Allow-Headers", "Authorization, Accept, Last-Event-ID")
@@ -267,6 +267,18 @@ func RequireScope(s auth.Scope) func(http.Handler) http.Handler {
 					fmt.Sprintf("This key does not have the %s scope.", s))
 				return
 			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// Version sets X-Cockpit-Version on the response. The router applies it
+// after authentication only, so unauthenticated clients (scanners on a
+// public listener) don't learn the version.
+func Version(v string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(apiv1.VersionHeader, v)
 			next.ServeHTTP(w, r)
 		})
 	}

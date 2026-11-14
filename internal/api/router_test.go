@@ -953,3 +953,21 @@ func TestWebDashboardRoutes(t *testing.T) {
 		t.Errorf("disabled dashboard: %d", r.status)
 	}
 }
+
+// The version header is on authenticated responses only, so scanners
+// hitting a public listener don't learn it.
+func TestVersionHeaderOnlyWhenAuthenticated(t *testing.T) {
+	h := router(t, newEnv(t, nil).d, Options{Listener: ListenerTCP})
+	if r := do(t, h, http.MethodGet, "/api/v1/system", bearer(systemKey)); r.status != http.StatusOK || r.header.Get(apiv1.VersionHeader) == "" {
+		t.Errorf("authenticated: status %d, version %q", r.status, r.header.Get(apiv1.VersionHeader))
+	}
+	if r := do(t, h, http.MethodGet, "/api/v1/metrics", bearer(systemKey)); r.status != http.StatusForbidden || r.header.Get(apiv1.VersionHeader) == "" {
+		t.Errorf("wrong scope: status %d, version %q", r.status, r.header.Get(apiv1.VersionHeader))
+	}
+	if r := do(t, h, http.MethodGet, "/api/v1/system"); r.status != http.StatusUnauthorized || r.header.Get(apiv1.VersionHeader) != "" {
+		t.Errorf("no key: status %d, version %q", r.status, r.header.Get(apiv1.VersionHeader))
+	}
+	if r := do(t, h, http.MethodGet, "/api/v1/livez"); r.header.Get(apiv1.VersionHeader) != "" {
+		t.Errorf("public route leaked version %q", r.header.Get(apiv1.VersionHeader))
+	}
+}

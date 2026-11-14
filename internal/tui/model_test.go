@@ -1524,3 +1524,21 @@ func TestNetworkEditCheck(t *testing.T) {
 		t.Errorf("add after edit: %q %v", m.input, m.epEdit)
 	}
 }
+
+func TestVersionShown(t *testing.T) {
+	m := New(&fakeAPI{}, Options{Version: "v1.2.0"})
+	if got := m.versionLine(); got != "This TUI: Cockpit v1.2.0." {
+		t.Errorf("before status: %q", got)
+	}
+	m.status = &apiv1.Status{Agent: apiv1.Agent{Version: "v1.2.0"}}
+	if got := m.versionLine(); got != "Cockpit v1.2.0." {
+		t.Errorf("same version: %q", got)
+	}
+	if h := m.header(120); !strings.Contains(h, "v1.2.0") {
+		t.Errorf("header lacks version: %q", h)
+	}
+	m.status.Agent.Version = "v1.1.0"
+	if got := m.versionLine(); got != "Connected Cockpit: v1.1.0 · this TUI: v1.2.0." {
+		t.Errorf("different versions: %q", got)
+	}
+}

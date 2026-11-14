@@ -1,7 +1,7 @@
 // Cockpit web dashboard (D35): a read-only API client. Everything shown
 // comes from /api/v1 with the key the user entered.
 
-import { APIError, get, getKey, setKey, stream } from './api.js';
+import { APIError, get, getKey, setKey, stream, version } from './api.js';
 import { LineChart } from './chart.js';
 import { ago, bar, bytes, card, clock, duration, h, kv, level, note, num, pct, pill, rate, replace, section, table } from './dom.js';
 
@@ -281,18 +281,20 @@ function layout() {
   els.os = h('span', { class: 'os muted' });
   els.health = h('span', { class: 'head-health' });
   els.conn = h('span', { class: 'conn' });
+  els.ver = h('span', { class: 'ver muted' });
+  els.footVer = h('span');
   els.nav = h('nav', { class: 'tabs', 'aria-label': 'Screens' },
     screens.map((s, i) => h('a', { href: '#/' + s.id, 'data-id': s.id }, h('span', { class: 'num' }, String(i + 1)), s.name)));
   els.main = h('main', { id: 'main', tabindex: '-1' });
   replace(root,
     h('header', { class: 'top' },
-      h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '', width: 22, height: 22 }), h('span', null, 'Cockpit')),
+      h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '', width: 22, height: 22 }), h('span', null, 'Cockpit'), els.ver),
       h('div', { class: 'ident' }, els.host, els.os),
       h('div', { class: 'head-right' }, els.health, els.conn,
         h('button', { class: 'ghost', type: 'button', onclick: () => signOut('Signed out. The key was removed from this tab.') }, 'Sign out'))),
     els.nav,
     els.main,
-    h('footer', null, 'Read-only view. Your key is kept in this browser tab only and is forgotten when the tab closes.'));
+    h('footer', null, els.footVer, 'Read-only view. Your key is kept in this browser tab only and is forgotten when the tab closes.'));
   updateHeader();
 }
 
@@ -308,6 +310,9 @@ function updateHeader() {
   els.host.textContent = sys?.hostname || location.hostname;
   els.os.textContent = sys ? [sys.os?.pretty_name || sys.os?.name, sys.architecture].filter(Boolean).join(' · ') : '';
   document.title = (sys?.hostname ? sys.hostname + ' · ' : '') + 'Cockpit';
+  const ver = version() || state.agent?.version || '';
+  els.ver.textContent = ver;
+  els.footVer.textContent = ver ? `Cockpit ${ver} · ` : '';
   replace(els.health, state.health ? pill(state.health.status) : null);
   const words = {
     live: ['ok', 'Live' + (state.updated ? ' · ' + clock(state.updated) : '')],
@@ -476,7 +481,7 @@ function Overview(el) {
       ['OS', sys.os?.pretty_name || sys.os?.name],
       ['Kernel', sys.kernel],
       ['Uptime', duration(sys.boot_time ? (Date.now() - Date.parse(sys.boot_time)) / 1000 : sys.uptime_seconds)],
-      state.agent ? ['Agent', state.agent.version] : null,
+      state.agent ? ['Version', 'Cockpit ' + state.agent.version] : null,
     ]) : note('Needs the system:read scope.'));
     // Storage
     const fs = m ? section(m.filesystems, 'Storage') : {};

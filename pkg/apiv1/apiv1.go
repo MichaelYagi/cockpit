@@ -98,3 +98,7 @@ const (
 
 // RequestIDHeader carries the request ID on every response.
 const RequestIDHeader = "X-Request-ID"
+
+// VersionHeader carries the Cockpit version on every authenticated
+// response (never on public routes or failed authentication).
+const VersionHeader = "X-Cockpit-Version"

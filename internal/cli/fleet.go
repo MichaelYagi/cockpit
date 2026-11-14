@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/MichaelYagi/cockpit/internal/buildinfo"
 	"github.com/MichaelYagi/cockpit/internal/config"
 	"github.com/MichaelYagi/cockpit/internal/fleet"
 	"github.com/MichaelYagi/cockpit/internal/tui"
@@ -288,7 +289,7 @@ func runFleetConsole(ctx context.Context, env Env) int {
 			return ExitOK
 		}
 		m, _ := l.Get(open)
-		if err := tui.Run(ctx, clients[open], tui.RunOptions{Options: tui.Options{Target: open + " · " + m.URL, Refresh: 2 * time.Second, PrefsPath: tuiPrefsPath(env)}}); err != nil {
+		if err := tui.Run(ctx, clients[open], tui.RunOptions{Options: tui.Options{Target: open + " · " + m.URL, Refresh: 2 * time.Second, PrefsPath: tuiPrefsPath(env), Version: buildinfo.Version}}); err != nil {
 			fmt.Fprintln(env.Stderr, "error:", err)
 			return ExitError
 		}

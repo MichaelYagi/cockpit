@@ -60,6 +60,18 @@ TCP listener is running; the API Access screen says so.
 
 `cockpit tui --once` prints a plain-text summary instead of opening the UI.
 
+### Which version is running
+
+- **Command line:** `cockpit version` prints the version, commit and Go
+  version.
+- **TUI:** the version is in the header next to `COCKPIT`. The help screen
+  (`?`) also shows the TUI's own version when it differs from the
+  machine it is watching.
+- **Web dashboard:** beside the logo and in the footer.
+- **API:** the `X-Cockpit-Version` header on every authenticated
+  response, and `agent.version` in `GET /api/v1/status`. The agent also
+  logs it at startup.
+
 ### Themes
 
 The Settings screen (`S`) lists the color themes with a swatch of each.
