@@ -38,7 +38,9 @@ Keys are never accepted in URLs or query strings.
 at `/ui/` (`/` redirects there), unless `api.web.enabled` is `false`
 (D35). Its files are outside `/api/v1`, are not part of this contract and
 need no key; the page then calls the API like any other client, with the
-key the user enters. It is same-origin, so it needs no CORS.
+key the user enters. It is same-origin, so it needs no CORS. Machines
+listed in `api.web.machines` (D45) are called cross-origin, so each must
+list the dashboard's origin in its `api.cors.allowed_origins`.
 
 **Browsers.** Web pages can call the TCP listener only from origins listed
 in `api.cors.allowed_origins` (D34), for `GET` requests with an

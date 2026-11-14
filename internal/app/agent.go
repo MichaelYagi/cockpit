@@ -265,7 +265,11 @@ func Run(ctx context.Context, o Options) (err error) {
 	if cfg.API.TCP.Enabled {
 		opts := api.Options{Listener: api.ListenerTCP, CheckLoopbackHost: isLoopback(cfg.API.TCP.Address), Limits: limits, CORSOrigins: cfg.API.CORS.AllowedOrigins}
 		if cfg.API.Web.Enabled {
-			opts.Web = web.Handler()
+			var ms []web.Machine
+			for _, m := range cfg.API.Web.Machines {
+				ms = append(ms, web.Machine{Name: m.Name, URL: m.URL})
+			}
+			opts.Web = web.Handler(web.Options{Machines: ms})
 		}
 		if tcpH, err = api.NewRouter(deps, opts); err != nil {
 			return err

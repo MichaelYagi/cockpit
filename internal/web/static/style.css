@@ -292,3 +292,15 @@ form.signin .hint { font-size: 12.5px; margin: 6px 0 0; }
   .conn { display: none; }
   input[type="search"] { width: 100%; }
 }
+
+/* Machines (D45) */
+.machine-pick { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+.signin .machine-pick { margin: 6px 0 2px; }
+.grid.machines { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.card.machine h2 .muted { font-weight: 400; }
+.card.machine .mono { font-family: var(--mono); font-size: 12px; margin: -4px 0 8px; }
+.card.machine button { margin-top: 10px; }
+.machine-key { display: flex; gap: 8px; margin-top: 8px; align-items: stretch; }
+.machine-key input { flex: 1; min-width: 0; }
+.banner:empty { display: none; }
+.banner { padding: 12px 24px 0; max-width: 1500px; margin: 0 auto; }

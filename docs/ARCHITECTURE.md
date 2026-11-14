@@ -226,6 +226,7 @@ api:
     allowed_origins: []        # exact origins, e.g. ["https://hoppscotch.io"]
   web:
     enabled: true              # web dashboard at /ui/ on the TCP listener (D35)
+    machines: []               # other agents the dashboard can show: [{name, url}] (D45)
   lan:
     enabled: false             # one-step LAN access over HTTPS (D37); --lan, COCKPIT_API_LAN
     http: false                # plain HTTP instead, private-network clients only (D38); --lan-http

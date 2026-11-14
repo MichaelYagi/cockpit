@@ -16,7 +16,7 @@ func serve(t *testing.T, method, path string, hdr map[string]string) *httptest.R
 		req.Header.Set(k, v)
 	}
 	w := httptest.NewRecorder()
-	Handler().ServeHTTP(w, req)
+	Handler(Options{}).ServeHTTP(w, req)
 	return w
 }
 
@@ -136,5 +136,25 @@ func TestScriptsNeverInsertHTML(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Configured machines (D45) are served as machines.json and are the only
+// other origins the page may call.
+func TestMachines(t *testing.T) {
+	h := Handler(Options{Machines: []Machine{{Name: "mac", URL: "http://192.168.0.20:7878"}, {Name: "nas", URL: "https://nas.lan:7878"}}})
+	req := httptest.NewRequest(http.MethodGet, "/ui/machines.json", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/json" ||
+		w.Body.String() != `[{"name":"mac","url":"http://192.168.0.20:7878"},{"name":"nas","url":"https://nas.lan:7878"}]` {
+		t.Fatalf("machines.json: %d %q %s", w.Code, w.Header().Get("Content-Type"), w.Body)
+	}
+	got := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(got, "connect-src 'self' http://192.168.0.20:7878 https://nas.lan:7878;") || strings.Count(got, "connect-src") != 1 {
+		t.Errorf("CSP %q", got)
+	}
+	if w := serve(t, http.MethodGet, "/ui/machines.json", nil); w.Body.String() != "[]" || w.Header().Get("Content-Security-Policy") != CSP {
+		t.Errorf("no machines: %s, CSP %q", w.Body, w.Header().Get("Content-Security-Policy"))
 	}
 }

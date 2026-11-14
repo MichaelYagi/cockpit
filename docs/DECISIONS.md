@@ -732,6 +732,9 @@ with `api.web.enabled: false`. It is an API client like the TUI:
 another computer, and it reuses the TCP listener, TLS setup and keys that
 already exist. Serving it from the same origin needs no CORS (D34).
 
+(Amended by D45: the page may also call machines listed in
+`api.web.machines`, which must allow its origin through CORS.)
+
 ## D36 — macOS system libraries through purego
 
 **Status:** Accepted (2026-11-13)
@@ -1058,3 +1061,45 @@ Either can be added later without changing `fleet scan`'s output.
 
 **Risk.** A scan connects to every address in the subnet, so network
 monitoring software may flag it. It runs only when the operator asks.
+
+## D45 — Several machines in the web dashboard
+
+**Status:** Accepted (2026-11-14)
+
+**Decision.** This amends D35, under which the dashboard only called its
+own agent. A dashboard can show other agents too.
+
+- **Configuration on the agent serving the dashboard.**
+  `api.web.machines` lists other agents as `{name, url}`. There are at
+  most 16, `url` is an exact origin such as `http://192.168.0.20:7878`,
+  and names and URLs are unique. The page reads the list from
+  `/ui/machines.json`. The same origins are added to the page's Content
+  Security Policy `connect-src`, so the page can call only them and
+  itself.
+- **Configuration on each listed agent.** It must allow the dashboard's
+  origin in `api.cors.allowed_origins` (D34). Otherwise the browser blocks
+  the calls, and the dashboard says which setting to add. The serving
+  agent never contacts the other machines and proxies nothing. The
+  browser talks to each agent directly, so every agent's own key check,
+  scopes, rate limits, Host check and private-network filter apply
+  unchanged.
+- **In the page.** A machine picker in the header switches the whole
+  dashboard to another agent, and the choice persists for the tab. A
+  **Machines** page lists every machine with its health, CPU, memory,
+  uptime and version, polled every 10 seconds with that machine's key.
+  One unreachable machine doesn't hold up the others.
+- **Keys.** Each machine's key is entered once per tab and kept, like the
+  dashboard's own key, in that tab's `sessionStorage` under the machine's
+  origin. Keys are never sent to any other machine.
+- **Mixed content.** A dashboard opened over HTTPS cannot call
+  plain-HTTP machines; browsers block it. The page says so.
+
+**Why.** The owner wants one browser view of every machine on the LAN.
+Calling each agent directly from the browser reuses its existing API and
+CORS support, and avoids making the serving agent a proxy that would
+hold or forward other machines' keys.
+
+**Risk.** The machine names and URLs in `machines.json` and the CSP
+header are visible to anyone who can load the page, including without a
+key. Use names you don't mind being seen. On a `--http-public` agent,
+that means the whole internet.

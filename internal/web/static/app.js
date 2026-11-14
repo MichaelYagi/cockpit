@@ -1,7 +1,7 @@
 // Cockpit web dashboard (D35): a read-only API client. Everything shown
 // comes from /api/v1 with the key the user entered.
 
-import { APIError, get, getKey, setKey, stream, version } from './api.js';
+import { APIError, get, getFrom, getKey, getTarget, keyFor, setKey, setKeyFor, setTarget, stream, version } from './api.js';
 import { LineChart } from './chart.js';
 import { ago, bar, bytes, card, clock, duration, h, kv, level, note, num, pct, pill, rate, replace, section, table } from './dom.js';
 
@@ -28,6 +28,7 @@ const state = {
 };
 
 let session = null; // running pollers and streams while signed in
+let machines = []; // other agents from machines.json (D45): [{name, url}]
 let screen = null; // the mounted screen
 
 // ---- polling ----
@@ -286,15 +287,18 @@ function layout() {
   els.nav = h('nav', { class: 'tabs', 'aria-label': 'Screens' },
     screens.map((s, i) => h('a', { href: '#/' + s.id, 'data-id': s.id }, h('span', { class: 'num' }, String(i + 1)), s.name)));
   els.main = h('main', { id: 'main', tabindex: '-1' });
+  els.banner = h('div', { class: 'banner', role: 'status' });
   replace(root,
     h('header', { class: 'top' },
       h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '', width: 22, height: 22 }), h('span', null, 'Cockpit'), els.ver),
+      machinePicker(),
       h('div', { class: 'ident' }, els.host, els.os),
       h('div', { class: 'head-right' }, els.health, els.conn,
         h('button', { class: 'ghost', type: 'button', onclick: () => signOut('Signed out. The key was removed from this tab.') }, 'Sign out'))),
     els.nav,
+    els.banner,
     els.main,
-    h('footer', null, els.footVer, 'Read-only view. Your key is kept in this browser tab only and is forgotten when the tab closes.'));
+    h('footer', null, els.footVer, 'Read-only view. Keys are kept in this browser tab only and are forgotten when the tab closes.'));
   updateHeader();
 }
 
@@ -307,7 +311,7 @@ function setConn(c) {
 function updateHeader() {
   if (!els.host) return;
   const sys = state.system;
-  els.host.textContent = sys?.hostname || location.hostname;
+  els.host.textContent = sys?.hostname || (getTarget() ? new URL(getTarget()).hostname : location.hostname);
   els.os.textContent = sys ? [sys.os?.pretty_name || sys.os?.name, sys.architecture].filter(Boolean).join(' · ') : '';
   document.title = (sys?.hostname ? sys.hostname + ' · ' : '') + 'Cockpit';
   const ver = version() || state.agent?.version || '';
@@ -322,6 +326,7 @@ function updateHeader() {
   }[state.conn];
   els.conn.className = 'conn ' + words[0];
   els.conn.textContent = words[1];
+  replace(els.banner, state.conn === 'offline' && getTarget() ? note(unreachable(getTarget()), 'crit') : null);
 }
 
 function route() {
@@ -368,7 +373,8 @@ function signIn(message) {
   const button = h('button', { type: 'submit', class: 'primary' }, 'Connect');
   const form = h('form', { class: 'signin', novalidate: true },
     h('div', { class: 'brand big' }, h('img', { src: 'icon.svg', alt: '', width: 34, height: 34 }), h('span', null, 'Cockpit')),
-    h('p', { class: 'muted' }, `Enter an API key to view ${location.host}.`),
+    machinePicker(),
+    h('p', { class: 'muted' }, `Enter an API key to view ${machineLabel(getTarget())}.`),
     h('label', { for: 'key' }, 'API key'),
     input,
     h('label', { class: 'check', for: 'show' }, show, ' Show key'),
@@ -377,6 +383,7 @@ function signIn(message) {
     h('p', { class: 'hint muted' },
       'Create a key in the terminal UI (API Access) or with ',
       h('code', null, 'cockpit keys create --scope all'),
+      getTarget() ? ' on that machine' : '',
       '. The key is kept in this tab only and is forgotten when you close it.'));
   form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -404,7 +411,7 @@ function signIn(message) {
       if (err instanceof APIError && err.status === 401) replace(msg, 'That key was not accepted. Check that it is complete and has not been revoked.');
       else if (err instanceof APIError && err.status === 429) replace(msg, 'Too many attempts. Wait a moment and try again.');
       else if (err instanceof APIError) replace(msg, err.message);
-      else replace(msg, 'The agent could not be reached.');
+      else replace(msg, unreachable(getTarget()));
     }
   });
   replace(root, h('div', { class: 'signin-wrap' }, form));
@@ -1009,7 +1016,146 @@ function Hardware(el) {
   return { destroy: () => poll.stop() };
 }
 
+// ---- machines (D45) ----
+
+const machineStore = 'cockpit.machine';
+
+function machineLabel(origin) {
+  if (!origin) return location.host;
+  const m = machines.find(x => x.url === origin);
+  return m ? `${m.name} (${new URL(origin).host})` : new URL(origin).host;
+}
+
+// unreachable explains a failed request to an agent. For another machine
+// the usual cause is its CORS setting, which the browser hides.
+function unreachable(origin) {
+  if (!origin) return 'The agent could not be reached.';
+  if (location.protocol === 'https:' && origin.startsWith('http:')) {
+    return `${machineLabel(origin)} uses plain HTTP, and a browser blocks that from an HTTPS page. Open this dashboard over HTTP, or start that machine with --lan.`;
+  }
+  return `Could not reach ${machineLabel(origin)}. Check that it is running with --lan, --lan-http or --http-public, and that its config.yaml lists ${location.origin} under api.cors.allowed_origins.`;
+}
+
+function machinePicker() {
+  if (!machines.length) return null;
+  const sel = h('select', { class: 'machine-pick', 'aria-label': 'Machine' },
+    h('option', { value: '' }, 'This machine'),
+    machines.map(m => h('option', { value: m.url }, m.name)));
+  sel.value = getTarget();
+  sel.addEventListener('change', () => switchMachine(sel.value));
+  return sel;
+}
+
+// switchMachine points the whole dashboard at another agent.
+function switchMachine(origin) {
+  stopSession();
+  setTarget(origin);
+  try {
+    if (origin) sessionStorage.setItem(machineStore, origin);
+    else sessionStorage.removeItem(machineStore);
+  } catch {
+    // Storage blocked: the choice lasts until the page reloads.
+  }
+  Object.assign(state, { system: null, agent: null, metrics: null, metricsError: null, health: null, healthError: null, updated: null, conn: 'connecting' });
+  if (getKey()) start();
+  else signIn();
+}
+
+// Machines lists this agent and every configured one with health, CPU,
+// memory, uptime and version. Each is polled with its own key; one that is
+// slow or unreachable doesn't hold up the others.
+function Machines(el) {
+  const rows = [{ name: 'This machine', url: '' }, ...machines].map(m => ({ m, el: h('section', { class: 'card machine' }) }));
+  el.append(h('div', { class: 'grid machines' }, rows.map(r => r.el)));
+  const ctrl = new AbortController();
+  const settle = p => p.then(data => ({ data }), error => ({ error }));
+
+  function keyForm(r, message) {
+    const input = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'ckp_…', 'aria-label': `API key for ${r.m.name}` });
+    const form = h('form', { class: 'machine-key', novalidate: true }, input, h('button', { type: 'submit', class: 'primary' }, 'Connect'));
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const key = input.value.trim();
+      if (!key.startsWith('ckp_')) return;
+      setKeyFor(r.m.url, key);
+      load(r);
+    });
+    return [message ? note(message, 'warn') : note('Enter an API key for this machine.'), form];
+  }
+
+  function draw(r, body) {
+    const current = r.m.url === getTarget();
+    replace(r.el,
+      h('h2', null, r.m.name, current ? h('span', { class: 'muted' }, ' · shown now') : null),
+      h('p', { class: 'muted mono' }, r.m.url ? new URL(r.m.url).host : location.host),
+      body,
+      current ? null : h('button', { type: 'button', class: 'ghost', onclick: () => switchMachine(r.m.url) }, 'Open'));
+  }
+
+  async function load(r) {
+    const key = keyFor(r.m.url);
+    if (!key) return draw(r, keyForm(r));
+    const [hl, mt, sy] = await Promise.all([
+      settle(getFrom(r.m.url, key, '/health', null, ctrl.signal)),
+      settle(getFrom(r.m.url, key, '/metrics', { sections: 'cpu,memory' }, ctrl.signal)),
+      settle(getFrom(r.m.url, key, '/system', null, ctrl.signal)),
+    ]);
+    if (ctrl.signal.aborted) return;
+    const errs = [hl, mt, sy].map(x => x.error).filter(Boolean);
+    if (errs.some(e => e instanceof APIError && e.status === 401)) {
+      setKeyFor(r.m.url, '');
+      return draw(r, keyForm(r, 'That key was not accepted. It may be incomplete or revoked.'));
+    }
+    if (errs.length === 3 && errs.every(e => !(e instanceof APIError))) return draw(r, note(unreachable(r.m.url), 'crit'));
+    const sys = sy.data?.system?.data;
+    const c = mt.data ? section(mt.data.cpu, 'CPU') : {};
+    const mm = mt.data ? section(mt.data.memory, 'Memory') : {};
+    const up = sys?.boot_time ? (Date.now() - Date.parse(sys.boot_time)) / 1000 : sys?.uptime_seconds;
+    draw(r, [
+      hl.data ? pill(hl.data.status) : note(hl.error?.status === 403 ? 'Health needs metrics:read.' : 'Health unavailable.'),
+      kv([
+        sys ? ['Host', sys.hostname] : null,
+        c.data ? ['CPU', pct(c.data.usage_percent)] : null,
+        mm.data ? ['Memory', pct(mm.data.used_percent)] : null,
+        up ? ['Uptime', duration(up)] : null,
+        version(r.m.url) ? ['Version', 'Cockpit ' + version(r.m.url)] : null,
+      ]),
+    ]);
+  }
+
+  rows.forEach(r => draw(r, note('Loading…')));
+  const all = () => {
+    if (!document.hidden) rows.forEach(r => load(r));
+  };
+  all();
+  const timer = setInterval(all, 10000);
+  return {
+    destroy() {
+      clearInterval(timer);
+      ctrl.abort();
+    },
+  };
+}
+
 // ---- start ----
 
-if (getKey()) start();
-else signIn();
+async function boot() {
+  try {
+    const r = await fetch('machines.json', { cache: 'no-store', credentials: 'omit' });
+    if (r.ok) machines = await r.json();
+  } catch {
+    machines = [];
+  }
+  if (machines.length) screens.splice(1, 0, { id: 'machines', name: 'Machines', mount: Machines });
+  let saved = '';
+  try {
+    saved = sessionStorage.getItem(machineStore) || '';
+  } catch {
+    saved = '';
+  }
+  if (saved && machines.some(m => m.url === saved)) setTarget(saved);
+  if (getKey()) start();
+  else signIn();
+}
+
+boot();
