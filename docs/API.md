@@ -10,6 +10,11 @@ disagree, the spec wins and this document must be fixed.
 - JSON only (`application/json`), UTF-8. SSE uses `text/event-stream`.
 - Timestamps: UTC, RFC 3339 (e.g. `2026-11-11T15:30:00Z`).
 - Every response includes an `X-Request-ID` header. Error bodies repeat it.
+- Every authenticated response includes `X-Cockpit-Version` (for example
+  `v0.5.0-47-gaf98c10`), the same value as `agent.version` in `/status`, so
+  any key can see the version without the `system:read` scope. Public
+  routes (`/livez`, `/openapi.json`) and failed authentication don't send
+  it, so an unauthenticated scanner doesn't learn the version.
 - Every resource includes `schema_version`, `machine_id`, and
   `generated_at`.
 - Field names: `snake_case`. Units are in the name (`_bytes`, `_percent`,

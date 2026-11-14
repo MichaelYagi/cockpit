@@ -69,7 +69,7 @@ cockpit report         # diagnostic report (Markdown or JSON, optionally anonymi
 cockpit fleet          # console for several machines (pinned TLS, no central server)
 cockpit tls init       # certificate for remote access
 cockpit config check   # validate configuration
-cockpit version
+cockpit version        # also shown in the TUI header, web dashboard and X-Cockpit-Version header
 ```
 
 The TUI never reads `/proc`, `/sys` or collector internals. It uses the

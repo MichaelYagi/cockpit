@@ -57,6 +57,19 @@ async function failure(res) {
   return new APIError(res.status, code, message, Number(res.headers.get('Retry-After')) || 0);
 }
 
+let agentVersion = '';
+
+// version returns the agent version from the last authenticated response
+// (X-Cockpit-Version), or '' before the first one.
+export function version() {
+  return agentVersion;
+}
+
+function remember(res) {
+  const v = res.headers.get('X-Cockpit-Version');
+  if (v) agentVersion = v;
+}
+
 // get fetches one API resource as JSON.
 export async function get(path, params, signal) {
   const res = await fetch(url(path, params), {
@@ -65,6 +78,7 @@ export async function get(path, params, signal) {
     credentials: 'omit',
     signal,
   });
+  remember(res);
   if (!res.ok) throw await failure(res);
   return res.json();
 }
@@ -80,6 +94,7 @@ export async function stream(path, params, onOpen, onEvent, signal) {
     credentials: 'omit',
     signal,
   });
+  remember(res);
   if (!res.ok) throw await failure(res);
   onOpen();
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();

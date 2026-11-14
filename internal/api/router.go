@@ -19,6 +19,7 @@ import (
 	"github.com/MichaelYagi/cockpit/internal/api/middleware"
 	"github.com/MichaelYagi/cockpit/internal/api/redact"
 	"github.com/MichaelYagi/cockpit/internal/auth"
+	"github.com/MichaelYagi/cockpit/internal/buildinfo"
 	"github.com/MichaelYagi/cockpit/internal/core"
 	"github.com/MichaelYagi/cockpit/pkg/apiv1"
 )
@@ -224,6 +225,7 @@ func newRouter(d Deps, o Options, routes []Route) (http.Handler, error) {
 		limits = o.Limits
 	}
 	authn := middleware.Authenticate(d.Verifier, limits, d.Stats, d.Logger)
+	version := middleware.Version(buildinfo.Version)
 	for _, rt := range routes {
 		if err := rt.validate(); err != nil {
 			return nil, err
@@ -233,7 +235,7 @@ func newRouter(d Deps, o Options, routes []Route) (http.Handler, error) {
 		}
 		var h http.Handler = rt.Handler
 		if !rt.Public {
-			h = authn(middleware.RequireScope(rt.Scope)(h))
+			h = authn(version(middleware.RequireScope(rt.Scope)(h)))
 		}
 		r.Method(rt.Method, BasePath+rt.Path, h)
 	}

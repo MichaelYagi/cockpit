@@ -13,7 +13,9 @@ info:
       `Authorization: Bearer ckp_...`, including from localhost. TCP
       requests are rate limited.
 
-    Every response carries an `X-Request-ID` header. Timestamps are UTC
+    Every response carries an `X-Request-ID` header. Every authenticated
+    response also carries `X-Cockpit-Version` (the Cockpit version, e.g.
+    `v0.5.0`); public routes and failed authentication never do. Timestamps are UTC
     RFC 3339. Operations declare their required scope in `x-cockpit-scope`
     (`public` means no authentication). Fields marked
     `x-cockpit-sensitive` are omitted by default and listed in the
@@ -807,6 +809,12 @@ components:
       description: Unique ID for this request; also present in error bodies and agent logs.
       required: true
       schema: { type: string, pattern: "^req_[0-9A-HJKMNP-TV-Z]{26}$" }
+    CockpitVersion:
+      description: >-
+        The Cockpit version serving the request, the same value as
+        `agent.version` in `/status`. Sent on every authenticated response,
+        never on public routes or authentication failures.
+      schema: { type: string }
   parameters:
     Limit:
       name: limit

@@ -388,7 +388,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 		}
 		return ExitOK
 	}
-	if err := tui.Run(ctx, c, tui.RunOptions{Options: tui.Options{Target: target, Refresh: interval, Embedded: embedded, Theme: *theme, PrefsPath: tuiPrefsPath(env)}}); err != nil {
+	if err := tui.Run(ctx, c, tui.RunOptions{Options: tui.Options{Target: target, Refresh: interval, Embedded: embedded, Theme: *theme, PrefsPath: tuiPrefsPath(env), Version: buildinfo.Version}}); err != nil {
 		fmt.Fprintln(env.Stderr, "error:", err)
 		return ExitError
 	}

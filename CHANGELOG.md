@@ -33,6 +33,13 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **The Cockpit version is shown everywhere.** The TUI header shows it
+  next to `COCKPIT`, and the help screen (`?`) also names the TUI's own
+  version when it differs from the machine it is watching. The web
+  dashboard shows it beside the logo and in the footer. Every
+  authenticated API response carries an `X-Cockpit-Version` header (never
+  public routes or failed authentication); `/status` still has
+  `agent.version`, and `cockpit version` prints it on the command line.
 - **`config.yaml` in the current folder.** In user mode, `cockpit` reads
   `config.yaml` (or `config.yml`) from the folder it is run from when one is there, before
   `~/.config/cockpit-monitor/config.yaml`. `--config` and `COCKPIT_CONFIG`

@@ -132,6 +132,9 @@ type Options struct {
 	// PrefsPath is the per-user preferences file (theme). Empty: nothing
 	// is read or saved.
 	PrefsPath string
+	// Version is this program's own version, shown in the help screen
+	// next to the connected Cockpit's version. Empty hides it.
+	Version string
 }
 
 // Model is the Bubble Tea model. It holds only API responses and

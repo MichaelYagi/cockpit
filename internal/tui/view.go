@@ -83,6 +83,9 @@ func fit(s string, h int) string {
 
 func (m *Model) header(w int) string {
 	left := m.st.title.Render("COCKPIT")
+	if m.status != nil && m.status.Agent.Version != "" {
+		left += " " + m.st.muted.Render(m.status.Agent.Version)
+	}
 	if m.system != nil && m.system.System.Data != nil {
 		s := m.system.System.Data
 		parts := []string{m.st.bold.Render(s.Hostname)}
@@ -917,14 +920,14 @@ func (m *Model) accessScreen(w, h int) string {
 		srv = waiting(m.st)
 	case m.status.API == nil:
 		srv = []string{
-			kv(m.st, "agent", m.status.Agent.Version+m.st.muted.Render(" · API "+m.status.Agent.APIVersion)),
+			kv(m.st, "version", m.status.Agent.Version+m.st.muted.Render(" · API "+m.status.Agent.APIVersion)),
 			kv(m.st, "via", m.opts.Target),
 			m.st.muted.Render("Connected with an API key. Server details and key management"),
 			m.st.muted.Render("are available only through the local admin socket."),
 		}
 	default:
 		a := m.status.API
-		srv = append(srv, kv(m.st, "agent", m.status.Agent.Version+m.st.muted.Render(" · API "+m.status.Agent.APIVersion+" · up "+duration(time.Duration(m.status.Agent.UptimeSeconds)*time.Second))))
+		srv = append(srv, kv(m.st, "version", m.status.Agent.Version+m.st.muted.Render(" · API "+m.status.Agent.APIVersion+" · up "+duration(time.Duration(m.status.Agent.UptimeSeconds)*time.Second))))
 		for _, l := range a.Listeners {
 			t := l.Transport
 			switch {
@@ -1149,6 +1152,9 @@ func (m *Model) helpView(w, h int) string {
 		badge(m.st, lvOK, "OK") + "   " + badge(m.st, lvWarn, "WARNING") + "   " + badge(m.st, lvCrit, "CRITICAL") + "   " + badge(m.st, lvUnknown, "UNKNOWN / unavailable"),
 		"",
 		m.st.muted.Render("Data comes from the Cockpit API at " + m.opts.Target + "."),
+	}
+	if v := m.versionLine(); v != "" {
+		lines = append(lines, m.st.muted.Render(v))
 	}
 	return column(m.st, []box{{title: "Help", lines: lines}}, w, h)
 }
@@ -1928,4 +1934,23 @@ func truncateLeft(s string, width int) string {
 		return s
 	}
 	return "…" + string(r[len(r)-width+1:])
+}
+
+// versionLine names the connected Cockpit's version and, when it differs,
+// this TUI's own (a TUI on one machine can watch another).
+func (m *Model) versionLine() string {
+	var srv string
+	if m.status != nil {
+		srv = m.status.Agent.Version
+	}
+	switch {
+	case srv == "" && m.opts.Version == "":
+		return ""
+	case srv == "":
+		return "This TUI: Cockpit " + m.opts.Version + "."
+	case m.opts.Version == "" || m.opts.Version == srv:
+		return "Cockpit " + srv + "."
+	default:
+		return "Connected Cockpit: " + srv + " · this TUI: " + m.opts.Version + "."
+	}
 }
