@@ -38,6 +38,7 @@ type Env struct {
 	LookupEnv      func(string) (string, bool)
 	Environ        []string
 	Home           string
+	WorkDir        string // current directory, searched for config.yaml
 	// Extensions are compiled-in extension collectors (D23), added to the
 	// platform's collectors by the agent and the embedded agent.
 	Extensions []collector.Collector
@@ -56,7 +57,8 @@ func (e Env) collectors() func(collector.Env) []collector.Collector {
 // OSEnv returns the real process environment.
 func OSEnv() Env {
 	home, _ := os.UserHomeDir()
-	return Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, LookupEnv: os.LookupEnv, Environ: os.Environ(), Home: home,
+	wd, _ := os.Getwd()
+	return Env{WorkDir: wd, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, LookupEnv: os.LookupEnv, Environ: os.Environ(), Home: home,
 		Interactive: isTerminal(os.Stdin) && isTerminal(os.Stdout)}
 }
 
@@ -146,7 +148,7 @@ func newConfigFlags(name string, env Env) *configFlags {
 	f := &configFlags{fs: flag.NewFlagSet(name, flag.ContinueOnError)}
 	f.fs.SetOutput(env.Stderr)
 	f.fs.StringVar(&f.mode, "mode", "", `"user" or "system" paths (default user; env COCKPIT_MODE)`)
-	f.fs.StringVar(&f.path, "config", "", "configuration file (env COCKPIT_CONFIG)")
+	f.fs.StringVar(&f.path, "config", "", "configuration file (env COCKPIT_CONFIG; default ./config.yaml if present, else the mode default)")
 	f.fs.StringVar(&f.logLevel, "log-level", "", "debug, info, warn or error")
 	f.fs.StringVar(&f.logFormat, "log-format", "", "text or json")
 	f.fs.StringVar(&f.tcpAddress, "tcp-address", "", "TCP listen address, e.g. 127.0.0.1:7878")
@@ -184,6 +186,7 @@ func (f *configFlags) source(env Env) config.Source {
 		Env:        env.LookupEnv,
 		Environ:    env.Environ,
 		Home:       env.Home,
+		WorkDir:    env.WorkDir,
 		Flags: config.Overrides{
 			LogLevel:      str("log-level", f.logLevel),
 			LogFormat:     str("log-format", f.logFormat),
@@ -337,7 +340,7 @@ func runTUI(ctx context.Context, args []string, env Env) int {
 		return ExitUsage
 	}
 
-	src := config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home}
+	src := config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home, WorkDir: env.WorkDir}
 	if *socket != "" {
 		src.Flags.SocketPath = socket // validate the socket actually used, not the default
 	}
@@ -468,7 +471,7 @@ func connect(env Env, mode, cfgPath, socket string, r *remoteFlags) (*client.Cli
 // default path from configuration when socket is empty.
 func connectSocket(env Env, mode, cfgPath, socket string) (*client.Client, string, error) {
 	if socket == "" {
-		res, err := config.Load(config.Source{Mode: config.Mode(mode), ConfigPath: cfgPath, Env: env.LookupEnv, Home: env.Home})
+		res, err := config.Load(config.Source{Mode: config.Mode(mode), ConfigPath: cfgPath, Env: env.LookupEnv, Home: env.Home, WorkDir: env.WorkDir})
 		if err != nil {
 			return nil, "", err
 		}

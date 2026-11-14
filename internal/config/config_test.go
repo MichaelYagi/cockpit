@@ -508,3 +508,54 @@ func TestLANPublicSetting(t *testing.T) {
 		t.Error("public with tls accepted")
 	}
 }
+
+func TestConfigInWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("logging: {level: debug}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+
+	res, err := Load(Source{Env: envMap(nil), Home: home, WorkDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.ConfigFileFound || res.Paths.ConfigFile != cfg || res.Config.Logging.Level != "debug" {
+		t.Errorf("current-folder config not used: %+v", res.Paths)
+	}
+
+	// COCKPIT_CONFIG and --config still win.
+	other := write(t, "logging: {level: warn}\n")
+	res, err = Load(Source{Env: envMap(map[string]string{EnvConfig: other}), Home: home, WorkDir: dir})
+	if err != nil || res.Config.Logging.Level != "warn" {
+		t.Errorf("COCKPIT_CONFIG did not override the current folder: %v", err)
+	}
+
+	// System mode never reads the current folder.
+	res, err = Load(Source{Mode: ModeSystem, Env: envMap(nil), Home: home, WorkDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Paths.ConfigFile == cfg {
+		t.Error("system mode read config.yaml from the current folder")
+	}
+
+	// No config.yaml in the folder: the default location is used.
+	res, err = Load(Source{Env: envMap(nil), Home: home, WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Paths.ConfigFile != filepath.Join(home, ".config", "cockpit-monitor", "config.yaml") {
+		t.Errorf("fallback path = %s", res.Paths.ConfigFile)
+	}
+
+	// A directory named config.yaml is ignored.
+	odd := t.TempDir()
+	if err := os.Mkdir(filepath.Join(odd, "config.yaml"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = Load(Source{Env: envMap(nil), Home: home, WorkDir: odd}); err != nil || res.ConfigFileFound {
+		t.Errorf("directory treated as config: %v", err)
+	}
+}
