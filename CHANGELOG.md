@@ -33,6 +33,12 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Several machines in the web dashboard (D45).** List other agents
+  under `api.web.machines` and the dashboard gets a machine picker and a
+  **Machines** page with each machine's health, CPU, memory, uptime and
+  version. Each listed machine must allow the dashboard's origin in
+  `api.cors.allowed_origins`. The browser calls each machine directly,
+  with a key per machine kept in the tab only.
 - **`cockpit fleet scan` finds agents on your network (D44).** It checks
   port 7878 (or `--port`) on each address of this machine's local /24
   (or `--subnet`), recognizes Cockpit by its public `/livez` reply without

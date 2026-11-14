@@ -93,7 +93,21 @@ type LAN struct {
 // Web is the browser dashboard served on the TCP listener (D35).
 type Web struct {
 	Enabled bool `yaml:"enabled"`
+	// Machines are other agents the dashboard can switch to and show on
+	// its Machines page (D45). Each must list this agent's origin in its
+	// api.cors.allowed_origins.
+	Machines []WebMachine `yaml:"machines,omitempty"`
 }
+
+// WebMachine is another agent shown in the web dashboard.
+type WebMachine struct {
+	Name string `yaml:"name"`
+	// URL is the agent's origin, e.g. http://192.168.0.20:7878.
+	URL string `yaml:"url"`
+}
+
+// MaxWebMachines bounds api.web.machines.
+const MaxWebMachines = 16
 
 // CORS lets listed web origins call the TCP listener from a browser
 // (D34). Empty (the default) allows none.

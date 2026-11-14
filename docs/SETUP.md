@@ -343,6 +343,51 @@ Number keys `1`–`9` switch screens.
   system service) to use the dashboard.
 - Turn it off with `api.web.enabled: false`.
 
+### Several machines in one dashboard
+
+One dashboard can show your other machines too (D45). It gets a machine
+picker in the top bar and a **Machines** page listing each machine's
+health, CPU, memory, uptime and version. The browser talks to each
+machine directly with that machine's key. Nothing is proxied.
+
+Say this PC (`192.168.0.185`) serves the dashboard and a Mac at
+`192.168.0.20` should appear in it. Both run with `--lan-http`.
+
+1. On **this PC**, list the Mac in `config.yaml`:
+
+   ```yaml
+   api:
+     web:
+       machines:
+         - name: Mac
+           url: http://192.168.0.20:7878
+   ```
+
+2. On **the Mac**, allow the PC's dashboard to call it, in its
+   `config.yaml`:
+
+   ```yaml
+   api:
+     cors:
+       allowed_origins: ["http://192.168.0.185:7878"]
+   ```
+
+   The origin must match the address you open the dashboard at
+   (`http://192.168.0.185:7878`, not `localhost`).
+
+3. Restart both agents, open `http://192.168.0.185:7878/`, sign in, then
+   go to **Machines** and enter the Mac's key (created on the Mac with
+   `cockpit keys create --scope all`). **Open** switches the whole
+   dashboard to the Mac.
+
+Each key stays in that browser tab only, as for the dashboard's own key.
+If a machine can't be reached, its card says what to check: that it
+runs with `--lan`, `--lan-http` or `--http-public`, and that its
+`allowed_origins` lists the dashboard's address. A dashboard opened over
+HTTPS can't show plain-HTTP machines, because browsers block that. The
+machine names and URLs are visible to anyone who can open the page, even
+without a key.
+
 ## Remote access
 
 By default TCP binds to `127.0.0.1` only. Remote access requires TLS and

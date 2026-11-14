@@ -575,3 +575,25 @@ func TestConfigInWorkDir(t *testing.T) {
 		t.Errorf("directory treated as config: %v", err)
 	}
 }
+
+func TestWebMachinesSetting(t *testing.T) {
+	ok := "api:\n  web:\n    machines:\n      - {name: Mac mini, url: \"http://192.168.0.20:7878\"}\n      - {name: nas, url: \"https://nas.lan:7878\"}\n"
+	res, err := Load(Source{ConfigPath: write(t, ok), Env: envMap(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ms := res.Config.API.Web.Machines; len(ms) != 2 || ms[0].Name != "Mac mini" || ms[1].URL != "https://nas.lan:7878" {
+		t.Errorf("machines %+v", ms)
+	}
+	for _, bad := range []string{
+		"api:\n  web:\n    machines:\n      - {name: a, url: \"http://192.168.0.20:7878/ui/\"}\n", // path
+		"api:\n  web:\n    machines:\n      - {name: a, url: \"ftp://x:1\"}\n",
+		"api:\n  web:\n    machines:\n      - {name: \"\", url: \"http://x:1\"}\n",
+		"api:\n  web:\n    machines:\n      - {name: a, url: \"http://x:1\"}\n      - {name: A, url: \"http://y:1\"}\n", // duplicate name
+		"api:\n  web:\n    machines:\n      - {name: a, url: \"http://x:1\"}\n      - {name: b, url: \"http://x:1\"}\n", // duplicate url
+	} {
+		if _, err := Load(Source{ConfigPath: write(t, bad), Env: envMap(nil)}); err == nil {
+			t.Errorf("accepted:\n%s", bad)
+		}
+	}
+}

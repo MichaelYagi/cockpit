@@ -1,9 +1,45 @@
-// API access from the browser (D35). Same origin, key in the
-// Authorization header, no cookies. The key lives in this tab's
-// sessionStorage only, so it is gone when the tab closes.
+// API access from the browser (D35). Key in the Authorization header, no
+// cookies. Keys live in this tab's sessionStorage only, so they are gone
+// when the tab closes. Calls go to this page's agent or, after
+// setTarget, to another configured machine (D45), each with its own key.
 
 const storageName = 'cockpit.key';
-let memoryKey = '';
+const memoryKeys = {};
+let target = ''; // '' is this page's origin; otherwise another agent's origin
+const versions = {};
+
+// setTarget points get and stream at another agent's origin ('' for this
+// page's own agent).
+export function setTarget(origin) {
+  target = origin || '';
+}
+
+export function getTarget() {
+  return target;
+}
+
+function storageKey(origin) {
+  return origin ? storageName + ':' + origin : storageName;
+}
+
+// keyFor and setKeyFor read and write the key for one origin.
+export function keyFor(origin) {
+  try {
+    return sessionStorage.getItem(storageKey(origin)) || memoryKeys[origin || ''] || '';
+  } catch {
+    return memoryKeys[origin || ''] || '';
+  }
+}
+
+export function setKeyFor(origin, key) {
+  memoryKeys[origin || ''] = key;
+  try {
+    if (key) sessionStorage.setItem(storageKey(origin), key);
+    else sessionStorage.removeItem(storageKey(origin));
+  } catch {
+    // Storage blocked: the key stays in memory until the page reloads.
+  }
+}
 
 export class APIError extends Error {
   constructor(status, code, message, retryAfter) {
@@ -15,33 +51,23 @@ export class APIError extends Error {
 }
 
 export function getKey() {
-  try {
-    return sessionStorage.getItem(storageName) || memoryKey;
-  } catch {
-    return memoryKey;
-  }
+  return keyFor(target);
 }
 
 export function setKey(key) {
-  memoryKey = key;
-  try {
-    if (key) sessionStorage.setItem(storageName, key);
-    else sessionStorage.removeItem(storageName);
-  } catch {
-    // Storage blocked: the key stays in memory until the page reloads.
-  }
+  setKeyFor(target, key);
 }
 
-function url(path, params) {
-  const u = new URL('/api/v1' + path, location.origin);
+function url(base, path, params) {
+  const u = new URL('/api/v1' + path, base || location.origin);
   for (const [k, v] of Object.entries(params || {})) {
     if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, String(v));
   }
   return u;
 }
 
-function headers(accept) {
-  return { Authorization: 'Bearer ' + getKey(), Accept: accept };
+function headers(key, accept) {
+  return { Authorization: 'Bearer ' + key, Accept: accept };
 }
 
 async function failure(res) {
@@ -57,30 +83,35 @@ async function failure(res) {
   return new APIError(res.status, code, message, Number(res.headers.get('Retry-After')) || 0);
 }
 
-let agentVersion = '';
-
-// version returns the agent version from the last authenticated response
-// (X-Cockpit-Version), or '' before the first one.
-export function version() {
-  return agentVersion;
+// version returns the Cockpit version from the last authenticated
+// response (X-Cockpit-Version) of the current target, or of origin.
+export function version(origin) {
+  return versions[origin === undefined ? target : origin] || '';
 }
 
-function remember(res) {
+function remember(origin, res) {
   const v = res.headers.get('X-Cockpit-Version');
-  if (v) agentVersion = v;
+  if (v) versions[origin] = v;
 }
 
-// get fetches one API resource as JSON.
-export async function get(path, params, signal) {
-  const res = await fetch(url(path, params), {
-    headers: headers('application/json'),
+// getFrom fetches one API resource as JSON from origin ('' for this page's
+// agent) with key.
+export async function getFrom(origin, key, path, params, signal) {
+  const res = await fetch(url(origin, path, params), {
+    headers: headers(key, 'application/json'),
     cache: 'no-store',
     credentials: 'omit',
+    mode: 'cors',
     signal,
   });
-  remember(res);
+  remember(origin, res);
   if (!res.ok) throw await failure(res);
   return res.json();
+}
+
+// get fetches one API resource as JSON from the current target.
+export function get(path, params, signal) {
+  return getFrom(target, getKey(), path, params, signal);
 }
 
 // stream reads Server-Sent Events with fetch, since EventSource cannot
@@ -88,13 +119,15 @@ export async function get(path, params, signal) {
 // onEvent(type, data, id) for each event, and returns when the stream
 // ends.
 export async function stream(path, params, onOpen, onEvent, signal) {
-  const res = await fetch(url(path, params), {
-    headers: headers('text/event-stream'),
+  const origin = target;
+  const res = await fetch(url(origin, path, params), {
+    headers: headers(getKey(), 'text/event-stream'),
     cache: 'no-store',
     credentials: 'omit',
+    mode: 'cors',
     signal,
   });
-  remember(res);
+  remember(origin, res);
   if (!res.ok) throw await failure(res);
   onOpen();
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();

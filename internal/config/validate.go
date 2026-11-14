@@ -85,6 +85,7 @@ func validate(c *Config, p *Paths, v *validator) {
 		v.add("api.lan.enabled", "needs the TCP listener (api.tcp.enabled: true)")
 	}
 	validateCORS(v, c.API.CORS)
+	validateWebMachines(v, c.API.Web)
 	if c.API.TLS.Enabled() {
 		if c.API.TLS.CertFile == "" || c.API.TLS.KeyFile == "" {
 			v.add("api.tls", "cert_file and key_file must both be set")
@@ -185,6 +186,35 @@ func validateCORS(v *validator, c CORS) {
 		if msg := originProblem(o); msg != "" {
 			v.add("api.cors.allowed_origins", "%q %s", o, msg)
 		}
+	}
+}
+
+// validateWebMachines checks api.web.machines (D45): unique printable
+// names and exact origins, as for CORS.
+func validateWebMachines(v *validator, w Web) {
+	if len(w.Machines) > MaxWebMachines {
+		v.add("api.web.machines", "at most %d machines are allowed (got %d)", MaxWebMachines, len(w.Machines))
+		return
+	}
+	names, urls := map[string]bool{}, map[string]bool{}
+	for i, m := range w.Machines {
+		f := fmt.Sprintf("api.web.machines[%d]", i)
+		n := strings.TrimSpace(m.Name)
+		switch {
+		case n == "" || len(n) > 64 || n != m.Name:
+			v.add(f+".name", "is required: 1 to 64 characters, no leading or trailing spaces")
+		case strings.IndexFunc(n, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0:
+			v.add(f+".name", "must not contain control characters")
+		case names[strings.ToLower(n)]:
+			v.add(f+".name", "%q is listed twice", n)
+		}
+		names[strings.ToLower(n)] = true
+		if msg := originProblem(m.URL); msg != "" {
+			v.add(f+".url", "%q %s", m.URL, msg)
+		} else if urls[m.URL] {
+			v.add(f+".url", "%q is listed twice", m.URL)
+		}
+		urls[m.URL] = true
 	}
 }
 
