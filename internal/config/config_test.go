@@ -550,6 +550,22 @@ func TestConfigInWorkDir(t *testing.T) {
 		t.Errorf("fallback path = %s", res.Paths.ConfigFile)
 	}
 
+	// config.yml is accepted; config.yaml wins when both exist.
+	yml := t.TempDir()
+	if err := os.WriteFile(filepath.Join(yml, "config.yml"), []byte("logging: {level: warn}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err = Load(Source{Env: envMap(nil), Home: home, WorkDir: yml})
+	if err != nil || res.Paths.ConfigFile != filepath.Join(yml, "config.yml") || res.Config.Logging.Level != "warn" {
+		t.Errorf("config.yml not used: %v %+v", err, res.Paths)
+	}
+	if err := os.WriteFile(filepath.Join(yml, "config.yaml"), []byte("logging: {level: debug}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = Load(Source{Env: envMap(nil), Home: home, WorkDir: yml}); err != nil || res.Config.Logging.Level != "debug" {
+		t.Errorf("config.yaml should win over config.yml: %v", err)
+	}
+
 	// A directory named config.yaml is ignored.
 	odd := t.TempDir()
 	if err := os.Mkdir(filepath.Join(odd, "config.yaml"), 0o700); err != nil {

@@ -6,3 +6,4 @@ coverage.*
 .vscode/
 dist/
 /config.yaml
+/config.yml

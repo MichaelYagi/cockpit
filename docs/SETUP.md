@@ -126,7 +126,8 @@ The first of these that applies is used:
 
 1. `--config <file>` (the file must exist).
 2. `COCKPIT_CONFIG=<file>` (the file must exist).
-3. `config.yaml` in the folder you run `cockpit` from (user mode only).
+3. `config.yaml` (or, if that's absent, `config.yml`) in the folder you run
+   `cockpit` from (user mode only).
 4. `~/.config/cockpit-monitor/config.yaml` in user mode, or
    `/etc/cockpit-monitor/config.yaml` in system mode.
 
@@ -134,7 +135,7 @@ No file at all is fine: the agent runs on built-in defaults. The agent logs
 `loaded configuration file=…` at startup, and `cockpit config check` prints
 which file it read. The system service never reads the current folder, so
 it doesn't depend on where it was started. The repository's `.gitignore`
-lists `config.yaml`, so a copy in a checkout isn't committed by accident.
+lists `config.yaml` and `config.yml`, so a copy in a checkout isn't committed by accident.
 
 ## Installing a release
 

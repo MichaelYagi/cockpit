@@ -30,8 +30,8 @@ Red Hat Cockpit project (cockpit-project.org), which ships `cockpit.service`,
 | Environment variable prefix | `COCKPIT_` |
 | API key prefix | `ckp_` |
 
-**Amendment (Accepted 2026-11-14).** In user mode, `config.yaml` in the
-current working directory is read when present, after `--config` and
+**Amendment (Accepted 2026-11-14).** In user mode, `config.yaml` (else
+`config.yml`) in the current working directory is read when present, after `--config` and
 `COCKPIT_CONFIG` and before `$XDG_CONFIG_HOME/cockpit-monitor/config.yaml`.
 System mode never reads the working directory.
 

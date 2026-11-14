@@ -183,7 +183,7 @@ defaults.
 - **Precedence:** command-line flags > `COCKPIT_*` environment variables >
   config file > defaults.
 - **Locations,** first match wins: `--config`; `COCKPIT_CONFIG`;
-  `config.yaml` in the working directory (user mode only); then
+  `config.yaml`, then `config.yml`, in the working directory (user mode only); then
   `/etc/cockpit-monitor/config.yaml` (system mode) or
   `$XDG_CONFIG_HOME/cockpit-monitor/config.yaml` (user mode). A missing
   default file means built-in defaults; a missing `--config` or
