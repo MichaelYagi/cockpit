@@ -176,6 +176,15 @@ func fleetAdd(ctx context.Context, path string, args []string, env Env) int {
 	if ok, code := parse(fs, args[2:]); !ok {
 		return code
 	}
+	switch {
+	case m.KeyFile == "" && m.KeyEnv == "":
+		fmt.Fprintf(env.Stderr, "error: %s needs an API key: pass --key-file FILE (a chmod 600 file holding the key) or --key-env VAR\n"+
+			"  Create a key on that machine with: cockpit keys create --name fleet --scope system:read --scope metrics:read\n", m.Name)
+		return ExitUsage
+	case m.KeyFile != "" && m.KeyEnv != "":
+		fmt.Fprintln(env.Stderr, "error: use --key-file or --key-env, not both")
+		return ExitUsage
+	}
 	if m.KeyFile != "" {
 		abs, err := filepath.Abs(m.KeyFile)
 		if err != nil {

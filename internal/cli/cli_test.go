@@ -543,6 +543,14 @@ func TestFleetEnrollment(t *testing.T) {
 	}
 	url := "https://" + a.addr
 
+	// No key: a clear usage error before anything connects.
+	if code, out := fleetRun("", false, "add", "box", url); code != ExitUsage || !strings.Contains(out, "--key-file") || strings.Contains(out, "no such file") {
+		t.Errorf("no key: %d %s", code, out)
+	}
+	if code, out := fleetRun("", false, "add", "box", url, "--key-file", keyPath, "--key-env", "K"); code != ExitUsage || !strings.Contains(out, "not both") {
+		t.Errorf("both keys: %d %s", code, out)
+	}
+
 	// Not a terminal and no fingerprint: refuse rather than trust blindly.
 	if code, out := fleetRun("", false, "add", "box", url, "--key-file", keyPath); code != ExitUsage || !strings.Contains(out, a.fp) {
 		t.Fatalf("non-interactive add: %d %s", code, out)
