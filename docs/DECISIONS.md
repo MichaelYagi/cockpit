@@ -608,6 +608,7 @@ new listeners and no central server.
   only if the operator wants network detail (D27). The docs say a fleet
   host holding many keys should be protected like those machines.
 - Plain-HTTP machines are allowed only on loopback, as for every client.
+  (Amended by D43: private addresses and `--http-public` machines too.)
 
 **Why.** It meets the "fleet console" goal with the existing API, keeps
 every machine local-first, and avoids a server that would need its own
@@ -996,3 +997,23 @@ it is revoked. A reachable port is found by internet scanners within
 minutes; only the API key stands between them and the data. Use keys with
 the fewest scopes needed, revoke them when unused, and prefer `--lan`
 (HTTPS) where possible.
+
+## D43 — Fleet console reaches plain-HTTP machines
+
+**Status:** Accepted (2026-11-14)
+
+**Decision.** This amends D30, which allowed plain-HTTP machines only on
+loopback. `cockpit fleet add NAME http://…` accepts a machine started
+with `--lan-http` (D38) when its address is private, and one started with
+`--http-public` (D42) at any address. These are the same rules
+`cockpit tui --url` follows. `fleet add` prints a warning, and `fleet
+list` shows the transport (`plain http (LAN)` or `plain http (internet)`)
+in place of the certificate trust.
+
+**Why.** The owner runs every machine with plain HTTP, and the fleet
+console refused them.
+
+**Risk.** With no TLS there is no certificate to pin. The machine-ID check
+still catches a reinstall, but anyone on the network can read the key and
+impersonate the machine. `--lan` (HTTPS with pinning) remains the
+recommended setup.

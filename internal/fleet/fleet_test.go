@@ -119,3 +119,27 @@ func TestKeySources(t *testing.T) {
 		t.Error("missing env accepted")
 	}
 }
+
+func TestTransportAndPlainHTTPClients(t *testing.T) {
+	key := keyFile(t, 0o600)
+	for _, c := range []struct{ url, want string }{
+		{"https://web01.example:7878", TransportHTTPS},
+		{"http://127.0.0.1:7878", TransportLoopback},
+		{"http://localhost:7878", TransportLoopback},
+		{"http://192.168.0.185:7878", TransportPlainLAN},
+		{"http://10.1.2.3:7878", TransportPlainLAN},
+		{"http://203.0.113.7:7878", TransportPlainPublic},
+		{"http://home.example.net:7878", TransportPlainPublic},
+	} {
+		m := Machine{Name: "a", URL: c.url, KeyFile: key}
+		if got := m.Transport(); got != c.want {
+			t.Errorf("%s: transport %q, want %q", c.url, got, c.want)
+		}
+		cl, err := m.Client(nil)
+		if err != nil {
+			t.Errorf("%s: client refused: %v", c.url, err)
+			continue
+		}
+		cl.Close()
+	}
+}

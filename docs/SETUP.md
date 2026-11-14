@@ -505,6 +505,14 @@ polling it until you run `fleet add NAME ... --replace`. The list is
 but never contains keys. Keys can also come from an environment variable
 (`--key-env`).
 
+**Plain-HTTP machines.** A machine started with `--lan-http` (or
+`--http-public`) is added with its `http://` address; no certificate is
+pinned, and `fleet add` warns that the key travels unencrypted:
+
+```sh
+cockpit fleet add mac http://192.168.0.20:7878 --key-file ~/mac.key
+```
+
 Give fleet keys `system:read` and `metrics:read`. Add `network:read` only
 if you want addresses on the console host. Protect the console host as
 well as the machines it watches, because it holds their keys.

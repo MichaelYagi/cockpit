@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -214,7 +216,42 @@ func (m Machine) Client(lookupEnv func(string) (string, bool), opts ...client.Op
 		}
 		opts = append(opts, client.WithCAPEM(pem))
 	}
+	switch m.Transport() {
+	case TransportPlainLAN:
+		opts = append(opts, client.WithPlainHTTPOnPrivateNetwork())
+	case TransportPlainPublic:
+		opts = append(opts, client.WithPlainHTTP())
+	}
 	return client.NewTCP(m.URL, key, opts...)
+}
+
+// Transport kinds for a machine's URL.
+const (
+	TransportHTTPS       = "https"
+	TransportLoopback    = "loopback http"
+	TransportPlainLAN    = "plain http (LAN)"      // agent started with --lan-http (D38)
+	TransportPlainPublic = "plain http (internet)" // agent started with --http-public (D42)
+)
+
+// Transport says how the console reaches the machine. Plain http is
+// allowed to private addresses and, for agents started with
+// --http-public, to any address (D43); the key then travels unencrypted.
+func (m Machine) Transport() string {
+	u, err := url.Parse(m.URL)
+	if err != nil || u.Scheme != "http" {
+		return TransportHTTPS
+	}
+	h := u.Hostname()
+	if strings.EqualFold(h, "localhost") {
+		return TransportLoopback
+	}
+	if a, err := netip.ParseAddr(h); err == nil && a.Unmap().IsLoopback() {
+		return TransportLoopback
+	}
+	if client.IsPrivateAddress(h) {
+		return TransportPlainLAN
+	}
+	return TransportPlainPublic
 }
 
 // Verify contacts the machine and checks that it is the one enrolled.
