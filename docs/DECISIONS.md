@@ -1017,3 +1017,44 @@ console refused them.
 still catches a reinstall, but anyone on the network can read the key and
 impersonate the machine. `--lan` (HTTPS with pinning) remains the
 recommended setup.
+
+## D44 — Finding agents on the LAN: `cockpit fleet scan`
+
+**Status:** Accepted (2026-11-14)
+
+**Decision.** `cockpit fleet scan` finds Cockpit agents on the local
+network so their addresses don't have to be typed. It is a client-side
+TCP scan, not a broadcast protocol. Agents need no change, no new port
+and no firewall rule beyond the TCP port they already serve.
+
+- **What it scans.** By default, the /24 around each private IPv4 address
+  on this machine's up, non-loopback interfaces (narrower prefixes are
+  kept). `--subnet CIDR` (repeatable) overrides this; `--port` picks the
+  agent port (default 7878). Only private and loopback IPv4 networks are
+  accepted, each at most a /20, and at most 4096 addresses in total. A
+  scan never probes the internet.
+- **How it recognizes an agent.** It makes a TCP connection (600 ms
+  timeout, 64 at once), then sends `GET /api/v1/livez` over plain HTTP and
+  then HTTPS. A match is exactly `{"status":"ok"}` together with a Cockpit
+  `X-Request-ID`. Other services on the port (Radarr also defaults to
+  7878) don't match. No API key or other secret is sent. Redirects are
+  not followed, and replies are read up to 1 KiB.
+- **What it prints.** URL, transport, a suggested name (reverse DNS, or
+  `host-a-b-c-d`) and whether the machine is already in the fleet. For
+  each new machine it prints the `cockpit fleet add` command. Adding still
+  needs a key created on that machine (D3), and `fleet add` still asks
+  before pinning an HTTPS certificate (D30). The fingerprint seen during
+  the scan is never trusted on its own.
+
+**Why.** The owner asked for automatic discovery. A TCP scan works through
+the WSL and Windows firewall setup that already passes the agent's TCP
+port, while multicast (mDNS) and UDP broadcast often don't. It also keeps
+agents free of new listeners and avoids a new dependency.
+
+**Not chosen.** mDNS/DNS-SD announcements (a new UDP listener and
+dependency, and unreliable under WSL mirrored networking), and an agent
+broadcast protocol (a new unauthenticated listener on every machine).
+Either can be added later without changing `fleet scan`'s output.
+
+**Risk.** A scan connects to every address in the subnet, so network
+monitoring software may flag it. It runs only when the operator asks.

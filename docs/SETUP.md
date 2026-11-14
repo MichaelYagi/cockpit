@@ -505,6 +505,21 @@ polling it until you run `fleet add NAME ... --replace`. The list is
 but never contains keys. Keys can also come from an environment variable
 (`--key-env`).
 
+**Finding machines.** `cockpit fleet scan` looks for Cockpit agents on
+your network (the /24 around this machine's addresses, or
+`--subnet 192.168.0.0/24`) and prints the `fleet add` command for each
+new one. It only finds agents started with `--lan`, `--lan-http` or
+`--http-public`, on port 7878 unless you pass `--port`. It sends no key,
+and a /24 takes about three seconds:
+
+```text
+$ cockpit fleet scan
+Scanning 192.168.0.0/24 on port 7878…
+URL                        TRANSPORT         NAME                FLEET
+http://192.168.0.20:7878   plain http (LAN)  host-192-168-0-20   not added
+http://192.168.0.185:7878  plain http (LAN)  host-192-168-0-185  added as pc
+```
+
 **Plain-HTTP machines.** A machine started with `--lan-http` (or
 `--http-public`) is added with its `http://` address; no certificate is
 pinned, and `fleet add` warns that the key travels unencrypted:
