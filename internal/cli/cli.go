@@ -148,7 +148,7 @@ func newConfigFlags(name string, env Env) *configFlags {
 	f := &configFlags{fs: flag.NewFlagSet(name, flag.ContinueOnError)}
 	f.fs.SetOutput(env.Stderr)
 	f.fs.StringVar(&f.mode, "mode", "", `"user" or "system" paths (default user; env COCKPIT_MODE)`)
-	f.fs.StringVar(&f.path, "config", "", "configuration file (env COCKPIT_CONFIG; default ./config.yaml if present, else the mode default)")
+	f.fs.StringVar(&f.path, "config", "", "configuration file (env COCKPIT_CONFIG; default ./config.yaml or ./config.yml if present, else the mode default)")
 	f.fs.StringVar(&f.logLevel, "log-level", "", "debug, info, warn or error")
 	f.fs.StringVar(&f.logFormat, "log-format", "", "text or json")
 	f.fs.StringVar(&f.tcpAddress, "tcp-address", "", "TCP listen address, e.g. 127.0.0.1:7878")
