@@ -7,7 +7,9 @@ import (
 	"flag"
 	"fmt"
 
+	"net/netip"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -27,12 +29,18 @@ Usage:
   cockpit fleet list
   cockpit fleet remove NAME
   cockpit fleet check
+  cockpit fleet scan [--subnet CIDR]... [--port N]
 
 add contacts the agent and records its machine ID. For https without
 --tls-fingerprint or --tls-ca it shows the server certificate's
 fingerprint and pins it after you confirm (--yes accepts it, for scripts
 that have checked the fingerprint another way). A machine whose ID or
 certificate changes is refused until it is added again with --replace.
+
+scan looks for Cockpit agents on your local network (the /24 around each
+private address of this machine, or --subnet): it connects to port 7878
+on each address and asks the public /api/v1/livez route, sending no key.
+It prints what it finds and the fleet add command for each new machine.
 
 URL may be http:// for an agent started with --lan-http (private
 addresses) or --http-public; the key then travels unencrypted.
@@ -74,6 +82,8 @@ func runFleet(ctx context.Context, args []string, env Env) int {
 	switch sub {
 	case "add":
 		return fleetAdd(ctx, path, rest, env)
+	case "scan":
+		return fleetScan(ctx, path, rest, env)
 	case "list", "remove", "check":
 	default:
 		fmt.Fprintf(env.Stderr, "unknown fleet command %q\n\n%s", sub, fleetUsage)
@@ -303,4 +313,85 @@ func runFleetConsole(ctx context.Context, env Env) int {
 			return ExitError
 		}
 	}
+}
+
+// fleetScan finds Cockpit agents on the local network (D44) and prints the
+// fleet add command for each one not yet enrolled.
+func fleetScan(ctx context.Context, path string, args []string, env Env) int {
+	fs := flag.NewFlagSet("cockpit fleet scan", flag.ContinueOnError)
+	fs.SetOutput(env.Stderr)
+	var subnets []netip.Prefix
+	fs.Func("subnet", "private IPv4 network to scan, e.g. 192.168.0.0/24 (repeatable; default: this machine's networks)", func(s string) error {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			return err
+		}
+		subnets = append(subnets, p.Masked())
+		return nil
+	})
+	port := fs.Int("port", fleet.DefaultScanPort, "agent TCP port")
+	if ok, code := parse(fs, args); !ok {
+		return code
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintln(env.Stderr, "usage: cockpit fleet scan [--subnet CIDR]... [--port N]")
+		return ExitUsage
+	}
+	if len(subnets) == 0 {
+		subnets = fleet.LocalSubnets()
+	}
+	if err := fleet.CheckSubnets(subnets); err != nil {
+		fmt.Fprintln(env.Stderr, "error:", err)
+		return ExitUsage
+	}
+	l, err := fleet.Load(path)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, "error:", err)
+		return ExitError
+	}
+	names := make([]string, len(subnets))
+	for i, p := range subnets {
+		names[i] = p.String()
+	}
+	fmt.Fprintf(env.Stderr, "Scanning %s on port %d…\n", strings.Join(names, ", "), *port)
+	sctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	found, err := fleet.Scan(sctx, fleet.ScanOptions{Subnets: subnets, Port: *port})
+	if err != nil {
+		fmt.Fprintln(env.Stderr, "error:", err)
+		return ExitError
+	}
+	if len(found) == 0 {
+		fmt.Fprintln(env.Stdout, "No Cockpit agents found. An agent is visible only when started with --lan, --lan-http or --http-public.")
+		return ExitOK
+	}
+	enrolled := map[string]string{}
+	for _, m := range l.Machines {
+		enrolled[m.URL] = m.Name
+	}
+	tw := tabwriter.NewWriter(env.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "URL\tTRANSPORT\tNAME\tFLEET")
+	var fresh []fleet.Found
+	for _, f := range found {
+		state := "not added"
+		if n, ok := enrolled[f.URL]; ok {
+			state = "added as " + n
+		} else {
+			fresh = append(fresh, f)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", f.URL, f.Transport, f.Name, state)
+	}
+	tw.Flush()
+	if len(fresh) == 0 {
+		return ExitOK
+	}
+	fmt.Fprintln(env.Stdout, "\nTo add a machine, create a key on it, copy the key file here (chmod 600), then add it:")
+	fmt.Fprintln(env.Stdout, "  (on the machine)  cockpit keys create --name fleet --scope system:read --scope metrics:read > NAME.key")
+	for _, f := range fresh {
+		fmt.Fprintf(env.Stdout, "  cockpit fleet add %s %s --key-file ./%s.key\n", f.Name, f.URL, f.Name)
+	}
+	if slices.ContainsFunc(fresh, func(f fleet.Found) bool { return f.Fingerprint != "" }) {
+		fmt.Fprintln(env.Stdout, "For https machines, fleet add shows the certificate fingerprint to confirm against `cockpit tls show` there.")
+	}
+	return ExitOK
 }
