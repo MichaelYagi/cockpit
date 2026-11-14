@@ -112,13 +112,29 @@ It is erased from the screen when you press Enter and cannot be shown again.
 
 | Path | Contents | Mode |
 |---|---|---|
-| `~/.config/cockpit-monitor/config.yaml` | Optional configuration | your choice |
+| `~/.config/cockpit-monitor/config.yaml` | Optional configuration (or `config.yaml` in the current folder, see below) | your choice |
 | `~/.local/state/cockpit-monitor/` | Database (key hashes), machine ID, lock, embedded-agent log | `0700` dir, `0600` files |
 | `$XDG_RUNTIME_DIR/cockpit-monitor/agent.sock` | Admin socket | `0700` dir, `0600` socket |
 
 The agent refuses to start if these directories are more permissive than
 shown or owned by another user. `cockpit config check` prints the effective
 configuration and paths.
+
+### Where the configuration file is found
+
+The first of these that applies is used:
+
+1. `--config <file>` (the file must exist).
+2. `COCKPIT_CONFIG=<file>` (the file must exist).
+3. `config.yaml` in the folder you run `cockpit` from (user mode only).
+4. `~/.config/cockpit-monitor/config.yaml` in user mode, or
+   `/etc/cockpit-monitor/config.yaml` in system mode.
+
+No file at all is fine: the agent runs on built-in defaults. The agent logs
+`loaded configuration file=…` at startup, and `cockpit config check` prints
+which file it read. The system service never reads the current folder, so
+it doesn't depend on where it was started. The repository's `.gitignore`
+lists `config.yaml`, so a copy in a checkout isn't committed by accident.
 
 ## Installing a release
 
@@ -610,8 +626,9 @@ Discord, Slack, or any service that accepts JSON.
    sudo chown cockpit-monitor: /etc/cockpit-monitor/ntfy.url && sudo chmod 600 /etc/cockpit-monitor/ntfy.url
    ```
 
-2. List it in the configuration file (`~/.config/cockpit-monitor/config.yaml`
-   or `/etc/cockpit-monitor/config.yaml`). `url_file` must be an absolute
+2. List it in the configuration file (`~/.config/cockpit-monitor/config.yaml`,
+   `config.yaml` in the current folder, or `/etc/cockpit-monitor/config.yaml`;
+   see [Where the configuration file is found](#where-the-configuration-file-is-found)). `url_file` must be an absolute
    path:
 
    ```yaml
@@ -647,4 +664,6 @@ affects monitoring.
 ## Configuration reference
 
 See `docs/ARCHITECTURE.md` §8 for the schema and defaults, or run
-`cockpit config check` to print the effective values.
+`cockpit config check` to print the effective values. The file is looked
+up as described in
+[Where the configuration file is found](#where-the-configuration-file-is-found).

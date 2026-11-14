@@ -37,9 +37,13 @@ type Overrides struct {
 type Source struct {
 	// Mode from --mode; empty falls back to COCKPIT_MODE, then "user".
 	Mode Mode
-	// ConfigPath from --config; empty falls back to COCKPIT_CONFIG, then the
-	// mode default. An explicitly named file must exist.
+	// ConfigPath from --config; empty falls back to COCKPIT_CONFIG, then
+	// config.yaml in WorkDir (user mode only), then the mode default. An
+	// explicitly named file must exist.
 	ConfigPath string
+	// WorkDir is the current working directory. Empty skips the
+	// current-folder lookup.
+	WorkDir string
 	// Env looks up environment variables (os.LookupEnv in production).
 	Env func(string) (string, bool)
 	// Environ lists all environment entries ("K=V"), used to warn about
@@ -100,6 +104,8 @@ func Load(src Source) (*Result, error) {
 	if !explicit {
 		if p, ok := src.Env(EnvConfig); ok && p != "" {
 			cfgPath, explicit = p, true
+		} else if p, ok := workDirConfig(mode, src.WorkDir); ok {
+			cfgPath = p
 		} else {
 			cfgPath = paths.ConfigFile
 		}
@@ -149,6 +155,21 @@ func resolveMode(src Source) (Mode, error) {
 		return m, nil
 	}
 	return "", fmt.Errorf("mode %q is invalid: use %q or %q", m, ModeUser, ModeSystem)
+}
+
+// workDirConfig returns config.yaml in dir when it is a regular file. Only
+// user mode looks there: a system service must not depend on the folder it
+// was started from.
+func workDirConfig(mode Mode, dir string) (string, bool) {
+	if mode != ModeUser || dir == "" {
+		return "", false
+	}
+	p := filepath.Join(dir, "config.yaml")
+	fi, err := os.Stat(p)
+	if err != nil || !fi.Mode().IsRegular() {
+		return "", false
+	}
+	return p, true
 }
 
 func loadFile(path string, explicit bool, cfg *Config) (bool, error) {

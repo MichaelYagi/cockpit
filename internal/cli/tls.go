@@ -66,7 +66,7 @@ func runTLS(args []string, env Env) int {
 	if ok, code := parse(fs, rest); !ok {
 		return code
 	}
-	res, err := config.Load(config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home})
+	res, err := config.Load(config.Source{Mode: config.Mode(*mode), ConfigPath: *cfgPath, Env: env.LookupEnv, Home: env.Home, WorkDir: env.WorkDir})
 	if err != nil {
 		fmt.Fprintln(env.Stderr, err)
 		return ExitError

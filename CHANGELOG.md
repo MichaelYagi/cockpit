@@ -33,6 +33,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **`config.yaml` in the current folder.** In user mode, `cockpit` reads
+  `config.yaml` from the folder it is run from when one is there, before
+  `~/.config/cockpit-monitor/config.yaml`. `--config` and `COCKPIT_CONFIG`
+  still take precedence; the system service never reads the current
+  folder. `config.yaml` is now in `.gitignore`.
 - **Plain HTTP from outside the network, opt-in (D42).**
   `cockpit agent --http-public` (or `api.lan.public: true`) works like
   `--lan-http` but accepts clients from any address, so the API and
