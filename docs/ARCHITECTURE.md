@@ -222,8 +222,8 @@ api:
     per_key_burst: 40
     global_rps: 200
     global_burst: 400
-  cors:                        # browser access to TCP, off by default (D34)
-    allowed_origins: []        # exact origins, e.g. ["https://hoppscotch.io"]
+  cors:                        # browser access to TCP (D34, D46)
+    allowed_origins: []        # empty: any origin (key still required); else only these exact origins
   web:
     enabled: true              # web dashboard at /ui/ on the TCP listener (D35)
     machines: []               # other agents the dashboard can show: [{name, url}] (D45)

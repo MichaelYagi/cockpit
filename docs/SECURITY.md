@@ -55,21 +55,29 @@ Threats:
 - Log a prominent warning at startup whenever a remote listener is active.
 - Do not assume a private LAN is trusted. Client IP allowlists are a
   candidate future feature.
-- **Browsers (D34).** By default no web page can read API responses: the
-  agent answers no CORS preflight. `api.cors.allowed_origins` lists exact
-  origins (scheme, host and port; no wildcards, no `null`) that may call
-  the TCP listener from a browser, with `GET` only. Credentials (cookies)
-  are never allowed; the page must send an API key, so a listed origin
-  gets no more than the key it is given. Preflights from unlisted origins
+- **Browsers (D34, D46).** By default any web page may call the TCP
+  listener from a browser, with `GET` only, so dashboards can show other
+  machines without configuration. Credentials (cookies) are never
+  allowed; the page must send an API key, so a page gets no more than the
+  key it is given, and the browser never attaches one by itself. A
+  hostile page can still read the public `/livez` and `/openapi.json`
+  answers of an agent it can reach, and try keys within the rate limits.
+  Chromium-based browsers also stop public websites from calling private
+  network addresses unless the agent opts in, which it doesn't.
+  `api.cors.allowed_origins` limits access to exact origins (scheme, host
+  and port; no wildcards, no `null`); preflights from other origins then
   get `403 origin_not_allowed`. The Unix socket never answers browsers.
-  Only list sites you trust with a key: the page's code sees the key.
+  Only give a key to pages you trust: the page's code sees the key.
 - **Web dashboard (D35).** The TCP listener serves static files at `/ui/`
   without a key. They contain no data. The page keeps the key the user
   enters in the tab's `sessionStorage` (gone when the tab closes; never in
-  cookies or `localStorage`) and sends it as an `Authorization` header to
-  the same origin, so another site cannot make requests with it. Responses
-  carry a strict Content Security Policy (`default-src 'none'`; scripts,
-  styles and connections from the same origin only; no framing), `nosniff`,
+  cookies) and sends it as an `Authorization` header, so another site
+  cannot make requests with it. Keys for other machines added in the
+  browser (D46) are kept in `localStorage` until the machine is removed,
+  so anyone using that browser profile can use them. Responses carry a
+  strict Content Security Policy (`default-src 'none'`; scripts and
+  styles from the same origin only; connections to the same origin or
+  any http/https address, for other machines; no framing), `nosniff`,
   `no-referrer` and `X-Frame-Options: DENY`. API text is inserted as text,
   never as HTML; a test rejects `innerHTML` and similar in the page's code.
   The dashboard cannot manage keys or settings, which stay on the Unix

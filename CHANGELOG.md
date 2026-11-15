@@ -10,6 +10,15 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Add machines from the web dashboard (D46).** The **Machines** page
+  is always there and has an **Add a machine** form: type the other
+  machine's address and a key created on it, and it is checked and
+  added. Added machines and their keys are remembered in that browser
+  until you remove them. No config file is needed on either machine.
+  For this, agents now accept browser requests from any web page when
+  `api.cors.allowed_origins` is empty (the default). A key is still
+  required, and listing origins still limits access to them. The
+  dashboard may call any address.
 - **`cockpit fleet add` without a key says so.** Leaving out
   `--key-file` and `--key-env` used to fail with `open : no such file or
   directory`; it now names the missing flag and how to create a key.
@@ -39,9 +48,8 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 - **Several machines in the web dashboard (D45).** List other agents
   under `api.web.machines` and the dashboard gets a machine picker and a
   **Machines** page with each machine's health, CPU, memory, uptime and
-  version. Each listed machine must allow the dashboard's origin in
-  `api.cors.allowed_origins`. The browser calls each machine directly,
-  with a key per machine kept in the tab only.
+  version. The browser calls each machine directly with that machine's
+  key.
 - **`cockpit fleet scan` finds agents on your network (D44).** It checks
   port 7878 (or `--port`) on each address of this machine's local /24
   (or `--subnet`), recognizes Cockpit by its public `/livez` reply without

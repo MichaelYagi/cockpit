@@ -28,7 +28,8 @@ const state = {
 };
 
 let session = null; // running pollers and streams while signed in
-let machines = []; // other agents from machines.json (D45): [{name, url}]
+let configured = []; // other agents from machines.json (D45): [{name, url}]
+let machines = []; // configured ones, then those added in this browser (D46, added: true)
 let screen = null; // the mounted screen
 
 // ---- polling ----
@@ -288,17 +289,18 @@ function layout() {
     screens.map((s, i) => h('a', { href: '#/' + s.id, 'data-id': s.id }, h('span', { class: 'num' }, String(i + 1)), s.name)));
   els.main = h('main', { id: 'main', tabindex: '-1' });
   els.banner = h('div', { class: 'banner', role: 'status' });
+  els.pick = h('span', { class: 'pick-wrap' }, machinePicker());
   replace(root,
     h('header', { class: 'top' },
       h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '', width: 22, height: 22 }), h('span', null, 'Cockpit'), els.ver),
-      machinePicker(),
+      els.pick,
       h('div', { class: 'ident' }, els.host, els.os),
       h('div', { class: 'head-right' }, els.health, els.conn,
-        h('button', { class: 'ghost', type: 'button', onclick: () => signOut('Signed out. The key was removed from this tab.') }, 'Sign out'))),
+        h('button', { class: 'ghost', type: 'button', onclick: () => signOut(getTarget() ? 'Signed out. The key was removed from this browser.' : 'Signed out. The key was removed from this tab.') }, 'Sign out'))),
     els.nav,
     els.banner,
     els.main,
-    h('footer', null, els.footVer, 'Read-only view. Keys are kept in this browser tab only and are forgotten when the tab closes.'));
+    h('footer', null, els.footVer, "Read-only view. This machine's key is kept in this tab only; keys for other machines are remembered in this browser until you remove them."));
   updateHeader();
 }
 
@@ -384,7 +386,7 @@ function signIn(message) {
       'Create a key in the terminal UI (API Access) or with ',
       h('code', null, 'cockpit keys create --scope all'),
       getTarget() ? ' on that machine' : '',
-      '. The key is kept in this tab only and is forgotten when you close it.'));
+      getTarget() ? '. The key is remembered in this browser until you remove the machine.' : '. The key is kept in this tab only and is forgotten when you close it.'));
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const key = input.value.trim();
@@ -1016,9 +1018,76 @@ function Hardware(el) {
   return { destroy: () => poll.stop() };
 }
 
-// ---- machines (D45) ----
+// ---- machines (D45, D46) ----
 
 const machineStore = 'cockpit.machine';
+const addedStore = 'cockpit.machines';
+const maxAdded = 32;
+const scheme = /^[a-z][a-z0-9+.-]*:\/\//i;
+const hostName = /^([a-z0-9-]+\.)*[a-z0-9-]+$|^\[[0-9a-f:.]+\]$/i;
+
+// parseOrigin turns what the user typed ("192.168.0.20", "mac.lan:7878",
+// a pasted dashboard link) into an origin, or '' if it isn't one. Without
+// a scheme it means plain HTTP on Cockpit's port 7878 unless a port is given.
+function parseOrigin(text) {
+  let t = text.trim();
+  if (!t) return '';
+  const bare = !scheme.test(t);
+  if (bare) t = 'http' + ':' + '//' + t;
+  let u;
+  try {
+    u = new URL(t);
+  } catch {
+    return '';
+  }
+  if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password || !hostName.test(u.hostname)) return '';
+  if (bare && !u.port) u.port = '7878';
+  return u.origin;
+}
+
+function addedMachines() {
+  try {
+    const v = JSON.parse(localStorage.getItem(addedStore) || '[]');
+    if (!Array.isArray(v)) return [];
+    return v.filter(m => m && typeof m.name === 'string' && typeof m.url === 'string' && parseOrigin(m.url) === m.url).slice(0, maxAdded);
+  } catch {
+    return [];
+  }
+}
+
+function storeAdded(list) {
+  try {
+    localStorage.setItem(addedStore, JSON.stringify(list.map(m => ({ name: m.name, url: m.url }))));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// loadMachines merges the configured machines with those added here.
+function loadMachines() {
+  const seen = new Set([location.origin, ...configured.map(m => m.url)]);
+  machines = [...configured];
+  for (const m of addedMachines()) {
+    if (seen.has(m.url)) continue;
+    seen.add(m.url);
+    machines.push({ name: m.name, url: m.url, added: true });
+  }
+}
+
+function refreshPicker() {
+  if (els.pick) replace(els.pick, machinePicker());
+}
+
+function removeMachine(m) {
+  if (!window.confirm(`Remove ${m.name} and its key from this browser?`)) return;
+  storeAdded(addedMachines().filter(x => x.url !== m.url));
+  setKeyFor(m.url, '');
+  loadMachines();
+  if (getTarget() === m.url) return switchMachine('');
+  refreshPicker();
+  route();
+}
 
 function machineLabel(origin) {
   if (!origin) return location.host;
@@ -1027,13 +1096,63 @@ function machineLabel(origin) {
 }
 
 // unreachable explains a failed request to an agent. For another machine
-// the usual cause is its CORS setting, which the browser hides.
+// the usual causes are that it only listens on localhost, or that its
+// CORS list leaves this page out; the browser hides which.
 function unreachable(origin) {
   if (!origin) return 'The agent could not be reached.';
   if (location.protocol === 'https:' && origin.startsWith('http:')) {
     return `${machineLabel(origin)} uses plain HTTP, and a browser blocks that from an HTTPS page. Open this dashboard over HTTP, or start that machine with --lan.`;
   }
-  return `Could not reach ${machineLabel(origin)}. Check that it is running with --lan, --lan-http or --http-public, and that its config.yaml lists ${location.origin} under api.cors.allowed_origins.`;
+  return `Could not reach ${machineLabel(origin)}. Check that it is running with --lan-http (or --lan) and that the address and port are right. If its config.yaml sets api.cors.allowed_origins, add ${location.origin} there or remove that list.`;
+}
+
+// addForm adds a machine in this browser: it checks the address and key
+// against the machine first, then remembers both here.
+function addForm() {
+  const addr = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: '192.168.0.20:7878', 'aria-label': 'Address' });
+  const key = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'ckp_…', 'aria-label': 'API key' });
+  const name = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', maxlength: 64, placeholder: 'Name (optional)', 'aria-label': 'Name' });
+  const msg = h('p', { class: 'muted', role: 'status' }, "Enter the other machine's address and an API key created on it.");
+  const button = h('button', { type: 'submit', class: 'primary' }, 'Add');
+  const say = (text, cls) => {
+    msg.className = cls;
+    msg.textContent = text;
+  };
+  const form = h('form', { class: 'machine-add', novalidate: true },
+    h('label', null, 'Address', addr), h('label', null, 'API key', key), h('label', null, 'Name', name), button);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const origin = parseOrigin(addr.value);
+    const k = key.value.trim();
+    if (!origin) return say('Enter an address such as 192.168.0.20:7878.', 'crit');
+    if (origin === location.origin) return say('That is this machine; it is already listed.', 'warn');
+    if (machines.some(m => m.url === origin)) return say('That machine is already listed.', 'warn');
+    if (!k.startsWith('ckp_')) return say('Cockpit API keys start with ckp_.', 'crit');
+    if (addedMachines().length >= maxAdded) return say(`At most ${maxAdded} machines can be added. Remove one first.`, 'crit');
+    button.disabled = true;
+    say('Checking…', 'muted');
+    let host = '';
+    try {
+      const sy = await getFrom(origin, k, '/system', null, AbortSignal.timeout(8000));
+      host = sy?.system?.data?.hostname || '';
+    } catch (err) {
+      button.disabled = false;
+      if (!(err instanceof APIError)) return say(unreachable(origin), 'crit');
+      if (err.status === 401) return say('That key was not accepted. It may be incomplete or revoked.', 'crit');
+      if (err.status !== 403) return say(err.message, 'crit');
+      // 403: the key works but lacks system:read; add it anyway.
+    }
+    const label = (name.value.trim() || host || new URL(origin).hostname).slice(0, 64);
+    if (!storeAdded([...addedMachines(), { name: label, url: origin }])) {
+      button.disabled = false;
+      return say('This browser does not allow saving. Check that site data is not blocked.', 'crit');
+    }
+    setKeyFor(origin, k);
+    loadMachines();
+    refreshPicker();
+    route();
+  });
+  return h('section', { class: 'card machine' }, h('h2', null, 'Add a machine'), msg, form);
 }
 
 function machinePicker() {
@@ -1061,12 +1180,13 @@ function switchMachine(origin) {
   else signIn();
 }
 
-// Machines lists this agent and every configured one with health, CPU,
-// memory, uptime and version. Each is polled with its own key; one that is
+// Machines lists this agent and every other one (configured or added in
+// this browser) with health, CPU, memory, uptime and version, and a form
+// to add more. Each is polled with its own key; one that is
 // slow or unreachable doesn't hold up the others.
 function Machines(el) {
   const rows = [{ name: 'This machine', url: '' }, ...machines].map(m => ({ m, el: h('section', { class: 'card machine' }) }));
-  el.append(h('div', { class: 'grid machines' }, rows.map(r => r.el)));
+  el.append(h('div', { class: 'grid machines' }, rows.map(r => r.el), addForm()));
   const ctrl = new AbortController();
   const settle = p => p.then(data => ({ data }), error => ({ error }));
 
@@ -1089,7 +1209,9 @@ function Machines(el) {
       h('h2', null, r.m.name, current ? h('span', { class: 'muted' }, ' · shown now') : null),
       h('p', { class: 'muted mono' }, r.m.url ? new URL(r.m.url).host : location.host),
       body,
-      current ? null : h('button', { type: 'button', class: 'ghost', onclick: () => switchMachine(r.m.url) }, 'Open'));
+      h('div', { class: 'machine-actions' },
+        current ? null : h('button', { type: 'button', class: 'ghost', onclick: () => switchMachine(r.m.url) }, 'Open'),
+        r.m.added ? h('button', { type: 'button', class: 'ghost', onclick: () => removeMachine(r.m) }, 'Remove') : null));
   }
 
   async function load(r) {
@@ -1142,11 +1264,13 @@ function Machines(el) {
 async function boot() {
   try {
     const r = await fetch('machines.json', { cache: 'no-store', credentials: 'omit' });
-    if (r.ok) machines = await r.json();
+    if (r.ok) configured = await r.json();
   } catch {
-    machines = [];
+    configured = [];
   }
-  if (machines.length) screens.splice(1, 0, { id: 'machines', name: 'Machines', mount: Machines });
+  if (!Array.isArray(configured)) configured = [];
+  loadMachines();
+  screens.splice(1, 0, { id: 'machines', name: 'Machines', mount: Machines });
   let saved = '';
   try {
     saved = sessionStorage.getItem(machineStore) || '';

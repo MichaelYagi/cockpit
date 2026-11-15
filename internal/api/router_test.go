@@ -686,18 +686,29 @@ func TestInvalidRouteDeclarations(t *testing.T) {
 	}
 }
 
-func TestNoCORS(t *testing.T) {
-	h := router(t, newEnv(t, nil).d, Options{Listener: ListenerTCP, CheckLoopbackHost: true})
-	for _, method := range []string{http.MethodGet, http.MethodOptions} {
-		r := do(t, h, method, "/api/v1/livez", func(r *http.Request) {
-			r.Header.Set("Origin", "https://evil.example")
-			r.Header.Set("Access-Control-Request-Method", "GET")
-		})
-		for k := range r.header {
-			if strings.HasPrefix(strings.ToLower(k), "access-control-") {
-				t.Errorf("%s: CORS header %s present", method, k)
-			}
-		}
+// With no origins listed, any page may call the API from a browser, but
+// only with a key (D46).
+func TestCORSAnyOriginByDefault(t *testing.T) {
+	e := newEnv(t, io.Discard)
+	h := router(t, e.d, Options{Listener: ListenerTCP, CheckLoopbackHost: true})
+	origin := func(r *http.Request) { r.Header.Set("Origin", "http://192.168.0.20:7878") }
+	preflight := func(r *http.Request) {
+		r.Header.Set("Access-Control-Request-Method", "GET")
+		r.Header.Set("Access-Control-Request-Headers", "authorization")
+	}
+	r := do(t, h, http.MethodOptions, "/api/v1/status", origin, preflight)
+	if r.status != 204 || r.header.Get("Access-Control-Allow-Origin") != "http://192.168.0.20:7878" || r.header.Get("Access-Control-Allow-Credentials") != "" {
+		t.Errorf("preflight: %d %v", r.status, r.header)
+	}
+	if r := do(t, h, http.MethodGet, "/api/v1/status", origin); r.status != 401 || r.header.Get("Access-Control-Allow-Origin") == "" {
+		t.Errorf("no key: %d %v", r.status, r.header)
+	}
+	if r := do(t, h, http.MethodGet, "/api/v1/status", origin, bearer(systemKey)); r.status != 200 || r.header.Get("Access-Control-Allow-Origin") != "http://192.168.0.20:7878" {
+		t.Errorf("with key: %d %v", r.status, r.header)
+	}
+	// No Origin header: an ordinary client, no CORS headers.
+	if r := do(t, h, http.MethodGet, "/api/v1/livez"); r.header.Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("CORS headers without Origin: %v", r.header)
 	}
 }
 
@@ -869,7 +880,7 @@ func TestNetworkScope(t *testing.T) {
 	}
 }
 
-// Browser access is opt-in per exact origin (D34).
+// A list of origins limits browser access to exactly those (D34).
 func TestCORS(t *testing.T) {
 	e := newEnv(t, io.Discard)
 	tcp := router(t, e.d, Options{Listener: ListenerTCP, CheckLoopbackHost: true, CORSOrigins: []string{"https://app.example"}})
