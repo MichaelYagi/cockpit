@@ -21,13 +21,15 @@ var static embed.FS
 // Prefix is the URL path the dashboard is served under.
 const Prefix = "/ui/"
 
-// CSP allows only same-origin scripts, styles and API calls, and no
-// framing. Nothing inline, nothing from another site. API calls may also
-// go to the configured machines (D45); see Options.
+// CSP allows only same-origin scripts and styles, and no framing.
+// Nothing inline, nothing loaded from another site. API calls may go to
+// any http or https address, so the page can show machines added in the
+// browser (D46); they carry only the key entered for that machine.
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-	"connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	"connect-src 'self' http: https:; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
-// Machine is another agent the dashboard can show (D45).
+// Machine is another agent the dashboard lists from the configuration
+// (D45).
 type Machine struct {
 	Name string `json:"name"`
 	URL  string `json:"url"` // an exact origin, validated by the configuration
@@ -35,23 +37,10 @@ type Machine struct {
 
 // Options configures the dashboard.
 type Options struct {
-	// Machines are other agents the page may call. Their origins are
-	// added to the CSP's connect-src, and the list is served as
+	// Machines are other agents listed for every visitor, served as
 	// machines.json. Names and addresses are therefore visible to anyone
 	// who can load the page, like the page itself.
 	Machines []Machine
-}
-
-// csp returns CSP with the machines' origins allowed for API calls.
-func csp(ms []Machine) string {
-	if len(ms) == 0 {
-		return CSP
-	}
-	connect := "connect-src 'self'"
-	for _, m := range ms {
-		connect += " " + m.URL
-	}
-	return strings.Replace(CSP, "connect-src 'self'", connect, 1)
 }
 
 var contentTypes = map[string]string{
@@ -97,10 +86,9 @@ func Handler(o Options) http.Handler {
 	list, _ := json.Marshal(machines)
 	sum := sha256.Sum256(list)
 	files["machines.json"] = file{body: list, contentType: "application/json", etag: `"` + hex.EncodeToString(sum[:8]) + `"`}
-	policy := csp(o.Machines)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", policy)
+		h.Set("Content-Security-Policy", CSP)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")

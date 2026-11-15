@@ -109,8 +109,9 @@ type WebMachine struct {
 // MaxWebMachines bounds api.web.machines.
 const MaxWebMachines = 16
 
-// CORS lets listed web origins call the TCP listener from a browser
-// (D34). Empty (the default) allows none.
+// CORS controls which web origins may call the TCP listener from a
+// browser (D34). Empty (the default) allows any origin, still only with
+// an API key (D46); a list allows only those origins.
 type CORS struct {
 	// AllowedOrigins are exact origins, e.g. "https://hoppscotch.io" or
 	// "http://localhost:3000". No wildcards.

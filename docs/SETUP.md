@@ -345,48 +345,56 @@ Number keys `1`–`9` switch screens.
 
 ### Several machines in one dashboard
 
-One dashboard can show your other machines too (D45). It gets a machine
-picker in the top bar and a **Machines** page listing each machine's
-health, CPU, memory, uptime and version. The browser talks to each
-machine directly with that machine's key. Nothing is proxied.
+One dashboard can show your other machines too (D45, D46). It gets a
+machine picker in the top bar and a **Machines** page listing each
+machine's health, CPU, memory, uptime and version. The browser talks to
+each machine directly with that machine's key. Nothing is proxied.
 
 Say this PC (`192.168.0.185`) serves the dashboard and a Mac at
-`192.168.0.20` should appear in it. Both run with `--lan-http`.
+`192.168.0.20` should appear in it.
 
-1. On **this PC**, list the Mac in `config.yaml`:
+1. On **the Mac**, start Cockpit so the network can reach it, and create
+   a key:
 
-   ```yaml
-   api:
-     web:
-       machines:
-         - name: Mac
-           url: http://192.168.0.20:7878
+   ```sh
+   ./bin/cockpit agent --lan-http
+   ./bin/cockpit keys create --name dashboard --scope all   # in another terminal
    ```
 
-2. On **the Mac**, allow the PC's dashboard to call it, in its
-   `config.yaml`:
+2. On **this PC**, open `http://192.168.0.185:7878/`, sign in, go to
+   **Machines**, and fill in **Add a machine**: the address
+   `192.168.0.20:7878` (or just `192.168.0.20`; port 7878 is assumed) and
+   the Mac's key. The name is optional and defaults to the Mac's host
+   name.
 
-   ```yaml
-   api:
-     cors:
-       allowed_origins: ["http://192.168.0.185:7878"]
-   ```
+That's all. The dashboard checks the address and key before adding the
+machine. **Open** switches the whole dashboard to it, and **Remove**
+forgets it.
 
-   The origin must match the address you open the dashboard at
-   (`http://192.168.0.185:7878`, not `localhost`).
+- Machines you add, and their keys, are remembered in that browser until
+  you remove them, so another browser or computer starts empty. The
+  dashboard's own key is still kept in the tab only.
+- If a machine can't be reached, the dashboard says what to check: that
+  it runs with `--lan-http`, `--lan` or `--http-public`, and that the
+  address and port are right.
+- A dashboard opened over HTTPS can't show plain-HTTP machines, because
+  browsers block that.
+- Any web page may call an agent from a browser by default, but only
+  with a key, so it gets nothing without one (D46). To allow only certain
+  pages, list them in `api.cors.allowed_origins`; the dashboard's own
+  address must then be on that list.
 
-3. Restart both agents, open `http://192.168.0.185:7878/`, sign in, then
-   go to **Machines** and enter the Mac's key (created on the Mac with
-   `cockpit keys create --scope all`). **Open** switches the whole
-   dashboard to the Mac.
+To list machines for everyone who opens the dashboard instead, put them
+in the serving agent's `config.yaml`. Their names and addresses are
+visible to anyone who can open the page, even without a key:
 
-Each key stays in that browser tab only, as for the dashboard's own key.
-If a machine can't be reached, its card says what to check: that it
-runs with `--lan`, `--lan-http` or `--http-public`, and that its
-`allowed_origins` lists the dashboard's address. A dashboard opened over
-HTTPS can't show plain-HTTP machines, because browsers block that. The
-machine names and URLs are visible to anyone who can open the page, even
-without a key.
+```yaml
+api:
+  web:
+    machines:
+      - name: Mac
+        url: http://192.168.0.20:7878
+```
 
 ## Remote access
 

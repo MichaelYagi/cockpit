@@ -47,12 +47,22 @@ func TestServesPageWithSecurityHeaders(t *testing.T) {
 }
 
 func TestCSPIsStrict(t *testing.T) {
-	for _, bad := range []string{"unsafe-inline", "unsafe-eval", "*", "http:", "https:"} {
-		if strings.Contains(CSP, bad) {
-			t.Errorf("CSP allows %q", bad)
+	for _, d := range strings.Split(CSP, ";") {
+		d = strings.TrimSpace(d)
+		if strings.HasPrefix(d, "connect-src ") {
+			// API calls may go to other machines (D46), nothing else.
+			if d != "connect-src 'self' http: https:" {
+				t.Errorf("connect-src is %q", d)
+			}
+			continue
+		}
+		for _, bad := range []string{"unsafe-inline", "unsafe-eval", "*", "http:", "https:"} {
+			if strings.Contains(d, bad) {
+				t.Errorf("%q allows %q", d, bad)
+			}
 		}
 	}
-	for _, need := range []string{"default-src 'none'", "frame-ancestors 'none'", "connect-src 'self'", "script-src 'self'"} {
+	for _, need := range []string{"default-src 'none'", "frame-ancestors 'none'", "script-src 'self';", "style-src 'self';"} {
 		if !strings.Contains(CSP, need) {
 			t.Errorf("CSP lacks %q", need)
 		}
@@ -139,8 +149,7 @@ func TestScriptsNeverInsertHTML(t *testing.T) {
 	}
 }
 
-// Configured machines (D45) are served as machines.json and are the only
-// other origins the page may call.
+// Configured machines (D45) are served as machines.json.
 func TestMachines(t *testing.T) {
 	h := Handler(Options{Machines: []Machine{{Name: "mac", URL: "http://192.168.0.20:7878"}, {Name: "nas", URL: "https://nas.lan:7878"}}})
 	req := httptest.NewRequest(http.MethodGet, "/ui/machines.json", nil)
@@ -150,11 +159,10 @@ func TestMachines(t *testing.T) {
 		w.Body.String() != `[{"name":"mac","url":"http://192.168.0.20:7878"},{"name":"nas","url":"https://nas.lan:7878"}]` {
 		t.Fatalf("machines.json: %d %q %s", w.Code, w.Header().Get("Content-Type"), w.Body)
 	}
-	got := w.Header().Get("Content-Security-Policy")
-	if !strings.Contains(got, "connect-src 'self' http://192.168.0.20:7878 https://nas.lan:7878;") || strings.Count(got, "connect-src") != 1 {
+	if got := w.Header().Get("Content-Security-Policy"); got != CSP {
 		t.Errorf("CSP %q", got)
 	}
-	if w := serve(t, http.MethodGet, "/ui/machines.json", nil); w.Body.String() != "[]" || w.Header().Get("Content-Security-Policy") != CSP {
-		t.Errorf("no machines: %s, CSP %q", w.Body, w.Header().Get("Content-Security-Policy"))
+	if w := serve(t, http.MethodGet, "/ui/machines.json", nil); w.Body.String() != "[]" {
+		t.Errorf("no machines: %s", w.Body)
 	}
 }

@@ -1,7 +1,8 @@
 // API access from the browser (D35). Key in the Authorization header, no
-// cookies. Keys live in this tab's sessionStorage only, so they are gone
-// when the tab closes. Calls go to this page's agent or, after
-// setTarget, to another configured machine (D45), each with its own key.
+// cookies. This page's own key lives in the tab's sessionStorage, so it is
+// gone when the tab closes. Calls can also go, after setTarget, to another
+// machine (D45, D46), each with its own key; those keys are remembered in
+// this browser's localStorage until the machine is removed.
 
 const storageName = 'cockpit.key';
 const memoryKeys = {};
@@ -24,8 +25,9 @@ function storageKey(origin) {
 
 // keyFor and setKeyFor read and write the key for one origin.
 export function keyFor(origin) {
+  const k = storageKey(origin);
   try {
-    return sessionStorage.getItem(storageKey(origin)) || memoryKeys[origin || ''] || '';
+    return sessionStorage.getItem(k) || (origin ? localStorage.getItem(k) : '') || memoryKeys[origin || ''] || '';
   } catch {
     return memoryKeys[origin || ''] || '';
   }
@@ -33,9 +35,14 @@ export function keyFor(origin) {
 
 export function setKeyFor(origin, key) {
   memoryKeys[origin || ''] = key;
+  const k = storageKey(origin);
   try {
-    if (key) sessionStorage.setItem(storageKey(origin), key);
-    else sessionStorage.removeItem(storageKey(origin));
+    if (origin) {
+      sessionStorage.removeItem(k);
+      if (key) localStorage.setItem(k, key);
+      else localStorage.removeItem(k);
+    } else if (key) sessionStorage.setItem(k, key);
+    else sessionStorage.removeItem(k);
   } catch {
     // Storage blocked: the key stays in memory until the page reloads.
   }

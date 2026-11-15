@@ -702,6 +702,8 @@ the agent: the preflight got `405` and the browser never sent the request.
 An exact allowlist enables them without letting arbitrary sites read the
 API.
 
+(Amended by D46: an empty `allowed_origins` allows any origin.)
+
 ## D35 — Web dashboard served by the agent
 
 **Status:** Accepted (2026-11-13)
@@ -733,7 +735,9 @@ another computer, and it reuses the TCP listener, TLS setup and keys that
 already exist. Serving it from the same origin needs no CORS (D34).
 
 (Amended by D45: the page may also call machines listed in
-`api.web.machines`, which must allow its origin through CORS.)
+`api.web.machines`, which must allow its origin through CORS. Amended by
+D46: the page may call any address, and machines can be added in the
+browser.)
 
 ## D36 — macOS system libraries through purego
 
@@ -1103,3 +1107,53 @@ hold or forward other machines' keys.
 header are visible to anyone who can load the page, including without a
 key. Use names you don't mind being seen. On a `--http-public` agent,
 that means the whole internet.
+
+(Amended by D46: machines can also be added in the browser, and listed
+machines no longer need `api.cors.allowed_origins`.)
+
+## D46 — Add machines in the web dashboard
+
+**Status:** Accepted (2026-11-14)
+
+**Decision.** This amends D34, D35 and D45. Setting up several machines
+needed a config file on every machine; the dashboard now does it alone.
+
+- **CORS defaults to any origin.** When `api.cors.allowed_origins` is
+  empty (the default), the TCP listener answers browser requests from any
+  origin, reflecting it in `Access-Control-Allow-Origin` with
+  `Vary: Origin`. Everything else in D34 stays: `GET` only, credentials
+  (cookies) never allowed, an API key required on every non-public route,
+  and the Unix socket never answers browsers. A non-empty list still
+  allows only the listed origins.
+- **The dashboard may connect anywhere.** Its CSP `connect-src` is
+  `'self' http: https:` instead of a fixed list. Scripts, styles and all
+  other directives stay same-origin only.
+- **Adding machines in the page.** The Machines page is always shown and
+  has an **Add a machine** form: address (a bare host means
+  `http://HOST:7878`), API key and optional name. The page checks the
+  address and key against that machine's `/system` (8-second limit)
+  before adding it. Added machines (at most 32) are kept in that
+  browser's `localStorage` with their keys until the user removes them.
+  Configured machines (`api.web.machines`) still appear for every
+  visitor, and their keys are remembered the same way. The dashboard's
+  own key stays in the tab's `sessionStorage`.
+
+**Why.** The owner found the config-file setup too complicated and wants
+to add machines from the web page. A browser never attaches an API key
+by itself, so allowing any origin gives a page nothing it isn't given a
+key for. That makes an origin allowlist mostly a speed bump, at the cost
+of editing every machine's config.
+
+**Risk.**
+
+- Any web page open in a browser that can reach an agent can read its
+  public `/livez` and `/openapi.json` and try keys, within the rate
+  limits. Chromium-based browsers block public websites from private
+  addresses unless the agent opts in (Private Network Access), and it
+  doesn't. A `--http-public` agent has no such protection.
+- With `connect-src` open, a script-injection bug in the dashboard could
+  send keys anywhere. The page inserts API text only as text, and a test
+  rejects HTML insertion and `eval`.
+- Keys in `localStorage` last until removed, and anyone using that
+  browser profile can use them.
+- `allowed_origins` restores the strict behavior for anyone who wants it.
