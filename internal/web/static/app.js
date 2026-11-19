@@ -811,6 +811,19 @@ function Network(el) {
 
 // endpointsCard lists configured service checks (D40). Down needs two
 // failed checks in a row, as in the health check.
+// targetLink shows an endpoint target, as a link opening in a new tab
+// when it is an http or https URL. Other targets (host:port) stay text.
+function targetLink(target) {
+  let u;
+  try {
+    u = new URL(target);
+  } catch {
+    return target;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return target;
+  return h('a', { href: u.href, target: '_blank', rel: 'noopener noreferrer' }, target);
+}
+
 function endpointsCard(s) {
   if (s && s.status === 'not_configured') {
     return card('Endpoints', note('No services are checked. List them under collection.endpoints.targets in the agent\'s config.yaml.'));
@@ -826,7 +839,7 @@ function endpointsCard(s) {
     { label: 'State', value: state },
     { label: 'Response', value: e => (e.status_code ? e.status_code + ' · ' : '') + (e.response_ms == null ? '—' : num(e.response_ms) + ' ms'), class: 'r' },
     { label: 'Detail', value: e => (e.up ? (e.cert_expires_at ? 'certificate until ' + e.cert_expires_at.slice(0, 10) : '') : e.error) || '—', class: 'muted' },
-    { label: 'Target', value: e => e.target || (e.redacted?.includes('target') ? 'needs network:read' : '—'), class: 'addr' },
+    { label: 'Target', value: e => (e.target ? targetLink(e.target) : e.redacted?.includes('target') ? 'needs network:read' : '—'), class: 'addr' },
   ], ep.data) : null);
 }
 
