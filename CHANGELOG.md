@@ -10,6 +10,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Remember me in the web dashboard (D47).** The sign-in has a
+  **Remember me** checkbox. Ticked, the key stays in that browser across
+  tabs and restarts until you sign out; unticked, it is forgotten when the
+  tab closes, as before.
 - **Add machines from the web dashboard (D46).** The **Machines** page
   is always there and has an **Add a machine** form: type the other
   machine's address and a key created on it, and it is checked and
