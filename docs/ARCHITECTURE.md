@@ -282,8 +282,10 @@ tui:
 - macOS (`internal/platform/darwin`) and Windows
   (`internal/platform/windows`) have collectors for identity, uptime, CPU,
   memory, filesystems and network, without cgo (D32). macOS also lists
-  processes, hardware, power sources and Apple Silicon temperatures,
-  calling system libraries through purego (D36). Everything else is
+  processes, hardware, power sources, Apple Silicon temperatures,
+  launchd services and the IOKit device registry (PCI, USB, disks),
+  calling system libraries through purego (D36, D48, D49), and memory
+  modules from `system_profiler`. Everything else is
   reported `unsupported` with a reason (`unsupported.Rest`). Other systems
   use `internal/platform/unsupported`, so the binary always runs.
 - The conformance suite (`internal/collector/conformance`) runs against

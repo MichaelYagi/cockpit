@@ -4,7 +4,9 @@ package darwin
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"runtime"
 	"sync"
 	"time"
@@ -44,6 +46,69 @@ func hardware(r *collector.Result) {
 		r.Records = append(r.Records, &core.BoardInfo{SystemVendor: "Apple", ProductName: model})
 	} else {
 		r.Status[core.CapHardwareBoard] = portable.Unavailable(core.TemporarilyUnavailable, "The Mac model could not be read.")
+	}
+}
+
+// ---- devices: PCI, USB and disks from the IOKit registry ----
+
+func devices(r *collector.Result, k *ioKitLib, loadErr error) {
+	if loadErr != nil {
+		reason := "Device lists need IOKit, which could not be loaded: " + loadErr.Error()
+		for _, c := range []core.Capability{core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices} {
+			r.Status[c] = portable.Unavailable(core.Unsupported, reason)
+		}
+		return
+	}
+	if pci, ok := k.pciDevices(); !ok {
+		r.Status[core.CapHardwarePCI] = portable.Unavailable(core.TemporarilyUnavailable, "The IOKit registry could not be read.")
+	} else if len(pci) == 0 {
+		r.Status[core.CapHardwarePCI] = portable.Unavailable(core.Unsupported, "No PCI devices are visible.")
+	} else {
+		r.Status[core.CapHardwarePCI] = portable.Available()
+		r.Records = append(r.Records, pci)
+	}
+	if usb, ok := k.usbDevices(); !ok {
+		r.Status[core.CapHardwareUSB] = portable.Unavailable(core.TemporarilyUnavailable, "The IOKit registry could not be read.")
+	} else if len(usb) == 0 {
+		r.Status[core.CapHardwareUSB] = portable.Unavailable(core.Unsupported, "No USB devices are connected or visible.")
+	} else {
+		r.Status[core.CapHardwareUSB] = portable.Available()
+		r.Records = append(r.Records, usb)
+	}
+	if disks, ok := k.disks(); !ok {
+		r.Status[core.CapStorageDevices] = portable.Unavailable(core.TemporarilyUnavailable, "The IOKit registry could not be read.")
+	} else if len(disks) == 0 {
+		r.Status[core.CapStorageDevices] = portable.Unavailable(core.Unsupported, "No disks were found.")
+	} else {
+		r.Status[core.CapStorageDevices] = portable.Available()
+		r.Records = append(r.Records, disks)
+	}
+}
+
+// ---- memory modules: system_profiler ----
+
+const systemProfiler = "/usr/sbin/system_profiler"
+
+// memoryModulesFrom runs Apple's system_profiler, which ships with
+// macOS: memory module details have no public library interface.
+func memoryModulesFrom(ctx context.Context, r *collector.Result) {
+	out, err := exec.CommandContext(ctx, systemProfiler, "-json", "SPMemoryDataType").Output()
+	var mods core.MemoryModules
+	if err == nil {
+		mods, err = memoryModules(out)
+	}
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		r.Status[core.CapHardwareMemory] = portable.Unavailable(core.Unsupported, "Memory modules need "+systemProfiler+", which is missing.")
+	case ctx.Err() != nil:
+		r.Status[core.CapHardwareMemory] = portable.Unavailable(core.TemporarilyUnavailable, "system_profiler took too long.")
+	case err != nil:
+		r.Status[core.CapHardwareMemory] = portable.Unavailable(core.TemporarilyUnavailable, "system_profiler failed: "+err.Error())
+	case len(mods) == 0:
+		r.Status[core.CapHardwareMemory] = portable.Unavailable(core.Unsupported, "This Mac reports no memory modules.")
+	default:
+		r.Status[core.CapHardwareMemory] = portable.Available()
+		r.Records = append(r.Records, mods)
 	}
 }
 

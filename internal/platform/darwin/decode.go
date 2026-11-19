@@ -5,14 +5,20 @@ package darwin
 // the *_darwin.go files.
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"math"
 	"math/bits"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/MichaelYagi/cockpit/internal/core"
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 // cpuStates is CPU_STATE_MAX: host_processor_info reports user, system,
@@ -309,4 +315,270 @@ func launchdServices(jobs []launchdJob) core.Services {
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
 	return out
+}
+
+// ---- IOKit registry: USB, PCI and disks ----
+
+// propStr returns the first non-empty string property among keys. CFData
+// holding text (as some PCI properties do) counts as a string.
+func propStr(d map[string]any, keys ...string) string {
+	for _, k := range keys {
+		var s string
+		switch v := d[k].(type) {
+		case string:
+			s = v
+		case []byte:
+			s = string(bytes.TrimRight(v, "\x00"))
+		}
+		if s = strings.TrimSpace(s); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func propNum(d map[string]any, key string) (float64, bool) {
+	v, ok := d[key].(float64)
+	return v, ok
+}
+
+// propLE32 reads a little-endian number from CFData, as IOPCIDevice
+// stores its IDs.
+func propLE32(d map[string]any, key string) (uint32, bool) {
+	b, ok := d[key].([]byte)
+	if !ok || len(b) == 0 || len(b) > 4 {
+		return 0, false
+	}
+	var buf [4]byte
+	copy(buf[:], b)
+	return binary.LittleEndian.Uint32(buf[:]), true
+}
+
+// usbSpeeds maps IOUSBHostDevice "Device Speed" to Mbit/s.
+var usbSpeeds = map[int]float64{0: 1.5, 1: 12, 2: 480, 3: 5000, 4: 10000, 5: 20000}
+
+// usbDeviceFrom turns an IOUSBHostDevice's properties into a device; name
+// is its registry name, used when the device has no product string.
+func usbDeviceFrom(d map[string]any, name string) (core.USBDevice, bool) {
+	vid, ok := propNum(d, "idVendor")
+	if !ok {
+		return core.USBDevice{}, false
+	}
+	pid, _ := propNum(d, "idProduct")
+	u := core.USBDevice{
+		VendorID:     fmt.Sprintf("%04x", uint16(vid)),
+		ProductID:    fmt.Sprintf("%04x", uint16(pid)),
+		Manufacturer: propStr(d, "USB Vendor Name", "kUSBVendorString"),
+		Product:      propStr(d, "USB Product Name", "kUSBProductString"),
+		Serial:       propStr(d, "USB Serial Number", "kUSBSerialNumberString"),
+	}
+	if u.Product == "" {
+		u.Product = strings.TrimSpace(name)
+	}
+	if loc, ok := propNum(d, "locationID"); ok {
+		u.Path = fmt.Sprintf("%08x", uint32(loc))
+	}
+	if sp, ok := propNum(d, "Device Speed"); ok {
+		if v, ok := usbSpeeds[int(sp)]; ok {
+			u.SpeedMbps = &v
+		}
+	}
+	return u, true
+}
+
+// pciVendors names the vendors usually found in a Mac; macOS has no
+// pci.ids database.
+var pciVendors = map[uint32]string{
+	0x106b: "Apple", 0x8086: "Intel", 0x1002: "AMD", 0x1022: "AMD", 0x10de: "NVIDIA", 0x14e4: "Broadcom",
+	0x144d: "Samsung", 0x1b4b: "Marvell", 0x1d6a: "Aquantia", 0x1af4: "Red Hat (virtio)", 0x15ad: "VMware",
+	0x1b21: "ASMedia", 0x1912: "Renesas", 0x12d8: "Pericom", 0x8087: "Intel",
+}
+
+// pciAddress turns "pcidebug" ("bus:device:function", sometimes followed
+// by the bridged bus range) into domain:bus:device.function.
+func pciAddress(debug string) (string, bool) {
+	if i := strings.IndexByte(debug, '('); i >= 0 {
+		debug = debug[:i]
+	}
+	parts := strings.Split(strings.TrimSpace(debug), ":")
+	if len(parts) != 3 {
+		return "", false
+	}
+	var n [3]uint64
+	for i, p := range parts {
+		v, err := strconv.ParseUint(p, 10, 8)
+		if err != nil {
+			return "", false
+		}
+		n[i] = v
+	}
+	return fmt.Sprintf("0000:%02x:%02x.%x", n[0], n[1], n[2]), true
+}
+
+// pciDeviceFrom turns an IOPCIDevice's properties into a device. name is
+// its registry name and driver the class of the driver attached to it.
+func pciDeviceFrom(d map[string]any, name, driver string) (core.PCIDevice, bool) {
+	vid, ok := propLE32(d, "vendor-id")
+	if !ok {
+		return core.PCIDevice{}, false
+	}
+	did, _ := propLE32(d, "device-id")
+	class, _ := propLE32(d, "class-code")
+	p := core.PCIDevice{
+		VendorID:   fmt.Sprintf("0x%04x", vid&0xffff),
+		DeviceID:   fmt.Sprintf("0x%04x", did&0xffff),
+		ClassCode:  fmt.Sprintf("0x%06x", class&0xffffff),
+		VendorName: pciVendors[vid&0xffff],
+		DeviceName: propStr(d, "model"),
+		Driver:     driver,
+	}
+	p.ClassName = portable.PCIClassName(p.ClassCode)
+	if a, ok := pciAddress(propStr(d, "pcidebug")); ok {
+		p.Address = a
+	} else {
+		p.Address = strings.TrimSpace(name)
+	}
+	return p, true
+}
+
+// diskTransport maps IOKit's "Physical Interconnect" to the API's
+// transports.
+func diskTransport(interconnect string) string {
+	switch strings.ToLower(interconnect) {
+	case "sata", "serial ata", "ata":
+		return "sata"
+	case "usb":
+		return "usb"
+	case "pci-express", "pci", "apple fabric", "nvme":
+		return "nvme"
+	case "virtio":
+		return "virtio"
+	case "secure digital", "sd":
+		return "mmc"
+	case "sas", "scsi", "fibre channel":
+		return "scsi"
+	}
+	return "unknown"
+}
+
+// blockDeviceFrom turns a whole-disk IOMedia and the "Device
+// Characteristics" and "Protocol Characteristics" of the device below it
+// into a disk. Disk images are skipped, as Linux skips loop devices.
+func blockDeviceFrom(media, device, protocol map[string]any) (core.BlockDevice, bool) {
+	name := propStr(media, "BSD Name")
+	inter := propStr(protocol, "Physical Interconnect")
+	if name == "" || inter == "Virtual Interface" {
+		return core.BlockDevice{}, false
+	}
+	size, _ := propNum(media, "Size")
+	b := core.BlockDevice{
+		Name:      name,
+		Model:     propStr(device, "Product Name"),
+		Serial:    propStr(device, "Serial Number"),
+		Transport: diskTransport(inter),
+		SizeBytes: uint64(max(size, 0)),
+	}
+	b.Removable, _ = media["Removable"].(bool)
+	switch propStr(device, "Medium Type") {
+	case "Solid State":
+		b.Rotational = new(false)
+	case "Rotational":
+		b.Rotational = new(true)
+	}
+	return b, true
+}
+
+// sortDisks orders disk2 before disk10.
+func sortDisks(ds core.BlockDevices) {
+	sort.Slice(ds, func(i, j int) bool {
+		if len(ds[i].Name) != len(ds[j].Name) {
+			return len(ds[i].Name) < len(ds[j].Name)
+		}
+		return ds[i].Name < ds[j].Name
+	})
+}
+
+// ---- memory modules: system_profiler SPMemoryDataType -json ----
+
+type spMemory struct {
+	Name         string     `json:"_name"`
+	Total        string     `json:"SPMemoryDataType"` // Apple silicon: the whole memory
+	Size         string     `json:"dimm_size"`
+	Type         string     `json:"dimm_type"`
+	Speed        string     `json:"dimm_speed"`
+	Manufacturer string     `json:"dimm_manufacturer"`
+	PartNumber   string     `json:"dimm_part_number"`
+	Serial       string     `json:"dimm_serial_number"`
+	Items        []spMemory `json:"_items"` // Intel: one per slot
+}
+
+// memSize parses "16 GB".
+func memSize(s string) (uint64, bool) {
+	f := strings.Fields(s)
+	if len(f) != 2 {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(f[0], 64)
+	if err != nil || v <= 0 {
+		return 0, false
+	}
+	mult := map[string]float64{"KB": 1 << 10, "MB": 1 << 20, "GB": 1 << 30, "TB": 1 << 40}[strings.ToUpper(f[1])]
+	if mult == 0 {
+		return 0, false
+	}
+	return uint64(v * mult), true
+}
+
+// hexText decodes "0x4D3437..." when it is printable ASCII, as Intel
+// Macs report part numbers; anything else is returned trimmed.
+func hexText(s string) string {
+	s = strings.TrimSpace(s)
+	if h, ok := strings.CutPrefix(s, "0x"); ok && len(h) > 4 {
+		if b, err := hex.DecodeString(h); err == nil {
+			t := strings.TrimSpace(string(bytes.TrimRight(b, "\x00")))
+			printable := t != ""
+			for _, r := range t {
+				printable = printable && r < unicode.MaxASCII && unicode.IsPrint(r)
+			}
+			if printable {
+				return t
+			}
+		}
+	}
+	return s
+}
+
+func spModule(locator string, m spMemory, size uint64) core.MemoryModule {
+	mod := core.MemoryModule{Locator: locator, SizeBytes: size, Type: strings.TrimSpace(m.Type),
+		Manufacturer: hexText(m.Manufacturer), PartNumber: hexText(m.PartNumber), Serial: strings.TrimSpace(m.Serial)}
+	if f := strings.Fields(m.Speed); len(f) > 0 {
+		mod.SpeedMTs, _ = strconv.Atoi(f[0])
+	}
+	return mod
+}
+
+// memoryModules parses system_profiler's memory report. Apple silicon
+// has one built-in memory; Intel Macs list each slot, empty ones with
+// size "empty", which are skipped.
+func memoryModules(js []byte) (core.MemoryModules, error) {
+	var doc struct {
+		Memory []spMemory `json:"SPMemoryDataType"`
+	}
+	if err := json.Unmarshal(js, &doc); err != nil {
+		return nil, err
+	}
+	var out core.MemoryModules
+	for _, m := range doc.Memory {
+		for _, it := range m.Items {
+			if size, ok := memSize(it.Size); ok {
+				out = append(out, spModule(strings.TrimSpace(it.Name), it, size))
+			}
+		}
+		if len(m.Items) == 0 {
+			if size, ok := memSize(m.Total); ok {
+				out = append(out, spModule("Built-in", m, size))
+			}
+		}
+	}
+	return out, nil
 }

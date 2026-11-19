@@ -10,6 +10,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Mac hardware inventory (D49).** On macOS, the Hardware screen lists
+  memory modules, physical disks, PCI devices and USB devices instead of
+  "Not collected on macOS yet". Apple Silicon Macs show their built-in
+  memory as one module. APFS containers and mounted disk images are not
+  listed as disks.
 - **Sensor reads stop at their deadline.** On machines with slow sysfs
   sensors, a sensor collection that ran out of time kept reading; it now
   stops and reports the sensors as temporarily unavailable for that round.

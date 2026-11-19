@@ -52,7 +52,8 @@ Batteries and UPS (Network UPS Tools) are included, and health findings
 can be sent to webhooks.
 
 **Platforms.** Linux has everything above. macOS has CPU, memory, disks,
-network, processes, services, batteries and Apple Silicon temperatures. Windows has
+network, processes, services, hardware inventory (memory, disks, PCI and
+USB devices), batteries and Apple Silicon temperatures. Windows has
 identity, CPU, memory, disks and network. Under WSL, Cockpit monitors the
 WSL virtual machine; Windows passes no CPU sensors into it.
 
