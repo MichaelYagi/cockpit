@@ -10,6 +10,13 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Windows processes and hardware (D50).** On Windows, the Processes
+  screen lists every process with CPU, memory, threads, owner and path,
+  and the Hardware screen shows the processor, board, firmware and memory
+  modules. Laptops show their battery.
+- **Memory module names include the bank.** Boards that name a slot
+  "DIMM 0" in each channel now show "P0 CHANNEL A DIMM 0", so modules
+  are told apart.
 - **Routes, DNS and UPS on more platforms.** macOS now shows its routing
   table and DNS servers on the Network screen, and macOS and Windows can
   read a UPS through Network UPS Tools, as Linux does. DNS servers with an

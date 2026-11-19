@@ -1247,3 +1247,41 @@ allows.
 
 **Risk.** It is tested on GitHub's macOS runner, a virtual machine that may
 have no PCI or USB devices, not on the owner's Mac.
+
+## D50 — Processes and hardware on Windows
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** This amends D32. Windows fills capabilities that already
+exist, without cgo and without new dependencies (`golang.org/x/sys`):
+
+- `windows.processes` lists processes on demand from
+  `NtQuerySystemInformation(SystemProcessInformation)`, the call Task
+  Manager uses: one snapshot with CPU times, memory, threads and thread
+  states, for every process, without administrator rights. The idle
+  process (PID 0) is left out, since its CPU time is idle time.
+  - `state` is `R` when a thread runs or is ready, `T` when every thread
+    is suspended (Task Manager's "Suspended"), and `S` otherwise.
+  - The owner comes from the process token. `uid` is the SID's relative
+    ID (18 for SYSTEM, 1001 for a local user), since the API's field is
+    a number; `user` is the account name.
+  - Windows refuses the token and path of protected and other users'
+    processes to non-administrators. Their `uid` is `-1` and the path is
+    `permission_denied`; the list is not marked partial, because every
+    process and its usage is still there.
+- `windows.hardware` reads the processor from the registry,
+  `GetLogicalProcessorInformationEx` (cores, threads, sockets, caches)
+  and CPUID (`x/sys/cpu`); the board and firmware from the registry; the
+  chassis and memory modules from SMBIOS (`GetSystemFirmwareTable`),
+  decoded by the same code as Linux (`internal/platform/portable`).
+  `max_frequency_mhz` is the rated speed Windows records, not the boost
+  clock.
+- `windows.power` reads `GetSystemPowerStatus`: one battery and the AC
+  adapter.
+
+**Why.** The owner wants every platform as complete as it can be. These
+are documented Windows interfaces (`NtQuerySystemInformation` is
+documented but may change; the struct layout comes from `x/sys/windows`).
+
+**Risk.** Tested on the owner's Windows 11 PC through WSL interop and on
+GitHub's Windows runner.

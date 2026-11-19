@@ -17,8 +17,11 @@ Phase 3.
   is marked partial. Apple Silicon temperatures are shown but not used by
   the CPU temperature check, because Apple publishes no limits for them.
   Disk health and fans are `unsupported`.
-- Windows: identity, uptime, CPU usage, memory, disks, network and UPS (D32).
-  There is no load average. Everything else is `unsupported`.
+- Windows: identity, uptime, CPU usage, memory, disks, network, processes,
+  processor, board, memory modules, battery and UPS (D32, D50). There is
+  no load average. Without administrator rights, Windows hides the owner
+  and path of system and other users' processes; their CPU and memory
+  are still shown. Everything else is `unsupported`.
 - The admin connection is a Unix socket on macOS and a named pipe on
   Windows.
 - Go 1.27.4 to build (pinned in `go.mod`; the `go` command downloads it if
