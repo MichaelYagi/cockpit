@@ -12,7 +12,9 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 - **Mac GPUs (D53).** On macOS, the Overview's GPU panel shows the GPU
   (on Apple silicon with its core count), its utilization and the memory
-  it uses. Temperature, power and clocks are not available there.
+  it uses. Temperature, power and clocks are not available there. The
+  macOS route list no longer shows the machine's own address, the
+  router's link entry or broadcast addresses as routes.
 - **Windows disks, PCI and USB devices, and GPUs (D52).** On Windows, the
   Hardware screen lists physical disks (model, size, SSD or hard drive,
   bus), PCI devices and USB devices by the names they report, and the

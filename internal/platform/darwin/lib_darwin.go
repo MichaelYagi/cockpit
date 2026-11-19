@@ -593,16 +593,29 @@ func (k *ioKitLib) ownDict(e uint32, prop string, keys ...string) map[string]any
 	return k.cf.dict(v, keys...)
 }
 
-// parentValue finds a property on the entry or its nearest parent.
-func (k *ioKitLib) parentValue(e uint32, prop string) any {
-	ref := k.cf.str(prop)
-	v := k.entrySearchProperty(e, ioServicePlane, ref, 0, ioIterateRecursively|ioIterateParents)
-	k.cf.release(ref)
-	if v == 0 {
-		return nil
+// pciParent reads the model and vendor of the nearest IOPCIDevice above
+// the entry, at most four levels up; it is empty on Apple silicon.
+func (k *ioKitLib) pciParent(e uint32) map[string]any {
+	cur, owned := e, false
+	defer func() {
+		if owned {
+			k.objectRelease(cur)
+		}
+	}()
+	for range 4 {
+		var p uint32
+		if k.entryGetParent(cur, ioServicePlane, &p) != kernSuccess || p == 0 {
+			return map[string]any{}
+		}
+		if owned {
+			k.objectRelease(cur)
+		}
+		cur, owned = p, true
+		if k.objectConformsTo(cur, "IOPCIDevice") {
+			return k.props(cur, "model", "vendor-id")
+		}
 	}
-	defer k.cf.release(v)
-	return k.cf.value(v)
+	return map[string]any{}
 }
 
 func (k *ioKitLib) className(e uint32) string {
@@ -620,12 +633,16 @@ func (k *ioKitLib) gpus() (core.GPUs, bool) {
 	var out core.GPUs
 	ok := k.each("IOAccelerator", func(e uint32) {
 		props := k.props(e, "model", "gpu-core-count")
+		// On Intel Macs the model and vendor are on the PCI device the
+		// accelerator sits on; searching further up would find the Mac's
+		// own model ("MacBookPro16,1").
+		pci := k.pciParent(e)
 		if _, has := props["model"]; !has {
-			if m := k.parentValue(e, "model"); m != nil {
+			if m, ok := pci["model"]; ok {
 				props["model"] = m
 			}
 		}
-		vendor, haveVendor := propLE32(map[string]any{"v": k.parentValue(e, "vendor-id")}, "v")
+		vendor, haveVendor := propLE32(pci, "vendor-id")
 		out = append(out, gpuFrom(k.className(e), props, vendor, haveVendor, k.ownDict(e, "PerformanceStatistics", gpuStatKeys...)))
 	})
 	return out, ok

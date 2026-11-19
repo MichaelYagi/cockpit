@@ -331,6 +331,9 @@ func TestRealNetConfig(t *testing.T) {
 		}
 		for _, rt := range routes {
 			t.Logf("route %+v", rt)
+			if (strings.HasSuffix(rt.Destination, "/32") || strings.HasSuffix(rt.Destination, "/128")) && rt.Gateway == "" {
+				t.Errorf("local host route listed: %+v", rt)
+			}
 		}
 		t.Logf("dns %+v", dns)
 		if !slices.ContainsFunc(routes, func(rt core.Route) bool { return rt.Default && rt.Gateway != "" && rt.Interface != "" }) {
@@ -361,8 +364,8 @@ func TestRealGPU(t *testing.T) {
 		for _, rec := range r.Records {
 			for _, g := range rec.(core.GPUs) {
 				t.Logf("gpu %+v util=%v mem=%v", g, deref(g.UtilizationPercent), deref(g.MemoryUsedBytes))
-				if g.Name == "" || g.Driver == "" {
-					t.Errorf("implausible GPU %+v", g)
+				if model, _ := unix.Sysctl("hw.model"); g.Name == "" || g.Driver == "" || g.Name == model {
+					t.Errorf("implausible GPU %+v (Mac model %q)", g, model)
 				}
 			}
 		}

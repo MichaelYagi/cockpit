@@ -660,6 +660,9 @@ func routeIP(b []byte) net.IP {
 // parseRouteDump parses NET_RT_DUMP. It keeps the routes netstat -rn
 // shows without -a: not ARP/neighbor entries, cloned host routes,
 // interface-scoped copies, reject routes, loopback or multicast routes.
+// Host routes without a gateway (this machine's addresses, the router's
+// link entry, broadcasts) are left out too, as Linux keeps them in its
+// separate local table and Windows hides them.
 // ifName maps an interface index to its name.
 func parseRouteDump(b []byte, ifName func(int) string) core.Routes {
 	out := core.Routes{}
@@ -695,8 +698,9 @@ func parseRouteDump(b []byte, ifName func(int) string) core.Routes {
 		}
 		ip := routeIP(dst).Mask(net.CIDRMask(plen, bitsLen))
 		iface := ifName(int(binary.LittleEndian.Uint16(msg[rtmIndex:])))
+		gateway := flags&rtfGateway != 0
 		if ip == nil || ip.IsLoopback() || ip.IsMulticast() || strings.HasPrefix(iface, "lo") ||
-			ip.IsLinkLocalUnicast() && len(ip) == net.IPv6len && plen >= 64 {
+			ip.IsLinkLocalUnicast() && len(ip) == net.IPv6len && plen >= 64 || plen == bitsLen && !gateway {
 			continue
 		}
 		name := "ipv4"
@@ -704,7 +708,7 @@ func parseRouteDump(b []byte, ifName func(int) string) core.Routes {
 			name = "ipv6"
 		}
 		r := core.Route{Family: name, Destination: fmt.Sprintf("%s/%d", ip, plen), Interface: iface, Default: plen == 0}
-		if gw, ok := addrs[rtaGateway]; ok && flags&rtfGateway != 0 && saFamily(gw) == family {
+		if gw, ok := addrs[rtaGateway]; ok && gateway && saFamily(gw) == family {
 			r.Gateway = routeIP(addrBytes(gw, family)).String()
 		}
 		out = append(out, r)

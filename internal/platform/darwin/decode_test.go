@@ -360,6 +360,10 @@ func TestParseRouteDump(t *testing.T) {
 	dump = append(dump, rtMsg(4, rtfUp|rtfReject, rtaDst|rtaNetmask, sin(10, 0, 0, 0), []byte{5, 0, 0, 0, 255})...)
 	// Loopback is skipped.
 	dump = append(dump, rtMsg(1, rtfUp|rtfHost, rtaDst|rtaGateway, sin(127, 0, 0, 1), sin(127, 0, 0, 1))...)
+	// Host routes without a gateway (own address, router link entry,
+	// broadcast) are skipped.
+	dump = append(dump, rtMsg(4, rtfUp|rtfHost, rtaDst|rtaGateway, sin(192, 168, 1, 5), linkGW)...)
+	dump = append(dump, rtMsg(4, rtfUp|rtfHost, rtaDst|rtaGateway, sin(255, 255, 255, 255), linkGW)...)
 	// A host route to 10.0.0.5 via a gateway.
 	dump = append(dump, rtMsg(4, rtfUp|rtfHost|rtfGateway, rtaDst|rtaGateway, sin(10, 0, 0, 5), sin(192, 168, 1, 254))...)
 	// IPv6 default via a link-local gateway with the embedded scope ID.
