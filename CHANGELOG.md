@@ -52,6 +52,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Added
 
+- **Services on macOS (D48).** The Services screen and `/api/v1/services`
+  list launchd jobs on a Mac: system daemons and your user agents, shown
+  as running (with the PID) or with how they last ended. A new
+  `services.launchd` capability reports them.
 - **Several machines in the web dashboard (D45).** List other agents
   under `api.web.machines` and the dashboard gets a machine picker and a
   **Machines** page with each machine's health, CPU, memory, uptime and

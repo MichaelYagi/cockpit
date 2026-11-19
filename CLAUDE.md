@@ -17,7 +17,7 @@ The product helps users understand:
 - What has changed or gone wrong over time.
 - How other applications and machines can consume its data securely.
 
-**Approved decisions live in `docs/DECISIONS.md` (D1–D47). They override
+**Approved decisions live in `docs/DECISIONS.md` (D1–D48). They override
 anything else in this file if the two ever disagree.** Propose a new
 decision entry before deviating from one.
 
@@ -80,7 +80,7 @@ Never create system files, units or users named plain `cockpit`.
 - Rate limiting: `golang.org/x/time/rate`.
 - systemd: `github.com/godbus/dbus/v5` (read-only `ListUnits`, D15).
 - Windows admin pipe: `github.com/Microsoft/go-winio` (D31).
-- macOS system libraries (Mach, libproc, IOKit): `github.com/ebitengine/purego`,
+- macOS system libraries (Mach, libproc, IOKit, ServiceManagement): `github.com/ebitengine/purego`,
   without cgo, macOS builds only (D36).
 - GPU metrics: `nvidia-smi` CSV query and `amdgpu` sysfs (optional, D16).
 - Streaming: SSE (Phase 2). No WebSocket planned.

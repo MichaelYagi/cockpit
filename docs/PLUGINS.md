@@ -130,7 +130,7 @@ Dotted identifiers: `system.identity`, `system.uptime`, `cpu.usage`,
 `cpu.load`, `cpu.frequency` (not collected yet), `memory.usage`, `memory.pressure`,
 `storage.devices`, `storage.filesystems`, `storage.smart`,
 `network.interfaces`, `network.throughput`, `sensors.thermal`,
-`sensors.fan`, later `gpu.*`, `services.systemd`, `processes.list`.
+`sensors.fan`, later `gpu.*`, `services.systemd`, `services.launchd`, `processes.list`.
 
 A collector declares what it can **potentially** provide. `Probe` and each
 `Result` report what is **actually** available right now.
@@ -182,6 +182,7 @@ filesystems are always skipped.
 | `darwin.hardware` | `hardware.cpu`, `hardware.board` | `sysctl` (`machdep.cpu.brand_string`, `hw.physicalcpu`, cache sizes, `hw.model`) |
 | `darwin.power` | `power.supplies` | IOKit power sources (purego) |
 | `darwin.thermal` | `sensors.thermal` (Apple Silicon) | IOKit HID temperature sensors (purego); not marked as CPU sensors |
+| `darwin.services` | `services.launchd` | ServiceManagement `SMCopyAllJobDictionaries` (purego, D48): system daemons and this user's agents, every 10s |
 | `windows.system` | `system.identity`, `system.uptime` | `RtlGetVersion`, registry product name, `GetTickCount64` |
 | `windows.cpu` | `cpu.usage` (`cpu.load` unsupported: none on Windows) | `GetSystemTimes` |
 | `windows.memory` | `memory.usage` | `GlobalMemoryStatusEx` |
