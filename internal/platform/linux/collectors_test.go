@@ -376,6 +376,23 @@ func TestSensorsNone(t *testing.T) {
 	}
 }
 
+// A cancelled collection stops reading and says so, instead of claiming
+// the machine has no sensors.
+func TestSensorsCancelled(t *testing.T) {
+	root := tree(t, map[string]string{
+		"sys/class/hwmon/hwmon0/name":        "k10temp\n",
+		"sys/class/hwmon/hwmon0/temp1_input": "45000\n",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := newSensors(env(root)).Collect(ctx)
+	wantStatus(t, r, core.CapSensorsThermal, core.TemporarilyUnavailable)
+	wantStatus(t, r, core.CapSensorsFan, core.TemporarilyUnavailable)
+	if len(r.Records) != 0 {
+		t.Error("records from a cancelled collection")
+	}
+}
+
 func TestFilesystemsRootOverlayKept(t *testing.T) {
 	root := tree(t, map[string]string{"proc/self/mountinfo": "1 0 0:30 / / rw - overlay overlay rw,lowerdir=/x\n"})
 	c := newFilesystems(env(root))
