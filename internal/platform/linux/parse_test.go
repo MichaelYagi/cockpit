@@ -80,7 +80,7 @@ func FuzzParsers(f *testing.F) {
 		_, _, _ = parseNetDev(b)
 		_, _ = parseMountinfo(b)
 		_ = unescapeOctal(string(b))
-		_, _, _ = parseSmartctl(b, 0)
+		_, _, _ = portable.ParseSmartctl(b, 0)
 		_, _ = parseProcStat(b)
 		_, _ = parseBootTime(b)
 		_ = parsePasswd(b)

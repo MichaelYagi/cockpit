@@ -176,6 +176,19 @@ func disk(h win.Handle, name string) (core.BlockDevice, bool) {
 	return storageDevice(name, desc[:n], size, rotational)
 }
 
+// smartDisks names PhysicalDriveN as smartctl does: /dev/pdN (D54).
+func smartDisks() ([]portable.SMARTDisk, error) {
+	ds, err := disks()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]portable.SMARTDisk, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, portable.SMARTDisk{Name: d.Name, Path: "/dev/pd" + strings.TrimPrefix(d.Name, "PhysicalDrive")})
+	}
+	return out, nil
+}
+
 func devices(r *collector.Result) {
 	if pci, err := pciDevices(); err != nil {
 		r.Status[core.CapHardwarePCI] = portable.Status(err, "PCI devices")

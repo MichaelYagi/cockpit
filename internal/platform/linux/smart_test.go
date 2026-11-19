@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/MichaelYagi/cockpit/internal/core"
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 type tools map[string]string
@@ -102,7 +103,7 @@ func TestSMARTCollectPermissionDenied(t *testing.T) {
 	e.Tools = tools{"smartctl": "/usr/sbin/smartctl"}
 	c := newSMART(e)
 	c.run = func(context.Context, string, ...string) ([]byte, int, error) {
-		return []byte(deniedJSON), smartBitOpenFailed, nil
+		return []byte(deniedJSON), portable.SmartBitOpenFailed, nil
 	}
 	wantStatus(t, c.Collect(context.Background()), core.CapStorageSMART, core.PermissionDenied)
 }
@@ -113,22 +114,4 @@ func TestSMARTVirtualDisks(t *testing.T) {
 	c := newSMART(e)
 	c.run = func(context.Context, string, ...string) ([]byte, int, error) { return []byte(virtualJSON), 4, nil }
 	wantStatus(t, c.Collect(context.Background()), core.CapStorageSMART, core.Unsupported)
-}
-
-func TestParseSmartctlFailing(t *testing.T) {
-	h, perm, ok := parseSmartctl([]byte(`{"smart_status":{"passed":false},"device":{"protocol":"ATA"}}`), 8)
-	if !ok || perm || h.Passed == nil || *h.Passed {
-		t.Errorf("failing disk: %+v perm=%v ok=%v", h, perm, ok)
-	}
-	if _, _, ok := parseSmartctl([]byte("not json"), 0); ok {
-		t.Error("garbage accepted")
-	}
-}
-
-func TestLimitedBuffer(t *testing.T) {
-	b := limitedBuffer{max: 4}
-	n, err := b.Write([]byte("abcdef"))
-	if n != 6 || err != nil || b.String() != "abcd" {
-		t.Errorf("n=%d err=%v buf=%q", n, err, b.String())
-	}
 }

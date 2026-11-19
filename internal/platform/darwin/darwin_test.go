@@ -380,3 +380,26 @@ func deref[T any](p *T) any {
 	}
 	return *p
 }
+
+// Disk health needs smartctl (D54); runners and machines without it
+// report not_configured, which is logged.
+func TestRealSMART(t *testing.T) {
+	for _, c := range collectors() {
+		if c.Descriptor().ID != "darwin.smart" {
+			continue
+		}
+		r := c.Collect(context.Background())
+		st := r.Status[core.CapStorageSMART]
+		t.Logf("%s %s", st.Availability, st.Reason)
+		for _, rec := range r.Records {
+			for _, h := range rec.(core.DiskHealthList) {
+				t.Logf("%+v passed=%v", h, h.Passed != nil && *h.Passed)
+			}
+		}
+		if st.Availability == core.Available && len(r.Records) == 0 {
+			t.Error("available without records")
+		}
+		return
+	}
+	t.Fatal("no darwin.smart collector")
+}

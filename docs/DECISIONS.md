@@ -1373,3 +1373,28 @@ virtual machine's paravirtual GPU, is listed with metrics `unsupported`.
 the one GPU interface macOS offers without root or private frameworks.
 
 **Contract.** Additive: one enum value, only from macOS agents.
+
+## D54 — Disk health on macOS and Windows
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** This extends D20 to macOS and Windows. `darwin.smart` and
+`windows.smart` run the same fixed `smartctl --json` query as Linux, once
+an hour, for each physical disk (`/dev/diskN` on macOS, `/dev/pdN` for
+`PhysicalDriveN` on Windows), with `--nocheck=standby` so sleeping disks
+are not woken. The parser and the bounded tool runner are shared with
+Linux (`internal/platform/portable`).
+
+- `smartctl` is optional. Besides `PATH`, Cockpit looks where Homebrew
+  (`/opt/homebrew`, `/usr/local`), MacPorts (`/opt/local/sbin`) and the
+  Windows installer (`%ProgramFiles%\smartmontools\bin`) put it, since a
+  launchd agent or a Windows service rarely has those on `PATH`.
+- There is no privileged helper on these platforms. Without root (macOS)
+  or administrator rights (Windows), smartctl cannot open the disks and
+  the capability is `permission_denied`, with that explanation.
+
+**Why.** The owner wants disk health everywhere smartctl can provide it.
+
+**Risk.** CI installs smartmontools on the macOS and Windows runners,
+whose virtual disks may report no SMART data; real disks are not tested
+there.

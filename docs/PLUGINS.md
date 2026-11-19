@@ -187,6 +187,7 @@ filesystems are always skipped.
 | `darwin.netconfig` | `network.routes`, `network.dns` | `sysctl NET_RT_DUMP` (routes as `netstat -rn` shows them: no neighbor entries, cloned or interface-scoped routes), `/etc/resolv.conf`, every 30s |
 | `darwin.ups`, `windows.ups` | `power.ups` | The same Network UPS Tools client as `linux.ups` (`internal/platform/portable`) |
 | `darwin.gpu` | `gpu.devices`, `gpu.metrics` | IOKit `IOAccelerator` (purego, D53): model, core count, and utilization and memory in use from the driver's `PerformanceStatistics`, every 5s |
+| `darwin.smart`, `windows.smart` | `storage.smart` | `smartctl --json` (D54), hourly, when installed: `/dev/diskN` on macOS, `/dev/pdN` on Windows; Homebrew, MacPorts and `Program Files` locations are searched besides `PATH` |
 | `darwin.memory_modules` | `hardware.memory_modules` | `system_profiler -json SPMemoryDataType` (D49): one built-in memory on Apple Silicon, each filled slot on Intel |
 | `windows.system` | `system.identity`, `system.uptime` | `RtlGetVersion`, registry product name, `GetTickCount64` |
 | `windows.cpu` | `cpu.usage` (`cpu.load` unsupported: none on Windows) | `GetSystemTimes` |

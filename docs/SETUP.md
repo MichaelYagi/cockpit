@@ -17,7 +17,7 @@ Phase 3.
   other users' CPU and memory use, so those processes show 0 and the list
   is marked partial. Apple Silicon temperatures are shown but not used by
   the CPU temperature check, because Apple publishes no limits for them.
-  Disk health and fans are `unsupported`.
+  Fans are `unsupported`; disk health needs `smartctl` (below).
 - Windows: identity, uptime, CPU usage, memory, disks, network, routes and
   DNS, processes, services, processor, board, memory modules, physical
   disks, PCI and USB devices, GPUs (NVIDIA metrics through `nvidia-smi`),
@@ -30,6 +30,12 @@ Phase 3.
 - Go 1.27.4 to build (pinned in `go.mod`; the `go` command downloads it if
   needed). No C compiler or database server is needed.
 - Optional: `smartctl` from smartmontools 7.0 or newer, for disk health.
+  On macOS, install it with Homebrew (`brew install smartmontools`) or
+  MacPorts; on Windows, with the smartmontools installer (it goes to
+  `C:\Program Files\smartmontools`). Cockpit finds it there even when it
+  is not on `PATH` (D54). Reading disks needs root on macOS and an
+  administrator terminal on Windows; otherwise disk health shows
+  `permission_denied`.
 
 ### macOS and Windows
 
@@ -603,7 +609,7 @@ Unavailable data is reported with a reason, never as an error:
 |---|---|---|
 | Temperatures, fans | No hwmon/thermal sensors (VMs, containers, WSL) | Nothing; this is expected |
 | Disk health | `smartctl` not installed | Install smartmontools 7.0+ (`install.sh` does this for the system service). Virtual disks in VMs and WSL have no SMART data even with it |
-| Disk health | Permission denied | Reading SMART data needs raw device access; in system mode enable the SMART helper (see System service) |
+| Disk health | Permission denied | Reading SMART data needs raw device access; in system mode enable the SMART helper (see System service). On macOS run the agent as root, on Windows from an administrator terminal (D54) |
 | Disk health | Results more than 3 hours old | The SMART helper stopped running: `systemctl status cockpit-smart.timer` |
 | Memory pressure | Kernel without PSI (before 4.20, or `psi=0`) | Memory utilization is still checked |
 | GPU metrics | `nvidia-smi` not installed (NVIDIA) or no metrics source | Install the NVIDIA driver utilities; the GPU is still listed |

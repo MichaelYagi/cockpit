@@ -68,3 +68,15 @@ jobs:
       - name: what the real macOS collectors found
         if: runner.os == 'macOS'
         run: go test -count=1 -v -run 'TestReal' ./internal/platform/darwin/
+      # Disk health (D54) with smartctl installed on the runner; its
+      # virtual disks may report no SMART data, so the result is logged.
+      - name: smartctl on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install smartmontools
+          go test -count=1 -v -run 'TestRealSMART' ./internal/platform/darwin/
+      - name: smartctl on Windows
+        if: runner.os == 'Windows'
+        run: |
+          choco install smartmontools -y --no-progress
+          go test -count=1 -v -run 'TestRealSMART' ./internal/platform/windows/

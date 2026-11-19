@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -40,6 +41,7 @@ var implemented = []core.Capability{
 	core.CapPowerUPS, core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapHardwareMemory,
 	core.CapPowerSupplies, core.CapNetworkRoutes, core.CapNetworkDNS, core.CapServicesWindows,
 	core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices, core.CapGPUDevices, core.CapGPUMetrics,
+	core.CapStorageSMART,
 }
 
 // Collectors returns the Windows collector set.
@@ -66,6 +68,14 @@ func Collectors(env collector.Env) []collector.Collector {
 		withInterval(sampler("windows.services", "service control manager", 0, now, []core.Capability{core.CapServicesWindows},
 			(&servicesCollector{}).collect), 10*time.Second),
 		portable.NewUPS(env, "windows.ups", version),
+		portable.NewSMART(portable.SMART{ID: "windows.smart", Version: version, Now: now,
+			Tool: func() (string, bool) {
+				return portable.FirstTool(env.Tools, "smartctl",
+					filepath.Join(os.Getenv("ProgramFiles"), "smartmontools", "bin", "smartctl.exe"))
+			},
+			Disks:        smartDisks,
+			NoPermission: "smartctl could not open the disks. Disk health on Windows needs the agent to run as administrator.",
+		}),
 		portable.NewEndpoints(env),
 		unsupported.Rest("windows.unsupported", implemented, "Not collected on Windows yet."),
 	}
