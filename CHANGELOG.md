@@ -10,6 +10,12 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Windows services, routes and DNS (D51).** On Windows, the Services
+  screen lists Windows services with their start type, and the Network
+  screen shows routes and DNS servers. An automatic service that stopped
+  with an error counts as failed; manual and delayed-start services never
+  do. The API gains the `services.windows` capability and the `windows`
+  DNS resolver value.
 - **Windows processes and hardware (D50).** On Windows, the Processes
   screen lists every process with CPU, memory, threads, owner and path,
   and the Hardware screen shows the processor, board, firmware and memory

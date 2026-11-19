@@ -2,6 +2,9 @@ package windows
 
 import (
 	"encoding/binary"
+	"fmt"
+	"net"
+	"strings"
 	"testing"
 )
 
@@ -102,5 +105,94 @@ func TestRawSMBIOS(t *testing.T) {
 	}
 	if rawSMBIOS([]byte{1, 2}) != nil {
 		t.Error("short header accepted")
+	}
+}
+
+func TestWindowsService(t *testing.T) {
+	cases := []struct {
+		in                winService
+		load, active, sub string
+	}{
+		{winService{Name: "Spooler", State: svcRunning, PID: 3012, StartType: startAuto}, "auto", "active", "running (pid 3012)"},
+		{winService{State: svcStopped, StartType: startDemand, ExitCode: 0}, "manual", "inactive", "stopped"},
+		{winService{State: svcStopped, StartType: startDemand, ExitCode: 1}, "manual", "inactive", "stopped (exit 1)"},
+		{winService{State: svcStopped, StartType: startAuto, Delayed: true, ExitCode: errServiceSpecific, SpecificExit: 7}, "auto (delayed)", "inactive", "stopped (exit 7)"},
+		{winService{State: svcStopped, StartType: startAuto, ExitCode: errServiceSpecific, SpecificExit: 7}, "auto", "failed", "stopped (exit 7)"},
+		{winService{State: svcStopped, StartType: startAuto, ExitCode: errServiceNeverStarted}, "auto", "inactive", "stopped"},
+		{winService{State: svcStopped, StartType: startDisabled, ExitCode: 0}, "disabled", "inactive", "stopped"},
+		{winService{State: svcPaused, StartType: startUnknown}, "unknown", "active", "paused"},
+		{winService{State: svcStartPending, StartType: startAuto}, "auto", "activating", "start pending"},
+		{winService{State: svcStopPending, StartType: startAuto}, "auto", "deactivating", "stop pending"},
+	}
+	for _, c := range cases {
+		s := windowsService(c.in)
+		if s.LoadState != c.load || s.ActiveState != c.active || s.SubState != c.sub {
+			t.Errorf("%+v: %+v", c.in, s)
+		}
+	}
+}
+
+func TestSockaddrIP(t *testing.T) {
+	v4 := sockaddrIP(2, [6]uint32{0x0101a8c0}) // 192.168.1.1 in memory order
+	if v4.String() != "192.168.1.1" {
+		t.Errorf("%v", v4)
+	}
+	// flow info, then 2001:db8::1, then the scope ID.
+	var d [6]uint32
+	d[1] = 0xb80d0120
+	d[4] = 0x01000000
+	if ip := sockaddrIP(23, d); ip.String() != "2001:db8::1" {
+		t.Errorf("%v", ip)
+	}
+	if sockaddrIP(0, d) != nil {
+		t.Error("unknown family accepted")
+	}
+}
+
+func TestWindowsRoutes(t *testing.T) {
+	ip := net.ParseIP
+	rows := []routeRow{
+		{Dst: ip("192.168.0.0").To4(), Prefix: 24, IfIndex: 7, Metric: 281},
+		{Dst: ip("0.0.0.0").To4(), Prefix: 0, Gateway: ip("192.168.0.1").To4(), IfIndex: 7, Metric: 25},
+		{Dst: ip("192.168.0.185").To4(), Prefix: 32, Gateway: ip("0.0.0.0").To4(), IfIndex: 7},  // own address
+		{Dst: ip("192.168.0.255").To4(), Prefix: 32, IfIndex: 7},                                // broadcast
+		{Dst: ip("255.255.255.255").To4(), Prefix: 32, IfIndex: 7},                              // limited broadcast
+		{Dst: ip("224.0.0.0").To4(), Prefix: 4, IfIndex: 7},                                     // multicast
+		{Dst: ip("127.0.0.0").To4(), Prefix: 8, IfIndex: 1, Loopback: true},                     // loopback
+		{Dst: ip("10.8.0.5").To4(), Prefix: 32, Gateway: ip("192.168.0.254").To4(), IfIndex: 7}, // host via gateway: kept
+		{Dst: ip("::"), Prefix: 0, Gateway: ip("fe80::1"), IfIndex: 7, Metric: 281},
+		{Dst: ip("fe80::"), Prefix: 64, IfIndex: 7},
+		{Dst: ip("2001:db8::"), Prefix: 64, Gateway: ip("::"), IfIndex: 7, Metric: 281},
+	}
+	got := windowsRoutes(rows, func(i uint32) string { return map[uint32]string{7: "Ethernet"}[i] })
+	var lines []string
+	for _, r := range got {
+		lines = append(lines, fmt.Sprintf("%s %s %s %s %d %v", r.Family, r.Destination, r.Gateway, r.Interface, r.Metric, r.Default))
+	}
+	want := []string{
+		"ipv4 0.0.0.0/0 192.168.0.1 Ethernet 25 true",
+		"ipv6 ::/0 fe80::1 Ethernet 281 true",
+		"ipv4 10.8.0.5/32 192.168.0.254 Ethernet 0 false",
+		"ipv4 192.168.0.0/24  Ethernet 281 false",
+		"ipv6 2001:db8::/64  Ethernet 281 false",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestWindowsDNS(t *testing.T) {
+	cfg := windowsDNS([]adapterDNS{
+		{Up: true, Servers: []string{"10.0.0.1"}, Suffix: "vpn.example"},                                             // no gateway: after
+		{Up: true, HasGateway: true, Servers: []string{"192.168.0.1", "fec0:0:0:ffff::1", "1.1.1.1"}, Suffix: "lan"}, // first
+		{Up: false, HasGateway: true, Servers: []string{"8.8.8.8"}, Suffix: "down"},                                  // ignored
+		{Up: true, HasGateway: true, Servers: []string{"1.1.1.1"}},                                                   // duplicate
+	}, "corp.example, lan")
+	if cfg.Resolver != "windows" || strings.Join(cfg.Nameservers, ",") != "192.168.0.1,1.1.1.1,10.0.0.1" ||
+		strings.Join(cfg.Search, ",") != "corp.example,lan,vpn.example" {
+		t.Errorf("%+v", cfg)
+	}
+	if cfg := windowsDNS(nil, ""); cfg.Nameservers == nil || len(cfg.Search) != 0 {
+		t.Errorf("empty %+v", cfg)
 	}
 }

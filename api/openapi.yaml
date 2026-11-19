@@ -154,13 +154,17 @@ paths:
     get:
       operationId: listServices
       tags: [machine]
-      summary: Services (systemd on Linux, launchd on macOS)
+      summary: Services (systemd on Linux, launchd on macOS, Windows services)
       description: >-
-        Unit state from systemd over D-Bus on Linux, or launchd jobs on macOS
-        (system daemons and this user's agents, D48), refreshed every 10
-        seconds. launchd jobs are `active` while running and `inactive`
-        otherwise, never `failed`. Counts cover all services even when
-        `state` filters the items.
+        Unit state from systemd over D-Bus on Linux, launchd jobs on macOS
+        (system daemons and this user's agents, D48), or Windows services
+        (D51), refreshed every 10 seconds. launchd jobs are `active` while
+        running and `inactive` otherwise, never `failed`. A Windows
+        service's `load_state` is its start type (`auto`, `auto (delayed)`,
+        `manual`, `disabled`, `boot`, `system` or `unknown`); it is
+        `failed` only when it starts automatically (not delayed), is
+        stopped and exited with an error. Counts cover all services even when `state` filters
+        the items.
       x-cockpit-scope: system:read
       parameters:
         - name: state
@@ -1797,7 +1801,7 @@ components:
       properties:
         nameservers: { type: array, items: { type: string } }
         search: { type: array, items: { type: string } }
-        resolver: { type: string, enum: [resolv.conf, systemd-resolved], description: "With systemd-resolved, nameservers are its upstream servers." }
+        resolver: { type: string, enum: [resolv.conf, systemd-resolved, windows], description: "With systemd-resolved, nameservers are its upstream servers. windows (D51) merges the connected adapters' servers, those with a default gateway first." }
     Sensor:
       type: object
       additionalProperties: false

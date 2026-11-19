@@ -111,7 +111,7 @@ type Routes []Route
 type DNSConfig struct {
 	Nameservers []string
 	Search      []string
-	// Resolver is "resolv.conf" or "systemd-resolved" (when the local stub
+	// Resolver is "resolv.conf", "windows" (D51) or "systemd-resolved" (when the local stub
 	// is in use, Nameservers are its upstream servers).
 	Resolver string
 }

@@ -54,8 +54,9 @@ can be sent to webhooks.
 **Platforms.** Linux has everything above. macOS has CPU, memory, disks,
 network, processes, services, hardware inventory (memory, disks, PCI and
 USB devices), routes and DNS, UPS, batteries and Apple Silicon
-temperatures. Windows has identity, CPU, memory, disks, network, processes, hardware
-inventory (processor, board, memory), battery and UPS. Under WSL, Cockpit monitors the
+temperatures. Windows has identity, CPU, memory, disks, network, routes and DNS,
+processes, services, hardware inventory (processor, board, memory),
+battery and UPS. Under WSL, Cockpit monitors the
 WSL virtual machine; Windows passes no CPU sensors into it.
 
 ## Architecture at a glance
