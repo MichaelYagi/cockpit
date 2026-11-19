@@ -10,6 +10,9 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Sensor reads stop at their deadline.** On machines with slow sysfs
+  sensors, a sensor collection that ran out of time kept reading; it now
+  stops and reports the sensors as temporarily unavailable for that round.
 - **Endpoint targets are links.** On the web dashboard's Network screen,
   an endpoint whose target is an `http` or `https` URL links to it, opening
   in a new tab. Other targets (`tcp://…`) stay text.

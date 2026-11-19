@@ -44,9 +44,16 @@ func (c *sensorsCollector) Descriptor() collector.Descriptor {
 	}
 }
 
-func (c *sensorsCollector) Collect(context.Context) collector.Result {
+func (c *sensorsCollector) Collect(ctx context.Context) collector.Result {
 	res := collector.Result{CollectedAt: c.env.Now(), Status: map[core.Capability]core.CapabilityStatus{}}
-	sensors := c.hwmon()
+	sensors := c.hwmon(ctx)
+	if ctx.Err() != nil {
+		// Some sysfs sensors are slow to read; stop at the deadline rather
+		// than report a partial list as complete.
+		cancelled := core.CapabilityStatus{Availability: core.TemporarilyUnavailable, Reason: "Reading sensors took too long."}
+		res.Status[core.CapSensorsThermal], res.Status[core.CapSensorsFan] = cancelled, cancelled
+		return res
+	}
 	hasTemp := false
 	for _, s := range sensors {
 		if s.Kind == core.SensorTemperature {
@@ -56,7 +63,7 @@ func (c *sensorsCollector) Collect(context.Context) collector.Result {
 	}
 	// Thermal zones usually duplicate hwmon; use them only as a fallback.
 	if !hasTemp {
-		zones := c.thermalZones()
+		zones := c.thermalZones(ctx)
 		sensors = append(sensors, zones...)
 		hasTemp = len(zones) > 0
 	}
@@ -81,7 +88,7 @@ func (c *sensorsCollector) Collect(context.Context) collector.Result {
 	return res
 }
 
-func (c *sensorsCollector) hwmon() []core.Sensor {
+func (c *sensorsCollector) hwmon(ctx context.Context) []core.Sensor {
 	dirs, err := listDir(c.env.SysRoot, "class/hwmon")
 	if err != nil {
 		return nil
@@ -89,6 +96,9 @@ func (c *sensorsCollector) hwmon() []core.Sensor {
 	sort.Strings(dirs)
 	var out []core.Sensor
 	for _, d := range dirs {
+		if ctx.Err() != nil {
+			return out
+		}
 		base := filepath.Join("class", "hwmon", d)
 		// Older drivers put attributes under device/.
 		for _, dir := range []string{base, filepath.Join(base, "device")} {
@@ -96,7 +106,7 @@ func (c *sensorsCollector) hwmon() []core.Sensor {
 			if err != nil {
 				continue
 			}
-			found := c.hwmonChip(dir, chip)
+			found := c.hwmonChip(ctx, dir, chip)
 			out = append(out, found...)
 			if len(found) > 0 {
 				break
@@ -106,7 +116,7 @@ func (c *sensorsCollector) hwmon() []core.Sensor {
 	return out
 }
 
-func (c *sensorsCollector) hwmonChip(dir, chip string) []core.Sensor {
+func (c *sensorsCollector) hwmonChip(ctx context.Context, dir, chip string) []core.Sensor {
 	names, err := listDir(c.env.SysRoot, dir)
 	if err != nil {
 		return nil
@@ -114,6 +124,9 @@ func (c *sensorsCollector) hwmonChip(dir, chip string) []core.Sensor {
 	sort.Strings(names)
 	var out []core.Sensor
 	for _, n := range names {
+		if ctx.Err() != nil {
+			return out
+		}
 		var kind core.SensorKind
 		var unit string
 		var scale float64
@@ -167,7 +180,7 @@ func (c *sensorsCollector) threshold(dir, name string, scale float64) *float64 {
 // plausibleCelsius filters sentinel readings such as -273 or 127.5 x 1000.
 func plausibleCelsius(v float64) bool { return v > -60 && v < 200 }
 
-func (c *sensorsCollector) thermalZones() []core.Sensor {
+func (c *sensorsCollector) thermalZones(ctx context.Context) []core.Sensor {
 	names, err := listDir(c.env.SysRoot, "class/thermal")
 	if err != nil {
 		return nil
@@ -175,6 +188,9 @@ func (c *sensorsCollector) thermalZones() []core.Sensor {
 	sort.Strings(names)
 	var out []core.Sensor
 	for _, n := range names {
+		if ctx.Err() != nil {
+			return out
+		}
 		if !strings.HasPrefix(n, "thermal_zone") {
 			continue
 		}
