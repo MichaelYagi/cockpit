@@ -280,7 +280,7 @@ func Collectors(env collector.Env) []collector.Collector {
 		newContainers(env),
 		newZFS(env),
 		newPower(env),
-		newUPS(env),
+		portable.NewUPS(env, "linux.ups", version),
 		newServices(env),
 		newCPUInfo(env),
 		newPCI(env),

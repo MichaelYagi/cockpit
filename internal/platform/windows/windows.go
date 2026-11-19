@@ -36,6 +36,7 @@ var (
 var implemented = []core.Capability{
 	core.CapSystemIdentity, core.CapSystemUptime, core.CapCPUUsage, core.CapCPULoad, core.CapMemoryUsage,
 	core.CapStorageFilesystems, core.CapNetworkInterfaces, core.CapNetworkThroughput, core.CapNetworkEndpoints,
+	core.CapPowerUPS,
 }
 
 // Collectors returns the Windows collector set.
@@ -50,6 +51,7 @@ func Collectors(env collector.Env) []collector.Collector {
 		sampler("windows.memory", "kernel32", 0, now, []core.Capability{core.CapMemoryUsage}, memory),
 		sampler("windows.filesystems", "kernel32", 10*time.Second, now, []core.Capability{core.CapStorageFilesystems}, drives),
 		sampler("windows.network", "iphlpapi", 0, now, []core.Capability{core.CapNetworkInterfaces, core.CapNetworkThroughput}, network),
+		portable.NewUPS(env, "windows.ups", version),
 		portable.NewEndpoints(env),
 		unsupported.Rest("windows.unsupported", implemented, "Not collected on Windows yet."),
 	}

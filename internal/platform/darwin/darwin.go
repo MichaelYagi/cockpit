@@ -38,6 +38,7 @@ var implemented = []core.Capability{
 	core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapPowerSupplies, core.CapSensorsThermal,
 	core.CapNetworkEndpoints, core.CapServicesLaunchd,
 	core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices, core.CapHardwareMemory,
+	core.CapNetworkRoutes, core.CapNetworkDNS, core.CapPowerUPS,
 }
 
 // Collectors returns the macOS collector set.
@@ -78,6 +79,9 @@ func Collectors(env collector.Env) []collector.Collector {
 			func(r *collector.Result) { thermal(r, iok, ioErr) }), 5*time.Second),
 		withInterval(sampler("darwin.services", "ServiceManagement (launchd)", 0, now, []core.Capability{core.CapServicesLaunchd},
 			func(r *collector.Result) { services(r, sm, smErr) }), 10*time.Second),
+		withInterval(sampler("darwin.netconfig", "sysctl NET_RT_DUMP, resolv.conf", 0, now, []core.Capability{core.CapNetworkRoutes, core.CapNetworkDNS},
+			netConfig), 30*time.Second),
+		portable.NewUPS(env, "darwin.ups", version),
 		portable.NewEndpoints(env),
 		unsupported.Rest("darwin.unsupported", implemented, "Not collected on macOS yet."),
 	}
