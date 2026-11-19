@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/core"
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 const nvidiaCSV = "NVIDIA GeForce RTX 3060, GPU-00000000-1111-2222-3333-444444444444, 00000000:26:00.0, 610.88, 12288, 1073, 7, 41, 10.88, 170.00, 30\n" +
@@ -17,7 +18,7 @@ const nvidiaCSV = "NVIDIA GeForce RTX 3060, GPU-00000000-1111-2222-3333-44444444
 	"garbage line\n"
 
 func TestParseNvidiaCSV(t *testing.T) {
-	gs := parseNvidiaCSV([]byte(nvidiaCSV))
+	gs := portable.ParseNvidiaCSV([]byte(nvidiaCSV))
 	if len(gs) != 2 {
 		t.Fatalf("%+v", gs)
 	}

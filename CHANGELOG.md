@@ -10,6 +10,13 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Windows disks, PCI and USB devices, and GPUs (D52).** On Windows, the
+  Hardware screen lists physical disks (model, size, SSD or hard drive,
+  bus), PCI devices and USB devices by the names they report, and the
+  Overview shows GPUs, with live NVIDIA metrics from `nvidia-smi`.
+- **PCI makers on macOS and Windows** come from a shared table of vendor
+  IDs. Windows' own "manufacturer" is the driver's vendor, which named an
+  Intel SSD "Standard NVM Express Controller".
 - **Windows services, routes and DNS (D51).** On Windows, the Services
   screen lists Windows services with their start type, and the Network
   screen shows routes and DNS servers. An automatic service that stopped

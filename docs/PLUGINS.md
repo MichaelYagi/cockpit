@@ -195,6 +195,8 @@ filesystems are always skipped.
 | `windows.processes` | `processes.list` (on demand) | `NtQuerySystemInformation(SystemProcessInformation)` (D50); owner and path through `OpenProcess`, `OpenProcessToken`, `QueryFullProcessImageName` |
 | `windows.hardware` | `hardware.cpu`, `hardware.board`, `hardware.memory_modules` | Registry (`CentralProcessor\0`, `System\BIOS`), `GetLogicalProcessorInformationEx`, CPUID (`x/sys/cpu`), SMBIOS from `GetSystemFirmwareTable('RSMB')` |
 | `windows.power` | `power.supplies` | `GetSystemPowerStatus`, every 10s |
+| `windows.devices` | `hardware.pci`, `hardware.usb`, `storage.devices` | SetupAPI (`PCI` and `USB` enumerators; USB names from the device's own description), `\\.\PhysicalDriveN` storage queries that need no access rights (D52); file-backed virtual disks and Storage Spaces skipped |
+| `windows.gpu` | `gpu.devices`, `gpu.metrics` | Display-class PCI devices; metrics from `%SystemRoot%\System32\nvidia-smi.exe` (D16, D52), every 5s |
 | `windows.netconfig` | `network.routes`, `network.dns` | `GetIpForwardTable2` (metric includes the interface metric; local host, broadcast and multicast entries skipped), `GetAdaptersAddresses` and the registry search list (D51), every 30s |
 | `windows.services` | `services.windows` | Service control manager: `EnumServicesStatusEx`, start types from `QueryServiceConfig` cached for 5 minutes (D51), every 10s |
 

@@ -6,6 +6,7 @@ package windows
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/bits"
 	"net"
 	"sort"
@@ -385,4 +386,143 @@ func windowsDNS(adapters []adapterDNS, searchList string) *core.DNSConfig {
 		}
 	}
 	return cfg
+}
+
+// ---- devices: PCI and USB from SetupAPI, disks from storage queries ----
+
+// idField returns the hex value after key ("VEN_", "DEV_", "CC_", "VID_",
+// "PID_") in a hardware or instance ID such as
+// PCI\VEN_10DE&DEV_2504&SUBSYS_397D1462&REV_A1\4&1A2B3C&0&0008.
+func idField(id, key string) string {
+	for _, part := range strings.FieldsFunc(strings.ToUpper(id), func(r rune) bool { return r == '\\' || r == '&' }) {
+		if v, ok := strings.CutPrefix(part, key); ok && v != "" {
+			if _, err := strconv.ParseUint(v, 16, 32); err == nil {
+				return strings.ToLower(v)
+			}
+		}
+	}
+	return ""
+}
+
+// vendorText drops SetupAPI's placeholder makers such as "(Standard
+// system devices)".
+func vendorText(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
+		return ""
+	}
+	return s
+}
+
+// pciDevice is what SetupAPI reports for one PCI function.
+type pciDevice struct {
+	InstanceID   string
+	HardwareIDs  []string
+	Bus, Address uint32 // SPDRP_BUSNUMBER; SPDRP_ADDRESS is device<<16 | function
+	HasLocation  bool
+	Description  string
+	Service      string
+}
+
+func pciFrom(d pciDevice) (core.PCIDevice, bool) {
+	ven, dev := idField(d.InstanceID, "VEN_"), idField(d.InstanceID, "DEV_")
+	if ven == "" {
+		return core.PCIDevice{}, false
+	}
+	class := ""
+	for _, h := range d.HardwareIDs {
+		if c := idField(h, "CC_"); len(c) >= 4 {
+			class = c
+			break
+		}
+	}
+	for len(class) < 6 && class != "" {
+		class += "0" // CC_0300 means class 03, subclass 00
+	}
+	p := core.PCIDevice{VendorID: "0x" + ven, DeviceID: "0x" + dev, DeviceName: strings.TrimSpace(d.Description), Driver: d.Service}
+	if v, err := strconv.ParseUint(ven, 16, 16); err == nil {
+		p.VendorName = portable.PCIVendorName(uint16(v))
+	}
+	if class != "" {
+		p.ClassCode = "0x" + class
+	}
+	p.ClassName = portable.PCIClassName(p.ClassCode)
+	if d.HasLocation {
+		p.Address = fmt.Sprintf("0000:%02x:%02x.%x", d.Bus&0xff, d.Address>>16&0x1f, d.Address&0x7)
+	} else {
+		p.Address = d.InstanceID
+	}
+	return p, true
+}
+
+// usbDevice is what SetupAPI reports for one USB device.
+type usbDevice struct {
+	InstanceID   string // USB\VID_046D&PID_C52B\5&2D5B4C4&0&3
+	BusName      string // the name the device reports ("BRIO"), if any
+	Description  string // the driver's name ("USB Composite Device")
+	Manufacturer string
+	Location     string // Port_#0003.Hub_#0001
+}
+
+// usbFrom keeps devices, not their interfaces (&MI_xx) or root hubs.
+func usbFrom(d usbDevice) (core.USBDevice, bool) {
+	up := strings.ToUpper(d.InstanceID)
+	vid, pid := idField(d.InstanceID, "VID_"), idField(d.InstanceID, "PID_")
+	if vid == "" || strings.Contains(up, "&MI_") || strings.Contains(up, "ROOT_HUB") {
+		return core.USBDevice{}, false
+	}
+	u := core.USBDevice{VendorID: fmt.Sprintf("%04s", vid), ProductID: fmt.Sprintf("%04s", pid),
+		Product: strings.TrimSpace(d.BusName), Manufacturer: vendorText(d.Manufacturer), Path: d.Location}
+	if u.Product == "" {
+		u.Product = strings.TrimSpace(d.Description)
+	}
+	// The last part of the instance ID is the device's serial number
+	// when it has one; Windows makes up one containing "&" otherwise.
+	if i := strings.LastIndexByte(d.InstanceID, '\\'); i >= 0 && !strings.Contains(d.InstanceID[i+1:], "&") {
+		u.Serial = d.InstanceID[i+1:]
+	}
+	if u.Path == "" && len(d.InstanceID) > 0 {
+		u.Path = d.InstanceID
+	}
+	return u, true
+}
+
+// STORAGE_BUS_TYPE values.
+var busTransports = map[uint32]string{1: "scsi", 3: "sata", 6: "scsi", 7: "usb", 10: "scsi", 11: "sata", 12: "mmc", 13: "mmc", 17: "nvme", 19: "mmc"}
+
+const (
+	busFileBackedVirtual = 15 // a mounted VHD or ISO
+	busSpaces            = 16 // a Storage Spaces virtual disk
+)
+
+// storageDevice decodes a STORAGE_DEVICE_DESCRIPTOR: removable media at
+// byte 10, offsets of the vendor, product and serial strings at 12, 16
+// and 24, and the bus type at 28. Virtual disks backed by files and
+// Storage Spaces are skipped, as Linux skips loop and device-mapper
+// devices.
+func storageDevice(name string, b []byte, sizeBytes uint64, rotational *bool) (core.BlockDevice, bool) {
+	if len(b) < 32 {
+		return core.BlockDevice{}, false
+	}
+	str := func(at int) string {
+		off := int(binary.LittleEndian.Uint32(b[at:]))
+		if off <= 0 || off >= len(b) {
+			return ""
+		}
+		end := off
+		for end < len(b) && b[end] != 0 {
+			end++
+		}
+		return strings.TrimSpace(string(b[off:end]))
+	}
+	bus := binary.LittleEndian.Uint32(b[28:])
+	if bus == busFileBackedVirtual || bus == busSpaces {
+		return core.BlockDevice{}, false
+	}
+	d := core.BlockDevice{Name: name, Model: strings.TrimSpace(str(12) + " " + str(16)), Serial: str(24),
+		Transport: busTransports[bus], Removable: b[10] != 0, SizeBytes: sizeBytes, Rotational: rotational}
+	if d.Transport == "" {
+		d.Transport = "unknown"
+	}
+	return d, true
 }
