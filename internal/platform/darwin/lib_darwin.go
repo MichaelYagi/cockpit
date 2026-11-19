@@ -578,6 +578,59 @@ func (k *ioKitLib) disks() (core.BlockDevices, bool) {
 	return out, ok
 }
 
+// ownDict reads the given keys of a dictionary property of the entry.
+func (k *ioKitLib) ownDict(e uint32, prop string, keys ...string) map[string]any {
+	ref := k.cf.str(prop)
+	v := k.entryCreateProperty(e, ref, 0, 0)
+	k.cf.release(ref)
+	if v == 0 {
+		return map[string]any{}
+	}
+	defer k.cf.release(v)
+	if k.cf.getTypeID(v) != k.cf.dictTypeID() {
+		return map[string]any{}
+	}
+	return k.cf.dict(v, keys...)
+}
+
+// parentValue finds a property on the entry or its nearest parent.
+func (k *ioKitLib) parentValue(e uint32, prop string) any {
+	ref := k.cf.str(prop)
+	v := k.entrySearchProperty(e, ioServicePlane, ref, 0, ioIterateRecursively|ioIterateParents)
+	k.cf.release(ref)
+	if v == 0 {
+		return nil
+	}
+	defer k.cf.release(v)
+	return k.cf.value(v)
+}
+
+func (k *ioKitLib) className(e uint32) string {
+	buf := make([]byte, ioNameSize)
+	if k.objectGetClass(e, &buf[0]) != kernSuccess {
+		return ""
+	}
+	return cString(buf, ioNameSize)
+}
+
+var gpuStatKeys = []string{"Device Utilization %", "GPU Activity(%)", "In use system memory", "vramUsedBytes"}
+
+// gpus lists IOAccelerator entries, one per GPU.
+func (k *ioKitLib) gpus() (core.GPUs, bool) {
+	var out core.GPUs
+	ok := k.each("IOAccelerator", func(e uint32) {
+		props := k.props(e, "model", "gpu-core-count")
+		if _, has := props["model"]; !has {
+			if m := k.parentValue(e, "model"); m != nil {
+				props["model"] = m
+			}
+		}
+		vendor, haveVendor := propLE32(map[string]any{"v": k.parentValue(e, "vendor-id")}, "v")
+		out = append(out, gpuFrom(k.className(e), props, vendor, haveVendor, k.ownDict(e, "PerformanceStatistics", gpuStatKeys...)))
+	})
+	return out, ok
+}
+
 // ---- ServiceManagement: launchd jobs (D48) ----
 
 type smLib struct {

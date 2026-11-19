@@ -722,3 +722,48 @@ func sortRoutes(rs core.Routes) {
 		return rs[i].Family < rs[j].Family
 	})
 }
+
+// ---- GPUs: IOAccelerator ----
+
+// gpuFrom turns an IOAccelerator entry into a GPU: its class (the
+// driver, e.g. AGXAcceleratorG13X), "model", the PCI vendor ID of the
+// device below it (Intel Macs; Apple silicon has none), and the
+// "PerformanceStatistics" dictionary the driver keeps up to date.
+func gpuFrom(class string, props map[string]any, vendorID uint32, haveVendor bool, stats map[string]any) core.GPU {
+	g := core.GPU{Driver: class, Name: propStr(props, "model")}
+	switch {
+	case strings.HasPrefix(class, "AGX") || haveVendor && vendorID == 0x106b:
+		g.Vendor = "Apple"
+	case haveVendor:
+		g.Vendor = portable.PCIVendorName(uint16(vendorID))
+	}
+	if g.Name == "" {
+		g.Name = strings.TrimSpace(g.Vendor + " GPU")
+	}
+	if cores, ok := propNum(props, "gpu-core-count"); ok && cores > 0 {
+		g.Name += " (" + strconv.Itoa(int(cores)) + "-core)"
+	}
+	pct := func(keys ...string) *float64 {
+		for _, k := range keys {
+			if v, ok := propNum(stats, k); ok && v >= 0 && v <= 100 {
+				return &v
+			}
+		}
+		return nil
+	}
+	bytesOf := func(keys ...string) *uint64 {
+		for _, k := range keys {
+			if v, ok := propNum(stats, k); ok && v >= 0 {
+				b := uint64(v)
+				return &b
+			}
+		}
+		return nil
+	}
+	g.UtilizationPercent = pct("Device Utilization %", "GPU Activity(%)")
+	g.MemoryUsedBytes = bytesOf("In use system memory", "vramUsedBytes")
+	if g.UtilizationPercent != nil || g.MemoryUsedBytes != nil {
+		g.MetricsSource = "iokit"
+	}
+	return g
+}

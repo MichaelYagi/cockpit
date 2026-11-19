@@ -10,7 +10,8 @@ Phase 3.
 - Linux (amd64 or arm64), with everything described here.
 - macOS: identity, uptime, CPU usage and load, memory, disks, network,
   processes, services (D48), processor and Mac model, memory modules,
-  physical disks, PCI and USB devices (D49), routes and DNS, UPS,
+  physical disks, PCI and USB devices (D49), GPUs with utilization (D53),
+  routes and DNS, UPS,
   batteries and power adapter, and (on Apple Silicon) temperatures (D32,
   D36). Without root, macOS hides
   other users' CPU and memory use, so those processes show 0 and the list

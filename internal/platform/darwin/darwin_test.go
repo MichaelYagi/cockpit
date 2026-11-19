@@ -343,3 +343,37 @@ func TestRealNetConfig(t *testing.T) {
 	}
 	t.Fatal("no darwin.netconfig collector")
 }
+
+// GPUs come from IOAccelerator; a CI virtual machine may have only a
+// paravirtual GPU, so the result is logged and only has to be coherent.
+func TestRealGPU(t *testing.T) {
+	for _, c := range collectors() {
+		if c.Descriptor().ID != "darwin.gpu" {
+			continue
+		}
+		r := c.Collect(context.Background())
+		for cp, st := range r.Status {
+			t.Logf("%s: %s %s", cp, st.Availability, st.Reason)
+		}
+		if st := r.Status[core.CapGPUDevices]; st.Availability == core.TemporarilyUnavailable {
+			t.Errorf("gpu: %s", st.Reason)
+		}
+		for _, rec := range r.Records {
+			for _, g := range rec.(core.GPUs) {
+				t.Logf("gpu %+v util=%v mem=%v", g, deref(g.UtilizationPercent), deref(g.MemoryUsedBytes))
+				if g.Name == "" || g.Driver == "" {
+					t.Errorf("implausible GPU %+v", g)
+				}
+			}
+		}
+		return
+	}
+	t.Fatal("no darwin.gpu collector")
+}
+
+func deref[T any](p *T) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}

@@ -390,3 +390,20 @@ func TestParseRouteDump(t *testing.T) {
 		_ = parseRouteDump(dump[:i], ifName) // any prefix parses without a panic
 	}
 }
+
+func TestGPUFrom(t *testing.T) {
+	g := gpuFrom("AGXAcceleratorG13X", map[string]any{"model": "Apple M1 Pro", "gpu-core-count": float64(16)}, 0, false,
+		map[string]any{"Device Utilization %": float64(12), "In use system memory": float64(734003200), "Renderer Utilization %": float64(9)})
+	if g.Vendor != "Apple" || g.Name != "Apple M1 Pro (16-core)" || g.Driver != "AGXAcceleratorG13X" || g.MetricsSource != "iokit" ||
+		*g.UtilizationPercent != 12 || *g.MemoryUsedBytes != 734003200 || g.MemoryTotalBytes != nil {
+		t.Errorf("%+v", g)
+	}
+	g = gpuFrom("AMDRadeonX6000_AMDNavi10GraphicsAccelerator", map[string]any{"model": []byte("AMD Radeon Pro 5500M\x00")}, 0x1002, true,
+		map[string]any{"Device Utilization %": float64(150)})
+	if g.Vendor != "AMD" || g.Name != "AMD Radeon Pro 5500M" || g.UtilizationPercent != nil || g.MetricsSource != "" {
+		t.Errorf("%+v", g)
+	}
+	if g = gpuFrom("AppleParavirtGPU", nil, 0, false, nil); g.Name != "GPU" || g.Vendor != "" {
+		t.Errorf("%+v", g)
+	}
+}

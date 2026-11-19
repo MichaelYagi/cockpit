@@ -1314,7 +1314,7 @@ components:
         fan_percent: { type: [number, "null"], minimum: 0 }
         frequency_mhz: { type: [number, "null"], minimum: 0, description: Current GPU clock (Intel i915/xe). }
         max_frequency_mhz: { type: [number, "null"], minimum: 0 }
-        metrics_source: { type: string, enum: ["", nvidia-smi, amdgpu, i915, xe] }
+        metrics_source: { type: string, enum: ["", nvidia-smi, amdgpu, i915, xe, iokit], description: "iokit (macOS, D53) reports utilization and memory in use only." }
         uuid: { type: string, x-cockpit-sensitive: true }
         redacted: { $ref: "#/components/schemas/Redacted" }
     MemoryInventory:

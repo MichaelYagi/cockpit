@@ -87,6 +87,35 @@ func devices(r *collector.Result, k *ioKitLib, loadErr error) {
 	}
 }
 
+// ---- GPUs ----
+
+func gpus(r *collector.Result, k *ioKitLib, loadErr error) {
+	if loadErr != nil {
+		r.Status[core.CapGPUDevices] = portable.Unavailable(core.Unsupported, "GPUs need IOKit, which could not be loaded: "+loadErr.Error())
+		r.Status[core.CapGPUMetrics] = r.Status[core.CapGPUDevices]
+		return
+	}
+	list, ok := k.gpus()
+	switch {
+	case !ok:
+		r.Status[core.CapGPUDevices] = portable.Unavailable(core.TemporarilyUnavailable, "The IOKit registry could not be read.")
+		r.Status[core.CapGPUMetrics] = r.Status[core.CapGPUDevices]
+		return
+	case len(list) == 0:
+		r.Status[core.CapGPUDevices] = portable.Unavailable(core.Unsupported, "No GPU was found.")
+		r.Status[core.CapGPUMetrics] = r.Status[core.CapGPUDevices]
+		return
+	}
+	r.Status[core.CapGPUDevices] = portable.Available()
+	r.Status[core.CapGPUMetrics] = portable.Unavailable(core.Unsupported, "This GPU's driver reports no usage statistics.")
+	for _, g := range list {
+		if g.MetricsSource != "" {
+			r.Status[core.CapGPUMetrics] = portable.Available()
+		}
+	}
+	r.Records = append(r.Records, list)
+}
+
 // ---- memory modules: system_profiler ----
 
 const systemProfiler = "/usr/sbin/system_profiler"
