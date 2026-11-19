@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/MichaelYagi/cockpit/internal/collector"
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 // The SMART helper (D20) runs smartctl as root from cockpit-smart.service
@@ -25,7 +26,7 @@ const (
 	// reports them as stale.
 	SMARTResultMaxAge = 3 * time.Hour
 	smartResultSuffix = ".json"
-	smartResultMax    = maxToolOutput + 4096
+	smartResultMax    = portable.MaxToolOutput + 4096
 )
 
 // smartResultFile is the helper's file format.

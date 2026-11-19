@@ -3,64 +3,25 @@
 package linux
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/MichaelYagi/cockpit/internal/collector"
 	"github.com/MichaelYagi/cockpit/internal/core"
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 // runFunc executes a command without a shell and returns stdout and the
 // exit code. Injectable for tests.
 type runFunc func(ctx context.Context, path string, args ...string) (stdout []byte, exitCode int, err error)
 
-const maxToolOutput = 1 << 20
-
+// realRun runs a tool with a fixed environment, bounded output and
+// stderr discarded (it may contain device details).
 func realRun(ctx context.Context, path string, args ...string) ([]byte, int, error) {
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.Env = []string{"LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
-	var out limitedBuffer
-	out.max = maxToolOutput
-	cmd.Stdout = &out
-	cmd.Stderr = nil // discarded; may contain device details
-	err := cmd.Run()
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return out.Bytes(), exitErr.ExitCode(), nil
-	}
-	if err != nil {
-		return nil, -1, err
-	}
-	return out.Bytes(), 0, nil
+	return portable.RunTool(ctx, []string{"LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}, path, args...)
 }
-
-type limitedBuffer struct {
-	bytes.Buffer
-	max int
-}
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if room := b.max - b.Len(); room < len(p) {
-		if room > 0 {
-			b.Buffer.Write(p[:room])
-		}
-		return len(p), nil // drop the rest; output is bounded
-	}
-	return b.Buffer.Write(p)
-}
-
-// smartctl exit status bits (see smartctl(8)).
-const (
-	smartBitCmdline    = 1 << 0
-	smartBitOpenFailed = 1 << 1
-)
 
 type smartCollector struct {
 	env  collector.Env
@@ -145,7 +106,7 @@ func (c *smartCollector) Collect(ctx context.Context) collector.Result {
 	if recs, found, stale := readHelperResults(c.env.SMARTResultsDir, disks, c.env.Now()); found {
 		var out core.DiskHealthList
 		for _, r := range recs {
-			if h, _, ok := parseSmartctl(r.Smartctl, r.ExitCode); ok {
+			if h, _, ok := portable.ParseSmartctl(r.Smartctl, r.ExitCode); ok {
 				h.Device = r.Device
 				out = append(out, h)
 			}
@@ -178,7 +139,7 @@ func (c *smartCollector) Collect(ctx context.Context) collector.Result {
 		if err != nil {
 			continue
 		}
-		h, perm, ok := parseSmartctl(stdout, code)
+		h, perm, ok := portable.ParseSmartctl(stdout, code)
 		if perm {
 			denied++
 		}
@@ -199,83 +160,4 @@ func (c *smartCollector) Collect(ctx context.Context) collector.Result {
 		res.Status[core.CapStorageSMART] = smartVirtual
 	}
 	return res
-}
-
-// smartctlJSON is the subset of `smartctl --json` output Cockpit uses.
-type smartctlJSON struct {
-	Smartctl struct {
-		Messages []struct {
-			String   string `json:"string"`
-			Severity string `json:"severity"`
-		} `json:"messages"`
-	} `json:"smartctl"`
-	Device struct {
-		Protocol string `json:"protocol"`
-	} `json:"device"`
-	SmartStatus *struct {
-		Passed bool `json:"passed"`
-	} `json:"smart_status"`
-	Temperature *struct {
-		Current *float64 `json:"current"`
-	} `json:"temperature"`
-	PowerOnTime *struct {
-		Hours *uint64 `json:"hours"`
-	} `json:"power_on_time"`
-	NVMe *struct {
-		CriticalWarning *int    `json:"critical_warning"`
-		PercentageUsed  *int    `json:"percentage_used"`
-		MediaErrors     *uint64 `json:"media_errors"`
-	} `json:"nvme_smart_health_information_log"`
-	ATA *struct {
-		Table []struct {
-			ID  int `json:"id"`
-			Raw struct {
-				Value uint64 `json:"value"`
-			} `json:"raw"`
-		} `json:"table"`
-	} `json:"ata_smart_attributes"`
-}
-
-// parseSmartctl interprets smartctl JSON output and exit code. perm reports
-// a permission failure; ok reports usable health data.
-func parseSmartctl(stdout []byte, code int) (h core.DiskHealth, perm, ok bool) {
-	var j smartctlJSON
-	if err := json.Unmarshal(stdout, &j); err != nil {
-		return h, false, false
-	}
-	if code&(smartBitCmdline|smartBitOpenFailed) != 0 {
-		for _, m := range j.Smartctl.Messages {
-			if strings.Contains(strings.ToLower(m.String), "permission denied") || strings.Contains(m.String, "requires root") {
-				return h, true, false
-			}
-		}
-		return h, false, false
-	}
-	if j.SmartStatus == nil {
-		return h, false, false // device does not support SMART (e.g. virtual disk)
-	}
-	passed := j.SmartStatus.Passed
-	h.Passed = &passed
-	h.Protocol = j.Device.Protocol
-	if j.Temperature != nil {
-		h.TemperatureCelsius = j.Temperature.Current
-	}
-	if j.PowerOnTime != nil {
-		h.PowerOnHours = j.PowerOnTime.Hours
-	}
-	if n := j.NVMe; n != nil {
-		h.CriticalWarning, h.PercentageUsed, h.MediaErrors = n.CriticalWarning, n.PercentageUsed, n.MediaErrors
-	}
-	if a := j.ATA; a != nil {
-		for _, attr := range a.Table {
-			v := attr.Raw.Value
-			switch attr.ID {
-			case 5:
-				h.ReallocatedSectors = &v
-			case 197:
-				h.PendingSectors = &v
-			}
-		}
-	}
-	return h, false, true
 }

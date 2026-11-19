@@ -87,6 +87,22 @@ func devices(r *collector.Result, k *ioKitLib, loadErr error) {
 	}
 }
 
+// smartDisks lists the physical disks for smartctl (D54).
+func smartDisks(k *ioKitLib, loadErr error) ([]portable.SMARTDisk, error) {
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	ds, ok := k.disks()
+	if !ok {
+		return nil, errors.New("the IOKit registry could not be read")
+	}
+	out := make([]portable.SMARTDisk, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, portable.SMARTDisk{Name: d.Name, Path: "/dev/" + d.Name})
+	}
+	return out, nil
+}
+
 // ---- GPUs ----
 
 func gpus(r *collector.Result, k *ioKitLib, loadErr error) {

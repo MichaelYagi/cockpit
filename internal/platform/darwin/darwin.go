@@ -39,6 +39,7 @@ var implemented = []core.Capability{
 	core.CapNetworkEndpoints, core.CapServicesLaunchd,
 	core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices, core.CapHardwareMemory,
 	core.CapNetworkRoutes, core.CapNetworkDNS, core.CapPowerUPS, core.CapGPUDevices, core.CapGPUMetrics,
+	core.CapStorageSMART,
 }
 
 // Collectors returns the macOS collector set.
@@ -84,6 +85,16 @@ func Collectors(env collector.Env) []collector.Collector {
 		withInterval(sampler("darwin.netconfig", "sysctl NET_RT_DUMP, resolv.conf", 0, now, []core.Capability{core.CapNetworkRoutes, core.CapNetworkDNS},
 			netConfig), 30*time.Second),
 		portable.NewUPS(env, "darwin.ups", version),
+		portable.NewSMART(portable.SMART{ID: "darwin.smart", Version: version, Now: now,
+			Tool: func() (string, bool) {
+				// Homebrew (Apple silicon, Intel) and MacPorts install here;
+				// a launchd agent's PATH usually has none of them.
+				return portable.FirstTool(env.Tools, "smartctl", "/opt/homebrew/sbin/smartctl", "/opt/homebrew/bin/smartctl",
+					"/usr/local/sbin/smartctl", "/usr/local/bin/smartctl", "/opt/local/sbin/smartctl")
+			},
+			Disks:        func() ([]portable.SMARTDisk, error) { return smartDisks(iok, ioErr) },
+			NoPermission: "smartctl could not open the disks. Disk health on macOS needs the agent to run as root.",
+		}),
 		portable.NewEndpoints(env),
 		unsupported.Rest("darwin.unsupported", implemented, "Not collected on macOS yet."),
 	}

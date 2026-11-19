@@ -10,6 +10,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Disk health on macOS and Windows (D54).** With smartmontools
+  installed, macOS and Windows report disk health (pass or fail,
+  temperature, wear, reallocated and pending sectors) and the disk health
+  check runs there, as on Linux. Cockpit finds `smartctl` in Homebrew,
+  MacPorts and `Program Files` even when it is not on `PATH`.
 - **Mac GPUs (D53).** On macOS, the Overview's GPU panel shows the GPU
   (on Apple silicon with its core count), its utilization and the memory
   it uses. Temperature, power and clocks are not available there. The
