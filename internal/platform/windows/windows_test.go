@@ -222,3 +222,50 @@ func TestRealServices(t *testing.T) {
 		}
 	}
 }
+
+// Every Windows host has PCI devices and a disk; USB and GPU lists depend
+// on the hardware, so they are logged.
+func TestRealDevices(t *testing.T) {
+	start := time.Now()
+	r := collectorByID(t, "windows.devices").Collect(context.Background())
+	t.Logf("collected in %v", time.Since(start))
+	for c, st := range r.Status {
+		t.Logf("%s: %s %s", c, st.Availability, st.Reason)
+	}
+	for _, rec := range r.Records {
+		switch v := rec.(type) {
+		case core.PCIDevices:
+			for _, d := range v {
+				t.Logf("pci %+v", d)
+				if d.VendorID == "" || d.Address == "" {
+					t.Errorf("implausible PCI device %+v", d)
+				}
+			}
+		case core.USBDevices:
+			for _, d := range v {
+				t.Logf("usb %+v", d)
+			}
+		case core.BlockDevices:
+			for _, d := range v {
+				t.Logf("disk %+v rotational=%v", d, d.Rotational != nil && *d.Rotational)
+				if d.SizeBytes == 0 || d.Model == "" {
+					t.Errorf("implausible disk %+v", d)
+				}
+			}
+		}
+	}
+	for _, c := range []core.Capability{core.CapHardwarePCI, core.CapStorageDevices} {
+		if st := r.Status[c]; st.Availability != core.Available {
+			t.Errorf("%s: %s %s", c, st.Availability, st.Reason)
+		}
+	}
+	g := collectorByID(t, "windows.gpu").Collect(context.Background())
+	for c, st := range g.Status {
+		t.Logf("%s: %s %s", c, st.Availability, st.Reason)
+	}
+	for _, rec := range g.Records {
+		for _, x := range rec.(core.GPUs) {
+			t.Logf("gpu %+v", x)
+		}
+	}
+}

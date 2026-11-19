@@ -388,14 +388,6 @@ func usbDeviceFrom(d map[string]any, name string) (core.USBDevice, bool) {
 	return u, true
 }
 
-// pciVendors names the vendors usually found in a Mac; macOS has no
-// pci.ids database.
-var pciVendors = map[uint32]string{
-	0x106b: "Apple", 0x8086: "Intel", 0x1002: "AMD", 0x1022: "AMD", 0x10de: "NVIDIA", 0x14e4: "Broadcom",
-	0x144d: "Samsung", 0x1b4b: "Marvell", 0x1d6a: "Aquantia", 0x1af4: "Red Hat (virtio)", 0x15ad: "VMware",
-	0x1b21: "ASMedia", 0x1912: "Renesas", 0x12d8: "Pericom", 0x8087: "Intel",
-}
-
 // pciAddress turns "pcidebug" ("bus:device:function", sometimes followed
 // by the bridged bus range) into domain:bus:device.function.
 func pciAddress(debug string) (string, bool) {
@@ -430,7 +422,7 @@ func pciDeviceFrom(d map[string]any, name, driver string) (core.PCIDevice, bool)
 		VendorID:   fmt.Sprintf("0x%04x", vid&0xffff),
 		DeviceID:   fmt.Sprintf("0x%04x", did&0xffff),
 		ClassCode:  fmt.Sprintf("0x%06x", class&0xffffff),
-		VendorName: pciVendors[vid&0xffff],
+		VendorName: portable.PCIVendorName(uint16(vid)),
 		DeviceName: propStr(d, "model"),
 		Driver:     driver,
 	}

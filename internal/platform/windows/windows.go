@@ -39,6 +39,7 @@ var implemented = []core.Capability{
 	core.CapStorageFilesystems, core.CapNetworkInterfaces, core.CapNetworkThroughput, core.CapNetworkEndpoints,
 	core.CapPowerUPS, core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapHardwareMemory,
 	core.CapPowerSupplies, core.CapNetworkRoutes, core.CapNetworkDNS, core.CapServicesWindows,
+	core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices, core.CapGPUDevices, core.CapGPUMetrics,
 }
 
 // Collectors returns the Windows collector set.
@@ -57,6 +58,9 @@ func Collectors(env collector.Env) []collector.Collector {
 		inventory("windows.hardware", "registry, processor topology, SMBIOS", now,
 			[]core.Capability{core.CapHardwareCPU, core.CapHardwareBoard, core.CapHardwareMemory}, hardware),
 		withInterval(sampler("windows.power", "GetSystemPowerStatus", 0, now, []core.Capability{core.CapPowerSupplies}, power), 10*time.Second),
+		inventory("windows.devices", "SetupAPI, storage queries", now,
+			[]core.Capability{core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices}, devices),
+		&gpuCollector{now: now},
 		withInterval(sampler("windows.netconfig", "GetIpForwardTable2, GetAdaptersAddresses", 0, now,
 			[]core.Capability{core.CapNetworkRoutes, core.CapNetworkDNS}, netConfig), 30*time.Second),
 		withInterval(sampler("windows.services", "service control manager", 0, now, []core.Capability{core.CapServicesWindows},

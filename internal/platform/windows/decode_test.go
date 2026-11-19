@@ -196,3 +196,70 @@ func TestWindowsDNS(t *testing.T) {
 		t.Errorf("empty %+v", cfg)
 	}
 }
+
+func TestPCIFrom(t *testing.T) {
+	d, ok := pciFrom(pciDevice{
+		InstanceID:  `PCI\VEN_10DE&DEV_2504&SUBSYS_397D1462&REV_A1\4&1A2B3C&0&0008`,
+		HardwareIDs: []string{`PCI\VEN_10DE&DEV_2504&SUBSYS_397D1462&REV_A1`, `PCI\VEN_10DE&DEV_2504&CC_030000`},
+		Bus:         0x26, Address: 0, HasLocation: true,
+		Description: "NVIDIA GeForce RTX 3060", Service: "nvlddmkm",
+	})
+	if !ok || d.Address != "0000:26:00.0" || d.VendorID != "0x10de" || d.DeviceID != "0x2504" || d.ClassCode != "0x030000" ||
+		d.ClassName != "VGA compatible controller" || d.DeviceName != "NVIDIA GeForce RTX 3060" || d.VendorName != "NVIDIA" || d.Driver != "nvlddmkm" {
+		t.Errorf("%+v", d)
+	}
+	d, _ = pciFrom(pciDevice{InstanceID: `PCI\VEN_1022&DEV_1483\3&11583659&0&09`, HardwareIDs: []string{`PCI\VEN_1022&DEV_1483&CC_0604`},
+		Bus: 0, Address: 3<<16 | 1, HasLocation: true})
+	if d.Address != "0000:00:03.1" || d.ClassCode != "0x060400" || d.ClassName != "PCI bridge" || d.VendorName != "AMD" {
+		t.Errorf("%+v", d)
+	}
+	if _, ok := pciFrom(pciDevice{InstanceID: `ACPI\PNP0A08\0`}); ok {
+		t.Error("a non-PCI ID was accepted")
+	}
+}
+
+func TestUSBFrom(t *testing.T) {
+	d, ok := usbFrom(usbDevice{InstanceID: `USB\VID_046D&PID_C52B\5&2D5B4C4&0&3`, Description: "USB Composite Device",
+		BusName: "USB Receiver", Manufacturer: "(Standard USB Host Controller)", Location: "Port_#0003.Hub_#0001"})
+	if !ok || d.VendorID != "046d" || d.ProductID != "c52b" || d.Serial != "" || d.Manufacturer != "" || d.Path != "Port_#0003.Hub_#0001" ||
+		d.Product != "USB Receiver" {
+		t.Errorf("%+v", d)
+	}
+	if d, _ = usbFrom(usbDevice{InstanceID: `USB\VID_0781&PID_5583\4C530001231129118123`, Description: "Ultra Fit"}); d.Serial != "4C530001231129118123" {
+		t.Errorf("serial %+v", d)
+	}
+	for _, id := range []string{`USB\VID_046D&PID_C52B&MI_00\6&1&0&0000`, `USB\ROOT_HUB30\4&1&0&0`, `HID\VID_046D&PID_C52B`} {
+		if d, ok := usbFrom(usbDevice{InstanceID: id}); ok && id != `HID\VID_046D&PID_C52B` {
+			t.Errorf("%s accepted: %+v", id, d)
+		}
+	}
+}
+
+func TestStorageDevice(t *testing.T) {
+	desc := make([]byte, 64)
+	desc[10] = 0                                 // fixed
+	binary.LittleEndian.PutUint32(desc[12:], 0)  // no vendor
+	binary.LittleEndian.PutUint32(desc[16:], 40) // product
+	binary.LittleEndian.PutUint32(desc[24:], 56) // serial
+	binary.LittleEndian.PutUint32(desc[28:], 17) // NVMe
+	copy(desc[40:], "Samsung SSD 970\x00")
+	copy(desc[56:], " S4EV\x00")
+	ssd := false
+	d, ok := storageDevice("PhysicalDrive0", desc, 1<<40, &ssd)
+	if !ok || d.Name != "PhysicalDrive0" || d.Model != "Samsung SSD 970" || d.Serial != "S4EV" || d.Transport != "nvme" ||
+		d.SizeBytes != 1<<40 || d.Removable || d.Rotational == nil || *d.Rotational {
+		t.Errorf("%+v", d)
+	}
+	binary.LittleEndian.PutUint32(desc[28:], busFileBackedVirtual)
+	if _, ok := storageDevice("PhysicalDrive1", desc, 1, nil); ok {
+		t.Error("a VHD was listed")
+	}
+	binary.LittleEndian.PutUint32(desc[28:], 99)
+	binary.LittleEndian.PutUint32(desc[16:], 1000) // offset out of range
+	if d, ok := storageDevice("x", desc, 1, nil); !ok || d.Transport != "unknown" || d.Model != "" {
+		t.Errorf("%+v", d)
+	}
+	if _, ok := storageDevice("x", desc[:20], 1, nil); ok {
+		t.Error("short descriptor accepted")
+	}
+}

@@ -286,8 +286,8 @@ tui:
   launchd services and the IOKit device registry (PCI, USB, disks),
   calling system libraries through purego (D36, D48, D49), and memory
   modules from `system_profiler`. Windows also lists processes, services,
-  routes, DNS, the processor, board, memory modules and batteries (D50,
-  D51). Everything else is
+  routes, DNS, the processor, board, memory modules, disks, PCI and USB
+  devices, GPUs and batteries (D50–D52). Everything else is
   reported `unsupported` with a reason (`unsupported.Rest`). Other systems
   use `internal/platform/unsupported`, so the binary always runs.
 - The conformance suite (`internal/collector/conformance`) runs against

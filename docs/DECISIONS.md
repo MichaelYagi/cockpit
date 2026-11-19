@@ -1323,3 +1323,34 @@ GitHub's Windows runner.
 **Contract.** Additive: one capability and one enum value. A client that
 rejects unknown enum values would see `windows` only from a Windows
 agent, which had no DNS data before.
+
+## D52 — Devices and GPUs on Windows
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** This amends D32 and D16. Without new dependencies:
+
+- `windows.devices` lists PCI and USB devices through SetupAPI every 5
+  minutes. IDs and class come from the hardware IDs, the PCI address
+  from the bus number and device address, the driver from the service
+  name. USB devices are named by the description they report themselves
+  (`DEVPKEY_Device_BusReportedDeviceDesc`), falling back to the driver's
+  description; interfaces and root hubs are skipped. PCI maker names come
+  from a table of vendor IDs shared with macOS
+  (`internal/platform/portable`), because SetupAPI's manufacturer is the
+  driver's vendor.
+- Physical disks come from `\\.\PhysicalDrive0` to `31`, opened with no
+  access rights, which works without administrator rights:
+  `IOCTL_STORAGE_QUERY_PROPERTY` (model, serial, bus, removable, seek
+  penalty for SSD or hard drive) and `IOCTL_DISK_GET_DRIVE_GEOMETRY_EX`
+  (size). File-backed virtual disks and Storage Spaces are skipped, as
+  Linux skips loop and device-mapper devices.
+- `windows.gpu` lists display-class PCI devices and, when the NVIDIA
+  driver installed `nvidia-smi.exe` in `System32`, runs the same fixed
+  query as Linux every 5 seconds (D16), without a shell or console
+  window.
+
+**Why.** The owner wants every platform as complete as it can be.
+
+**Risk.** Tested on the owner's Windows 11 PC through WSL interop and on
+GitHub's Windows runner.

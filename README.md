@@ -55,8 +55,8 @@ can be sent to webhooks.
 network, processes, services, hardware inventory (memory, disks, PCI and
 USB devices), routes and DNS, UPS, batteries and Apple Silicon
 temperatures. Windows has identity, CPU, memory, disks, network, routes and DNS,
-processes, services, hardware inventory (processor, board, memory),
-battery and UPS. Under WSL, Cockpit monitors the
+processes, services, hardware inventory (processor, board, memory, disks,
+PCI and USB devices), GPUs, battery and UPS. Under WSL, Cockpit monitors the
 WSL virtual machine; Windows passes no CPU sensors into it.
 
 ## Architecture at a glance

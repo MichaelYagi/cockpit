@@ -18,8 +18,9 @@ Phase 3.
   the CPU temperature check, because Apple publishes no limits for them.
   Disk health and fans are `unsupported`.
 - Windows: identity, uptime, CPU usage, memory, disks, network, routes and
-  DNS, processes, services, processor, board, memory modules, battery and
-  UPS (D32, D50, D51). There is
+  DNS, processes, services, processor, board, memory modules, physical
+  disks, PCI and USB devices, GPUs (NVIDIA metrics through `nvidia-smi`),
+  battery and UPS (D32, D50–D52). There is
   no load average. Without administrator rights, Windows hides the owner
   and path of system and other users' processes; their CPU and memory
   are still shown. Everything else is `unsupported`.
