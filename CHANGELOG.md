@@ -10,6 +10,9 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Endpoint targets are links.** On the web dashboard's Network screen,
+  an endpoint whose target is an `http` or `https` URL links to it, opening
+  in a new tab. Other targets (`tcp://…`) stay text.
 - **Remember me in the web dashboard (D47).** The sign-in has a
   **Remember me** checkbox. Ticked, the key stays in that browser across
   tabs and restarts until you sign out; unticked, it is forgotten when the
