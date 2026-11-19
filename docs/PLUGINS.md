@@ -183,6 +183,8 @@ filesystems are always skipped.
 | `darwin.power` | `power.supplies` | IOKit power sources (purego) |
 | `darwin.thermal` | `sensors.thermal` (Apple Silicon) | IOKit HID temperature sensors (purego); not marked as CPU sensors |
 | `darwin.services` | `services.launchd` | ServiceManagement `SMCopyAllJobDictionaries` (purego, D48): system daemons and this user's agents, every 10s |
+| `darwin.devices` | `hardware.pci`, `hardware.usb`, `storage.devices` | IOKit registry (purego, D49): `IOPCIDevice`, `IOUSBHostDevice`, whole `IOMedia` on a block storage driver (APFS containers and disk images skipped) |
+| `darwin.memory_modules` | `hardware.memory_modules` | `system_profiler -json SPMemoryDataType` (D49): one built-in memory on Apple Silicon, each filled slot on Intel |
 | `windows.system` | `system.identity`, `system.uptime` | `RtlGetVersion`, registry product name, `GetTickCount64` |
 | `windows.cpu` | `cpu.usage` (`cpu.load` unsupported: none on Windows) | `GetSystemTimes` |
 | `windows.memory` | `memory.usage` | `GlobalMemoryStatusEx` |

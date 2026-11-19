@@ -3,8 +3,9 @@
 // Package darwin collects macOS metrics without cgo (D32, D36): sysctl,
 // getfsstat and the routing socket's interface statistics, plus Mach,
 // libproc, CoreFoundation and IOKit calls made through purego for CPU
-// usage, processes, power sources and temperatures. Disk health and fans
-// are reported unsupported.
+// usage, processes, power sources, temperatures, launchd services and the
+// IOKit device registry (PCI, USB, disks). Memory modules come from
+// system_profiler. Disk health and fans are reported unsupported.
 package darwin
 
 import (
@@ -36,6 +37,7 @@ var implemented = []core.Capability{
 	core.CapStorageFilesystems, core.CapNetworkInterfaces, core.CapNetworkThroughput,
 	core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapPowerSupplies, core.CapSensorsThermal,
 	core.CapNetworkEndpoints, core.CapServicesLaunchd,
+	core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices, core.CapHardwareMemory,
 }
 
 // Collectors returns the macOS collector set.
@@ -67,6 +69,9 @@ func Collectors(env collector.Env) []collector.Collector {
 		sampler("darwin.network", "sysctl net.route", 0, now, []core.Capability{core.CapNetworkInterfaces, core.CapNetworkThroughput}, network),
 		newProcesses(sys, sysErr, now),
 		inventory("darwin.hardware", "sysctl", now, []core.Capability{core.CapHardwareCPU, core.CapHardwareBoard}, hardware),
+		inventory("darwin.devices", "IOKit registry", now, []core.Capability{core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices},
+			func(r *collector.Result) { devices(r, iok, ioErr) }),
+		memoryModulesCollector(now),
 		withInterval(sampler("darwin.power", "IOKit power sources", 0, now, []core.Capability{core.CapPowerSupplies},
 			func(r *collector.Result) { power(r, iok, ioErr) }), 10*time.Second),
 		withInterval(sampler("darwin.thermal", "IOKit HID", 0, now, []core.Capability{core.CapSensorsThermal},
@@ -98,6 +103,27 @@ func sampler(id, source string, interval time.Duration, now func() time.Time, ca
 			return r
 		},
 	}
+}
+
+// memoryModulesCollector runs system_profiler, which takes about half a
+// second, so it gets the context and a longer timeout.
+func memoryModulesCollector(now func() time.Time) collector.Collector {
+	c := inventory("darwin.memory_modules", "system_profiler", now, []core.Capability{core.CapHardwareMemory}, nil).(portable.Func)
+	c.Desc.DefaultTimeout = 10 * time.Second
+	c.Desc.MinInterval = time.Minute // an external tool (PLUGINS.md)
+	caps := c.Desc.Capabilities
+	c.Fn = func(ctx context.Context) collector.Result {
+		r := collector.Result{CollectedAt: now(), Status: map[core.Capability]core.CapabilityStatus{}}
+		if ctx.Err() != nil {
+			for _, cp := range caps {
+				r.Status[cp] = portable.Unavailable(core.TemporarilyUnavailable, "The collection was cancelled.")
+			}
+			return r
+		}
+		memoryModulesFrom(ctx, &r)
+		return r
+	}
+	return c
 }
 
 // inventory is a collector for data that rarely changes.

@@ -10,6 +10,7 @@ package darwin
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unsafe"
 
@@ -173,6 +174,10 @@ type cfLib struct {
 	stringTypeID     func() uint64
 	numberTypeID     func() uint64
 	booleanTypeID    func() uint64
+	dataTypeID       func() uint64
+	dictTypeID       func() uint64
+	dataLength       func(d uintptr) int64
+	dataBytes        func(d uintptr) *byte
 	numberGetValue   func(n uintptr, typ int64, out *float64) bool
 	numberCreate     func(alloc uintptr, typ int64, v *int32) uintptr
 	booleanGetValue  func(b uintptr) bool
@@ -194,6 +199,10 @@ func loadCF() (*cfLib, error) {
 		"CFStringGetTypeID":         &c.stringTypeID,
 		"CFNumberGetTypeID":         &c.numberTypeID,
 		"CFBooleanGetTypeID":        &c.booleanTypeID,
+		"CFDataGetTypeID":           &c.dataTypeID,
+		"CFDictionaryGetTypeID":     &c.dictTypeID,
+		"CFDataGetLength":           &c.dataLength,
+		"CFDataGetBytePtr":          &c.dataBytes,
 		"CFNumberGetValue":          &c.numberGetValue,
 		"CFNumberCreate":            &c.numberCreate,
 		"CFBooleanGetValue":         &c.booleanGetValue,
@@ -217,8 +226,8 @@ func loadCF() (*cfLib, error) {
 // str makes a CFString; the caller releases it.
 func (c *cfLib) str(s string) uintptr { return c.stringCreate(0, s, cfStringEncodingUTF8) }
 
-// value converts a CFString, CFNumber or CFBoolean to Go; anything else
-// is nil.
+// value converts a CFString, CFNumber, CFBoolean or CFData (as []byte,
+// at most 4 KiB) to Go; anything else is nil.
 func (c *cfLib) value(ref uintptr) any {
 	if ref == 0 {
 		return nil
@@ -238,6 +247,13 @@ func (c *cfLib) value(ref uintptr) any {
 		return f
 	case c.booleanTypeID():
 		return c.booleanGetValue(ref)
+	case c.dataTypeID():
+		n := c.dataLength(ref)
+		p := c.dataBytes(ref)
+		if n <= 0 || n > 4096 || p == nil {
+			return nil
+		}
+		return slices.Clone(unsafe.Slice(p, n))
 	}
 	return nil
 }
@@ -291,6 +307,20 @@ type ioKitLib struct {
 	hidCopyProperty func(service, key uintptr) uintptr
 	hidCopyEvent    func(service uintptr, typ int64, options int32, timestamp int64) uintptr
 	hidFloatValue   func(event uintptr, field int32) float64
+
+	// Registry access for PCI, USB and disks. Entries are io_object_t
+	// (mach_port_t) handles.
+	serviceMatching     func(class string) uintptr
+	getMatchingServices func(mainPort uint32, matching uintptr, iter *uint32) int32
+	iteratorNext        func(iter uint32) uint32
+	objectRelease       func(obj uint32) int32
+	entryCreateProperty func(entry uint32, key, alloc uintptr, options uint32) uintptr
+	entrySearchProperty func(entry uint32, plane string, key, alloc uintptr, options uint32) uintptr
+	entryGetName        func(entry uint32, name *byte) int32
+	entryGetParent      func(entry uint32, plane string, parent *uint32) int32
+	entryGetChild       func(entry uint32, plane string, child *uint32) int32
+	objectGetClass      func(obj uint32, name *byte) int32
+	objectConformsTo    func(obj uint32, class string) bool
 }
 
 func loadIOKit(cf *cfLib) (*ioKitLib, error) {
@@ -306,6 +336,17 @@ func loadIOKit(cf *cfLib) (*ioKitLib, error) {
 		"IOHIDServiceClientCopyProperty":      &k.hidCopyProperty,
 		"IOHIDServiceClientCopyEvent":         &k.hidCopyEvent,
 		"IOHIDEventGetFloatValue":             &k.hidFloatValue,
+		"IOServiceMatching":                   &k.serviceMatching,
+		"IOServiceGetMatchingServices":        &k.getMatchingServices,
+		"IOIteratorNext":                      &k.iteratorNext,
+		"IOObjectRelease":                     &k.objectRelease,
+		"IORegistryEntryCreateCFProperty":     &k.entryCreateProperty,
+		"IORegistryEntrySearchCFProperty":     &k.entrySearchProperty,
+		"IORegistryEntryGetName":              &k.entryGetName,
+		"IORegistryEntryGetParentEntry":       &k.entryGetParent,
+		"IORegistryEntryGetChildEntry":        &k.entryGetChild,
+		"IOObjectGetClass":                    &k.objectGetClass,
+		"IOObjectConformsTo":                  &k.objectConformsTo,
 	})
 	if err != nil {
 		return nil, err
@@ -387,6 +428,154 @@ func (k *ioKitLib) temperatures() []thermalReading {
 		cf.release(ev)
 	}
 	return out
+}
+
+// ---- IOKit registry: PCI, USB and disks ----
+
+const (
+	ioServicePlane       = "IOService"
+	ioIterateRecursively = 1 // kIORegistryIterateRecursively
+	ioIterateParents     = 2 // kIORegistryIterateParents
+	maxRegistryEntries   = 1024
+	ioNameSize           = 128 // io_name_t
+	kernSuccess          = 0
+	ioMainPortDefault    = 0 // kIOMainPortDefault
+)
+
+// each calls fn for every registry entry of an IOKit class, at most
+// maxRegistryEntries. ok is false when the registry could not be queried.
+func (k *ioKitLib) each(class string, fn func(entry uint32)) (ok bool) {
+	match := k.serviceMatching(class)
+	if match == 0 {
+		return false
+	}
+	var iter uint32
+	if k.getMatchingServices(ioMainPortDefault, match, &iter) != kernSuccess { // consumes match
+		return false
+	}
+	defer k.objectRelease(iter)
+	for n := 0; ; n++ {
+		e := k.iteratorNext(iter)
+		if e == 0 {
+			return true
+		}
+		if n < maxRegistryEntries {
+			fn(e)
+		}
+		k.objectRelease(e)
+	}
+}
+
+// props reads the given properties of a registry entry.
+func (k *ioKitLib) props(e uint32, keys ...string) map[string]any {
+	out := map[string]any{}
+	for _, key := range keys {
+		ref := k.cf.str(key)
+		v := k.entryCreateProperty(e, ref, 0, 0)
+		k.cf.release(ref)
+		if v == 0 {
+			continue
+		}
+		if x := k.cf.value(v); x != nil {
+			out[key] = x
+		}
+		k.cf.release(v)
+	}
+	return out
+}
+
+// parentDict finds a dictionary property on the entry or the nearest
+// parent that has it, and reads the given keys from it.
+func (k *ioKitLib) parentDict(e uint32, prop string, keys ...string) map[string]any {
+	ref := k.cf.str(prop)
+	v := k.entrySearchProperty(e, ioServicePlane, ref, 0, ioIterateRecursively|ioIterateParents)
+	k.cf.release(ref)
+	if v == 0 {
+		return map[string]any{}
+	}
+	defer k.cf.release(v)
+	if k.cf.getTypeID(v) != k.cf.dictTypeID() {
+		return map[string]any{}
+	}
+	return k.cf.dict(v, keys...)
+}
+
+func (k *ioKitLib) name(e uint32) string {
+	buf := make([]byte, ioNameSize)
+	if k.entryGetName(e, &buf[0]) != kernSuccess {
+		return ""
+	}
+	return cString(buf, ioNameSize)
+}
+
+// childClass is the class of the entry's first child, the driver of a
+// PCI device.
+func (k *ioKitLib) childClass(e uint32) string {
+	var c uint32
+	if k.entryGetChild(e, ioServicePlane, &c) != kernSuccess || c == 0 {
+		return ""
+	}
+	defer k.objectRelease(c)
+	buf := make([]byte, ioNameSize)
+	if k.objectGetClass(c, &buf[0]) != kernSuccess {
+		return ""
+	}
+	return cString(buf, ioNameSize)
+}
+
+// parentIs reports whether the entry's provider conforms to class.
+func (k *ioKitLib) parentIs(e uint32, class string) bool {
+	var p uint32
+	if k.entryGetParent(e, ioServicePlane, &p) != kernSuccess || p == 0 {
+		return false
+	}
+	defer k.objectRelease(p)
+	return k.objectConformsTo(p, class)
+}
+
+var usbKeys = []string{"idVendor", "idProduct", "USB Vendor Name", "USB Product Name", "USB Serial Number",
+	"kUSBVendorString", "kUSBProductString", "kUSBSerialNumberString", "locationID", "Device Speed"}
+
+func (k *ioKitLib) usbDevices() (core.USBDevices, bool) {
+	var out core.USBDevices
+	ok := k.each("IOUSBHostDevice", func(e uint32) {
+		if d, good := usbDeviceFrom(k.props(e, usbKeys...), k.name(e)); good {
+			out = append(out, d)
+		}
+	})
+	slices.SortStableFunc(out, func(a, b core.USBDevice) int { return strings.Compare(a.Path, b.Path) })
+	return out, ok
+}
+
+func (k *ioKitLib) pciDevices() (core.PCIDevices, bool) {
+	var out core.PCIDevices
+	ok := k.each("IOPCIDevice", func(e uint32) {
+		if d, good := pciDeviceFrom(k.props(e, "vendor-id", "device-id", "class-code", "pcidebug", "model"), k.name(e), k.childClass(e)); good {
+			out = append(out, d)
+		}
+	})
+	slices.SortStableFunc(out, func(a, b core.PCIDevice) int { return strings.Compare(a.Address, b.Address) })
+	return out, ok
+}
+
+// disks lists whole physical disks: whole IOMedia directly on a block
+// storage driver. APFS containers and other synthesized disks sit on
+// their own drivers and are skipped.
+func (k *ioKitLib) disks() (core.BlockDevices, bool) {
+	var out core.BlockDevices
+	ok := k.each("IOMedia", func(e uint32) {
+		media := k.props(e, "BSD Name", "Size", "Removable", "Whole")
+		if whole, _ := media["Whole"].(bool); !whole || !k.parentIs(e, "IOBlockStorageDriver") {
+			return
+		}
+		device := k.parentDict(e, "Device Characteristics", "Product Name", "Serial Number", "Medium Type")
+		protocol := k.parentDict(e, "Protocol Characteristics", "Physical Interconnect")
+		if d, good := blockDeviceFrom(media, device, protocol); good {
+			out = append(out, d)
+		}
+	})
+	sortDisks(out)
+	return out, ok
 }
 
 // ---- ServiceManagement: launchd jobs (D48) ----

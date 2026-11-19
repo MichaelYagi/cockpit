@@ -1216,3 +1216,34 @@ when a library call exists.
 capability then reports `unsupported` instead of failing. It is tested on
 GitHub's macOS runner, not on the owner's Mac.
 
+## D49 — Hardware inventory on macOS
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** This amends D36. Two macOS collectors fill capabilities
+that already exist, so the API is unchanged:
+
+- `darwin.devices` reads the IOKit registry through purego every 5
+  minutes. PCI devices come from `IOPCIDevice` (IDs, class, address from
+  `pcidebug`, the attached driver's class, and a small table of vendor
+  names, since macOS has no `pci.ids`). USB devices come from
+  `IOUSBHostDevice`. Disks are whole `IOMedia` entries that sit directly
+  on a block storage driver, with model, serial and medium type from
+  "Device Characteristics" and transport from "Protocol Characteristics".
+  APFS containers and disk images are skipped, as Linux skips loop and
+  device-mapper devices.
+- `darwin.memory_modules` runs `/usr/sbin/system_profiler -json
+  SPMemoryDataType` without a shell, every 5 minutes at most once a
+  minute, with a 10-second timeout. Apple Silicon reports one built-in
+  memory (size, type, maker); Intel Macs report each filled slot.
+
+Serial numbers are sensitive and redacted as on Linux (D9). A failure
+makes only that capability unavailable, with a reason.
+
+**Why.** The owner wants these on the Hardware screen of their Mac.
+Memory module details have no public library interface; `system_profiler`
+ships with macOS and has structured JSON output, which principle 9
+allows.
+
+**Risk.** It is tested on GitHub's macOS runner, a virtual machine that may
+have no PCI or USB devices, not on the owner's Mac.

@@ -9,12 +9,13 @@ Phase 3.
 
 - Linux (amd64 or arm64), with everything described here.
 - macOS: identity, uptime, CPU usage and load, memory, disks, network,
-  processes, processor and Mac model, batteries and power adapter, and
-  (on Apple Silicon) temperatures (D32, D36). Without root, macOS hides
+  processes, services (D48), processor and Mac model, memory modules,
+  physical disks, PCI and USB devices (D49), batteries and power adapter,
+  and (on Apple Silicon) temperatures (D32, D36). Without root, macOS hides
   other users' CPU and memory use, so those processes show 0 and the list
   is marked partial. Apple Silicon temperatures are shown but not used by
   the CPU temperature check, because Apple publishes no limits for them.
-  Disk health, fans and services are `unsupported`.
+  Disk health and fans are `unsupported`.
 - Windows: identity, uptime, CPU usage, memory, disks and network (D32).
   There is no load average. Everything else is `unsupported`.
 - The admin connection is a Unix socket on macOS and a named pipe on

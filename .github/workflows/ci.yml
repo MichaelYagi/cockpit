@@ -65,3 +65,6 @@ jobs:
         run: go vet ./...
       - name: platform tests and conformance
         run: go test ./internal/collector/... ./internal/platform/... ./internal/tlsutil/... ./internal/api/server/... ./internal/cli/... ./pkg/...
+      - name: what the real macOS collectors found
+        if: runner.os == 'macOS'
+        run: go test -count=1 -v -run 'TestReal' ./internal/platform/darwin/

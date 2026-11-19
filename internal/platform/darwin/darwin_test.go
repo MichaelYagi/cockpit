@@ -248,3 +248,61 @@ func TestRealServices(t *testing.T) {
 	}
 	t.Fatal("no darwin.services collector")
 }
+
+// PCI, USB and disks come from the IOKit registry, memory modules from
+// system_profiler. Every Mac, including a CI virtual machine, has a boot
+// disk; the other lists depend on the hardware, so they are logged.
+func TestRealDevices(t *testing.T) {
+	got := map[string]collector.Result{}
+	for _, c := range collectors() {
+		if id := c.Descriptor().ID; id == "darwin.devices" || id == "darwin.memory_modules" {
+			got[id] = c.Collect(context.Background())
+		}
+	}
+	for id, r := range got {
+		for c, st := range r.Status {
+			t.Logf("%s %s: %s %s", id, c, st.Availability, st.Reason)
+		}
+		for _, rec := range r.Records {
+			t.Logf("%s: %+v", id, rec)
+		}
+	}
+	dev := got["darwin.devices"]
+	if st := dev.Status[core.CapStorageDevices]; st.Availability != core.Available {
+		t.Fatalf("disks: %s %s", st.Availability, st.Reason)
+	}
+	for _, rec := range dev.Records {
+		switch v := rec.(type) {
+		case core.BlockDevices:
+			for _, d := range v {
+				if !strings.HasPrefix(d.Name, "disk") || d.SizeBytes == 0 {
+					t.Errorf("implausible disk %+v", d)
+				}
+			}
+		case core.PCIDevices:
+			for _, d := range v {
+				if d.VendorID == "" || d.ClassCode == "" || d.Address == "" {
+					t.Errorf("implausible PCI device %+v", d)
+				}
+			}
+		case core.USBDevices:
+			for _, d := range v {
+				if len(d.VendorID) != 4 {
+					t.Errorf("implausible USB device %+v", d)
+				}
+			}
+		}
+	}
+	mem := got["darwin.memory_modules"]
+	st := mem.Status[core.CapHardwareMemory]
+	if st.Availability == core.TemporarilyUnavailable {
+		t.Errorf("memory modules: %s", st.Reason)
+	}
+	if st.Availability == core.Available {
+		for _, m := range mem.Records[0].(core.MemoryModules) {
+			if m.SizeBytes == 0 || m.Locator == "" {
+				t.Errorf("implausible module %+v", m)
+			}
+		}
+	}
+}

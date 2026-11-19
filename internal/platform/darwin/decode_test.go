@@ -215,3 +215,98 @@ func TestLaunchdServices(t *testing.T) {
 		}
 	}
 }
+
+func TestUSBDeviceFrom(t *testing.T) {
+	d, ok := usbDeviceFrom(map[string]any{"idVendor": float64(0x46d), "idProduct": float64(0xc52b),
+		"USB Vendor Name": "Logitech", "USB Product Name": "USB Receiver ", "USB Serial Number": "S1",
+		"locationID": float64(0x01100000), "Device Speed": float64(1)}, "USB Receiver")
+	if !ok || d.VendorID != "046d" || d.ProductID != "c52b" || d.Manufacturer != "Logitech" || d.Product != "USB Receiver" ||
+		d.Serial != "S1" || d.Path != "01100000" || d.SpeedMbps == nil || *d.SpeedMbps != 12 {
+		t.Errorf("%+v", d)
+	}
+	d, ok = usbDeviceFrom(map[string]any{"idVendor": float64(0x5ac), "kUSBProductString": "Keyboard", "Device Speed": float64(9)}, "kbd")
+	if !ok || d.Product != "Keyboard" || d.SpeedMbps != nil {
+		t.Errorf("%+v", d)
+	}
+	if d, _ = usbDeviceFrom(map[string]any{"idVendor": float64(1)}, " Hub "); d.Product != "Hub" {
+		t.Errorf("registry name not used: %+v", d)
+	}
+	if _, ok := usbDeviceFrom(map[string]any{"USB Product Name": "x"}, "x"); ok {
+		t.Error("a device without a vendor ID was accepted")
+	}
+}
+
+func TestPCIDeviceFrom(t *testing.T) {
+	d, ok := pciDeviceFrom(map[string]any{"vendor-id": []byte{0x86, 0x80, 0, 0}, "device-id": []byte{0x12, 0x3e, 0, 0},
+		"class-code": []byte{0, 0, 3, 0}, "pcidebug": "0:2:0", "model": []byte("Intel UHD Graphics 630\x00")}, "IGPU", "AppleIntelCFLGraphics")
+	if !ok || d.Address != "0000:00:02.0" || d.VendorID != "0x8086" || d.DeviceID != "0x3e12" || d.ClassCode != "0x030000" ||
+		d.ClassName != "VGA compatible controller" || d.VendorName != "Intel" || d.DeviceName != "Intel UHD Graphics 630" ||
+		d.Driver != "AppleIntelCFLGraphics" {
+		t.Errorf("%+v", d)
+	}
+	d, _ = pciDeviceFrom(map[string]any{"vendor-id": []byte{0xe4, 0x14, 0, 0}, "class-code": []byte{0x80, 2, 2, 0},
+		"pcidebug": "1:0:0(1:1)"}, "wlan", "")
+	if d.Address != "0000:01:00.0" || d.ClassName != "Network controller" || d.VendorName != "Broadcom" {
+		t.Errorf("%+v", d)
+	}
+	if d, _ = pciDeviceFrom(map[string]any{"vendor-id": []byte{1, 2}, "pcidebug": "bad"}, "pci-bridge", ""); d.Address != "pci-bridge" {
+		t.Errorf("registry name not used: %+v", d)
+	}
+	if _, ok := pciDeviceFrom(map[string]any{"vendor-id": []byte{1, 2, 3, 4, 5}}, "x", ""); ok {
+		t.Error("an oversized ID was accepted")
+	}
+}
+
+func TestBlockDeviceFrom(t *testing.T) {
+	d, ok := blockDeviceFrom(map[string]any{"BSD Name": "disk0", "Size": float64(500107862016), "Removable": false},
+		map[string]any{"Product Name": "APPLE SSD AP0512Q ", "Serial Number": "X1", "Medium Type": "Solid State"},
+		map[string]any{"Physical Interconnect": "Apple Fabric"})
+	if !ok || d.Name != "disk0" || d.Model != "APPLE SSD AP0512Q" || d.Serial != "X1" || d.Transport != "nvme" ||
+		d.SizeBytes != 500107862016 || d.Removable || d.Rotational == nil || *d.Rotational {
+		t.Errorf("%+v", d)
+	}
+	d, _ = blockDeviceFrom(map[string]any{"BSD Name": "disk4", "Removable": true}, map[string]any{"Medium Type": "Rotational"},
+		map[string]any{"Physical Interconnect": "USB"})
+	if d.Transport != "usb" || !d.Removable || d.Rotational == nil || !*d.Rotational {
+		t.Errorf("%+v", d)
+	}
+	if d, _ = blockDeviceFrom(map[string]any{"BSD Name": "disk1"}, nil, nil); d.Transport != "unknown" || d.Rotational != nil {
+		t.Errorf("%+v", d)
+	}
+	if _, ok := blockDeviceFrom(map[string]any{"BSD Name": "disk5"}, nil, map[string]any{"Physical Interconnect": "Virtual Interface"}); ok {
+		t.Error("a disk image was listed")
+	}
+	ds := core.BlockDevices{{Name: "disk10"}, {Name: "disk2"}, {Name: "disk0"}}
+	sortDisks(ds)
+	if ds[0].Name != "disk0" || ds[1].Name != "disk2" || ds[2].Name != "disk10" {
+		t.Errorf("%+v", ds)
+	}
+}
+
+func TestMemoryModules(t *testing.T) {
+	apple := `{"SPMemoryDataType":[{"SPMemoryDataType":"16 GB","dimm_manufacturer":"Hynix","dimm_type":"LPDDR5"}]}`
+	got, err := memoryModules([]byte(apple))
+	if err != nil || len(got) != 1 || got[0].Locator != "Built-in" || got[0].SizeBytes != 16<<30 || got[0].Type != "LPDDR5" ||
+		got[0].Manufacturer != "Hynix" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	intel := `{"SPMemoryDataType":[{"_name":"Memory Slots","_items":[
+		{"_name":"BANK 0/ChannelA-DIMM0","dimm_size":"8 GB","dimm_speed":"2667 MHz","dimm_type":"DDR4",
+		 "dimm_manufacturer":"0x80AD","dimm_part_number":"0x484D4134314753364146523847422D53572020","dimm_serial_number":"0x1234"},
+		{"_name":"BANK 1/ChannelB-DIMM0","dimm_size":"empty","dimm_type":"empty"}]}]}`
+	got, err = memoryModules([]byte(intel))
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	m := got[0]
+	if m.Locator != "BANK 0/ChannelA-DIMM0" || m.SizeBytes != 8<<30 || m.SpeedMTs != 2667 || m.Type != "DDR4" ||
+		m.Manufacturer != "0x80AD" || m.PartNumber != "HMA41GS6AFR8GB-SW" || m.Serial != "0x1234" {
+		t.Errorf("%+v", m)
+	}
+	if got, err := memoryModules([]byte(`{"SPMemoryDataType":[]}`)); err != nil || len(got) != 0 {
+		t.Errorf("%+v %v", got, err)
+	}
+	if _, err := memoryModules([]byte(`not json`)); err == nil {
+		t.Error("bad JSON accepted")
+	}
+}
