@@ -38,7 +38,7 @@ var implemented = []core.Capability{
 	core.CapSystemIdentity, core.CapSystemUptime, core.CapCPUUsage, core.CapCPULoad, core.CapMemoryUsage,
 	core.CapStorageFilesystems, core.CapNetworkInterfaces, core.CapNetworkThroughput, core.CapNetworkEndpoints,
 	core.CapPowerUPS, core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapHardwareMemory,
-	core.CapPowerSupplies,
+	core.CapPowerSupplies, core.CapNetworkRoutes, core.CapNetworkDNS, core.CapServicesWindows,
 }
 
 // Collectors returns the Windows collector set.
@@ -57,6 +57,10 @@ func Collectors(env collector.Env) []collector.Collector {
 		inventory("windows.hardware", "registry, processor topology, SMBIOS", now,
 			[]core.Capability{core.CapHardwareCPU, core.CapHardwareBoard, core.CapHardwareMemory}, hardware),
 		withInterval(sampler("windows.power", "GetSystemPowerStatus", 0, now, []core.Capability{core.CapPowerSupplies}, power), 10*time.Second),
+		withInterval(sampler("windows.netconfig", "GetIpForwardTable2, GetAdaptersAddresses", 0, now,
+			[]core.Capability{core.CapNetworkRoutes, core.CapNetworkDNS}, netConfig), 30*time.Second),
+		withInterval(sampler("windows.services", "service control manager", 0, now, []core.Capability{core.CapServicesWindows},
+			(&servicesCollector{}).collect), 10*time.Second),
 		portable.NewUPS(env, "windows.ups", version),
 		portable.NewEndpoints(env),
 		unsupported.Rest("windows.unsupported", implemented, "Not collected on Windows yet."),

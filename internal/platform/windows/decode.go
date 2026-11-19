@@ -7,6 +7,7 @@ package windows
 import (
 	"encoding/binary"
 	"math/bits"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -192,4 +193,196 @@ func smbiosInventory(structs [][]byte) (core.MemoryModules, string) {
 		}
 	}
 	return mods, chassis
+}
+
+// ---- services ----
+
+// Service states (SERVICE_STATUS.dwCurrentState) and start types.
+const (
+	svcStopped         = 1
+	svcStartPending    = 2
+	svcStopPending     = 3
+	svcRunning         = 4
+	svcContinuePending = 5
+	svcPausePending    = 6
+	svcPaused          = 7
+
+	startBoot     = 0
+	startSystem   = 1
+	startAuto     = 2
+	startDemand   = 3
+	startDisabled = 4
+	startUnknown  = 0xFFFFFFFF
+
+	errServiceSpecific     = 1066 // ERROR_SERVICE_SPECIFIC_ERROR
+	errServiceNeverStarted = 1077 // ERROR_SERVICE_NEVER_STARTED
+)
+
+// winService is what EnumServicesStatusEx and QueryServiceConfig report
+// about one service.
+type winService struct {
+	Name, Display          string
+	State, PID             uint32
+	ExitCode, SpecificExit uint32
+	StartType              uint32 // startUnknown when the configuration was refused
+	Delayed                bool
+}
+
+var startTypes = map[uint32]string{startBoot: "boot", startSystem: "system", startAuto: "auto", startDemand: "manual", startDisabled: "disabled"}
+
+// windowsService maps a service to the API's systemd-shaped fields (D51).
+// A stopped automatic service that exited with an error is failed: it
+// should be running and is not. Manual and delayed-start services may
+// stop by design (Downloaded Maps Manager exits with code 50 when it has
+// nothing to do), so their exit codes are shown but never failed.
+func windowsService(w winService) core.Service {
+	s := core.Service{Name: w.Name, Description: w.Display, LoadState: startTypes[w.StartType]}
+	if s.LoadState == "" {
+		s.LoadState = "unknown"
+	} else if w.StartType == startAuto && w.Delayed {
+		s.LoadState = "auto (delayed)"
+	}
+	exit := w.ExitCode
+	if exit == errServiceSpecific {
+		exit = w.SpecificExit
+	}
+	switch w.State {
+	case svcRunning:
+		s.ActiveState, s.SubState = "active", "running (pid "+strconv.FormatUint(uint64(w.PID), 10)+")"
+	case svcPaused, svcPausePending, svcContinuePending:
+		s.ActiveState, s.SubState = "active", "paused"
+	case svcStartPending:
+		s.ActiveState, s.SubState = "activating", "start pending"
+	case svcStopPending:
+		s.ActiveState, s.SubState = "deactivating", "stop pending"
+	default:
+		s.ActiveState, s.SubState = "inactive", "stopped"
+		if w.ExitCode != 0 && w.ExitCode != errServiceNeverStarted {
+			s.SubState = "stopped (exit " + strconv.FormatUint(uint64(exit), 10) + ")"
+			if w.StartType == startAuto && !w.Delayed || w.StartType == startBoot || w.StartType == startSystem {
+				s.ActiveState = "failed"
+			}
+		}
+	}
+	return s
+}
+
+// ---- routes and DNS ----
+
+// routeRow is one MIB_IPFORWARD_ROW2, decoded.
+type routeRow struct {
+	Dst      net.IP
+	Prefix   int
+	Gateway  net.IP // nil or unspecified when on-link
+	IfIndex  uint32
+	Metric   int // route metric plus the interface's, as route print shows
+	Loopback bool
+}
+
+// sockaddrIP reads the address of a SOCKADDR_INET: for AF_INET (2) the
+// four bytes after family and port, for AF_INET6 (23) the sixteen after
+// family, port and flow info.
+func sockaddrIP(family uint16, data [6]uint32) net.IP {
+	var b [24]byte
+	for i, v := range data {
+		binary.LittleEndian.PutUint32(b[i*4:], v)
+	}
+	switch family {
+	case 2:
+		return net.IP(append([]byte(nil), b[0:4]...))
+	case 23:
+		return net.IP(append([]byte(nil), b[4:20]...))
+	}
+	return nil
+}
+
+// windowsRoutes keeps the routes `route print` lists as active routes,
+// without the local entries Linux keeps in its separate local table:
+// on-link host routes (this machine's addresses and broadcasts),
+// loopback, multicast and IPv6 link-local subnets.
+func windowsRoutes(rows []routeRow, ifName func(uint32) string) core.Routes {
+	out := core.Routes{}
+	for _, r := range rows {
+		if len(out) >= 512 {
+			break
+		}
+		if r.Dst == nil || r.Loopback {
+			continue
+		}
+		bitsLen := 32
+		family := "ipv4"
+		if r.Dst.To4() == nil {
+			bitsLen, family = 128, "ipv6"
+		}
+		gw := r.Gateway
+		if gw != nil && gw.IsUnspecified() {
+			gw = nil
+		}
+		if r.Prefix < 0 || r.Prefix > bitsLen || r.Dst.IsLoopback() || r.Dst.IsMulticast() ||
+			r.Prefix == bitsLen && gw == nil || r.Dst.Equal(net.IPv4bcast) ||
+			family == "ipv6" && r.Dst.IsLinkLocalUnicast() && r.Prefix >= 64 {
+			continue
+		}
+		dst := r.Dst.Mask(net.CIDRMask(r.Prefix, bitsLen))
+		rt := core.Route{Family: family, Destination: dst.String() + "/" + strconv.Itoa(r.Prefix), Interface: ifName(r.IfIndex),
+			Metric: r.Metric, Default: r.Prefix == 0}
+		if gw != nil {
+			rt.Gateway = gw.String()
+		}
+		out = append(out, rt)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Default != out[j].Default {
+			return out[i].Default
+		}
+		if out[i].Family != out[j].Family {
+			return out[i].Family < out[j].Family
+		}
+		return out[i].Metric < out[j].Metric
+	})
+	return out
+}
+
+// adapterDNS is one network adapter's DNS settings.
+type adapterDNS struct {
+	Up, HasGateway bool
+	Servers        []string
+	Suffix         string
+}
+
+// windowsDNS merges the adapters' DNS servers the way Windows uses them:
+// adapters with a default gateway first, in binding order, then other
+// connected adapters. searchList is the global suffix search list.
+func windowsDNS(adapters []adapterDNS, searchList string) *core.DNSConfig {
+	cfg := &core.DNSConfig{Resolver: "windows", Nameservers: []string{}, Search: []string{}}
+	seen := map[string]bool{}
+	add := func(list *[]string, v string, limit int) {
+		if v = strings.TrimSpace(v); v != "" && !seen[v] && len(*list) < limit {
+			seen[v] = true
+			*list = append(*list, v)
+		}
+	}
+	for _, pass := range []bool{true, false} {
+		for _, a := range adapters {
+			if !a.Up || a.HasGateway != pass {
+				continue
+			}
+			for _, s := range a.Servers {
+				// fec0:0:0:ffff::1–3 are the deprecated site-local defaults
+				// Windows lists when no IPv6 DNS server is configured.
+				if !strings.HasPrefix(s, "fec0:0:0:ffff::") {
+					add(&cfg.Nameservers, s, 16)
+				}
+			}
+		}
+	}
+	for _, s := range strings.Split(searchList, ",") {
+		add(&cfg.Search, s, 16)
+	}
+	for _, a := range adapters {
+		if a.Up {
+			add(&cfg.Search, a.Suffix, 16)
+		}
+	}
+	return cfg
 }

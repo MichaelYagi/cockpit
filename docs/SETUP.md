@@ -17,8 +17,9 @@ Phase 3.
   is marked partial. Apple Silicon temperatures are shown but not used by
   the CPU temperature check, because Apple publishes no limits for them.
   Disk health and fans are `unsupported`.
-- Windows: identity, uptime, CPU usage, memory, disks, network, processes,
-  processor, board, memory modules, battery and UPS (D32, D50). There is
+- Windows: identity, uptime, CPU usage, memory, disks, network, routes and
+  DNS, processes, services, processor, board, memory modules, battery and
+  UPS (D32, D50, D51). There is
   no load average. Without administrator rights, Windows hides the owner
   and path of system and other users' processes; their CPU and memory
   are still shown. Everything else is `unsupported`.
@@ -607,7 +608,7 @@ Unavailable data is reported with a reason, never as an error:
 | GPU busy % (Intel) | Needs perf events | Frequency and power are shown instead; busy % is not available to an unprivileged agent |
 | Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
 | Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
-| Services | Not running systemd (Linux) | Nothing; other features still work. On macOS, launchd jobs are listed instead (D48) |
+| Services | Not running systemd (Linux) | Nothing; other features still work. On macOS, launchd jobs are listed instead (D48), on Windows its services (D51) |
 | Batteries | None present | Expected on desktops, servers and VMs |
 | UPS | Off by default | Set `collection.ups.enabled: true` (see UPS monitoring) |
 | UPS | No server answered | Start `upsd` or check `collection.ups.address` |

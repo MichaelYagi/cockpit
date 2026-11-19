@@ -155,3 +155,70 @@ func TestRealHardware(t *testing.T) {
 	p := collectorByID(t, "windows.power").Collect(context.Background())
 	t.Logf("power %v %+v", p.Status[core.CapPowerSupplies], p.Records)
 }
+
+func TestRealNetConfig(t *testing.T) {
+	r := collectorByID(t, "windows.netconfig").Collect(context.Background())
+	var routes core.Routes
+	var dns *core.DNSConfig
+	for _, rec := range r.Records {
+		switch v := rec.(type) {
+		case core.Routes:
+			routes = v
+		case *core.DNSConfig:
+			dns = v
+		}
+	}
+	for c, st := range r.Status {
+		t.Logf("%s: %s %s", c, st.Availability, st.Reason)
+	}
+	for _, rt := range routes {
+		t.Logf("route %+v", rt)
+	}
+	t.Logf("dns %+v", dns)
+	hasDefault := false
+	for _, rt := range routes {
+		hasDefault = hasDefault || rt.Default && rt.Gateway != "" && rt.Interface != ""
+	}
+	if !hasDefault {
+		t.Error("no default route with a gateway and interface")
+	}
+	if dns == nil || len(dns.Nameservers) == 0 || dns.Resolver != "windows" {
+		t.Errorf("dns %+v", dns)
+	}
+}
+
+// Every Windows host runs core services such as the RPC server and the
+// event log, started automatically.
+func TestRealServices(t *testing.T) {
+	c := collectorByID(t, "windows.services")
+	start := time.Now()
+	r := c.Collect(context.Background())
+	first := time.Since(start)
+	start = time.Now()
+	c.Collect(context.Background())
+	t.Logf("first collection %v, cached %v", first, time.Since(start))
+	st := r.Status[core.CapServicesWindows]
+	if st.Availability != core.Available {
+		t.Fatalf("%s %s", st.Availability, st.Reason)
+	}
+	svcs := r.Records[0].(core.Services)
+	counts := map[string]int{}
+	found := map[string]core.Service{}
+	for _, s := range svcs {
+		counts[s.ActiveState+"/"+s.LoadState]++
+		if s.Name == "RpcSs" || s.Name == "EventLog" {
+			found[s.Name] = s
+		}
+		if s.ActiveState == "failed" {
+			t.Logf("failed: %+v", s)
+		}
+	}
+	t.Logf("%d services: %v", len(svcs), counts)
+	for _, n := range []string{"RpcSs", "EventLog"} {
+		s, ok := found[n]
+		t.Logf("%s %+v", n, s)
+		if !ok || s.ActiveState != "active" || s.LoadState != "auto" || !strings.HasPrefix(s.SubState, "running (pid ") {
+			t.Errorf("%s: %+v", n, s)
+		}
+	}
+}

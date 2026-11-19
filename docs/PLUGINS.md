@@ -130,7 +130,7 @@ Dotted identifiers: `system.identity`, `system.uptime`, `cpu.usage`,
 `cpu.load`, `cpu.frequency` (not collected yet), `memory.usage`, `memory.pressure`,
 `storage.devices`, `storage.filesystems`, `storage.smart`,
 `network.interfaces`, `network.throughput`, `sensors.thermal`,
-`sensors.fan`, later `gpu.*`, `services.systemd`, `services.launchd`, `processes.list`.
+`sensors.fan`, later `gpu.*`, `services.systemd`, `services.launchd`, `services.windows`, `processes.list`.
 
 A collector declares what it can **potentially** provide. `Probe` and each
 `Result` report what is **actually** available right now.
@@ -195,6 +195,8 @@ filesystems are always skipped.
 | `windows.processes` | `processes.list` (on demand) | `NtQuerySystemInformation(SystemProcessInformation)` (D50); owner and path through `OpenProcess`, `OpenProcessToken`, `QueryFullProcessImageName` |
 | `windows.hardware` | `hardware.cpu`, `hardware.board`, `hardware.memory_modules` | Registry (`CentralProcessor\0`, `System\BIOS`), `GetLogicalProcessorInformationEx`, CPUID (`x/sys/cpu`), SMBIOS from `GetSystemFirmwareTable('RSMB')` |
 | `windows.power` | `power.supplies` | `GetSystemPowerStatus`, every 10s |
+| `windows.netconfig` | `network.routes`, `network.dns` | `GetIpForwardTable2` (metric includes the interface metric; local host, broadcast and multicast entries skipped), `GetAdaptersAddresses` and the registry search list (D51), every 30s |
+| `windows.services` | `services.windows` | Service control manager: `EnumServicesStatusEx`, start types from `QueryServiceConfig` cached for 5 minutes (D51), every 10s |
 
 `darwin.unsupported` and `windows.unsupported` report every other
 capability as `unsupported` with a reason.

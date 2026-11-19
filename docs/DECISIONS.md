@@ -1285,3 +1285,41 @@ documented but may change; the struct layout comes from `x/sys/windows`).
 
 **Risk.** Tested on the owner's Windows 11 PC through WSL interop and on
 GitHub's Windows runner.
+
+## D51 — Services, routes and DNS on Windows
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** This amends D32. Two Windows collectors, with
+`golang.org/x/sys/windows` only:
+
+- `windows.services` lists Win32 services from the service control
+  manager (`EnumServicesStatusEx`) every 10 seconds, with start types from
+  `QueryServiceConfig`, cached for 5 minutes. It reports a new
+  capability, `services.windows`; the services section takes the best of
+  systemd, launchd and Windows services, so the response shape is
+  unchanged. Each service becomes:
+  - `name` the service name (`Spooler`), `description` its display name;
+  - `load_state` its start type: `auto`, `auto (delayed)`, `manual`,
+    `disabled`, `boot`, `system`, or `unknown` when Windows refuses the
+    configuration;
+  - `active` with `running (pid N)` or `paused`; `activating` and
+    `deactivating` while pending; otherwise `inactive` with `stopped` or
+    `stopped (exit N)`.
+  - `failed` only for an automatic (not delayed), boot or system service
+    that stopped with an error: it should be running. Manual and
+    delayed-start services stop by design, so their exit codes are shown
+    but never raise the services health check.
+- `windows.netconfig` reads routes from `GetIpForwardTable2` (metric is
+  the route's plus the interface's, as `route print` shows) without the
+  local entries Linux keeps in its local table, and DNS servers from
+  `GetAdaptersAddresses`: connected adapters with a default gateway
+  first, then the others, without duplicates or the deprecated
+  `fec0:0:0:ffff::` defaults. The search list is the registry's plus each
+  adapter's suffix. The DNS `resolver` field gains the value `windows`.
+
+**Why.** The owner wants every platform as complete as it can be.
+
+**Contract.** Additive: one capability and one enum value. A client that
+rejects unknown enum values would see `windows` only from a Windows
+agent, which had no DNS data before.
