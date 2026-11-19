@@ -5,6 +5,8 @@ package linux
 import (
 	"testing"
 	"time"
+
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 func TestParseUptime(t *testing.T) {
@@ -89,6 +91,6 @@ func FuzzParsers(f *testing.F) {
 		_ = parseSize(string(b))
 		_ = parseIPv4Routes(b)
 		_ = parseIPv6Routes(b)
-		_ = parseResolvConf(b)
+		_ = portable.ParseResolvConf(b)
 	})
 }

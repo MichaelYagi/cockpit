@@ -2,7 +2,9 @@ package darwin
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/MichaelYagi/cockpit/internal/core"
@@ -308,5 +310,83 @@ func TestMemoryModules(t *testing.T) {
 	}
 	if _, err := memoryModules([]byte(`not json`)); err == nil {
 		t.Error("bad JSON accepted")
+	}
+}
+
+// rtMsg builds one NET_RT_DUMP message: a 92-byte rt_msghdr and the given
+// socket addresses, each padded to 4 bytes.
+func rtMsg(index uint16, flags, addrs uint32, sas ...[]byte) []byte {
+	var body []byte
+	for _, sa := range sas {
+		body = append(body, sa...)
+		for len(body)%4 != 0 {
+			body = append(body, 0)
+		}
+		if len(sa) == 0 {
+			body = append(body, 0, 0, 0, 0)
+		}
+	}
+	h := make([]byte, rtmHdrLen)
+	binary.LittleEndian.PutUint16(h, uint16(rtmHdrLen+len(body)))
+	h[2], h[rtmType] = 5, rtmGet
+	binary.LittleEndian.PutUint16(h[rtmIndex:], index)
+	binary.LittleEndian.PutUint32(h[rtmFlags:], flags)
+	binary.LittleEndian.PutUint32(h[rtmAddrs:], addrs)
+	return append(h, body...)
+}
+
+func sin(a, b, c, d byte) []byte { return []byte{16, afInet, 0, 0, a, b, c, d, 0, 0, 0, 0, 0, 0, 0, 0} }
+
+func sin6(ip ...byte) []byte {
+	sa := make([]byte, 28)
+	sa[0], sa[1] = 28, afInet6
+	copy(sa[8:], ip)
+	return sa
+}
+
+func TestParseRouteDump(t *testing.T) {
+	names := map[int]string{1: "lo0", 4: "en0"}
+	ifName := func(i int) string { return names[i] }
+	linkGW := []byte{20, 18, 4, 0, 6, 3, 6, 0, 'e', 'n', '0', 0, 0, 0, 0, 0, 0, 0, 0, 0} // sockaddr_dl
+	var dump []byte
+	// default via 192.168.1.1: an empty netmask.
+	dump = append(dump, rtMsg(4, rtfUp|rtfGateway, rtaDst|rtaGateway|rtaNetmask, sin(0, 0, 0, 0), sin(192, 168, 1, 1), nil)...)
+	// 192.168.1.0/24 on en0, netmask shortened to 7 bytes with no family.
+	dump = append(dump, rtMsg(4, rtfUp, rtaDst|rtaGateway|rtaNetmask, sin(192, 168, 1, 0), linkGW, []byte{7, 0, 0, 0, 255, 255, 255})...)
+	// A scoped default, an ARP entry, a cloned host and a reject route are skipped.
+	dump = append(dump, rtMsg(4, rtfUp|rtfGateway|rtfIfScope, rtaDst|rtaGateway|rtaNetmask, sin(0, 0, 0, 0), sin(192, 168, 1, 1), nil)...)
+	dump = append(dump, rtMsg(4, rtfUp|rtfHost|rtfLLInfo, rtaDst|rtaGateway, sin(192, 168, 1, 7), linkGW)...)
+	dump = append(dump, rtMsg(4, rtfUp|rtfHost|rtfWasCloned, rtaDst|rtaGateway, sin(192, 168, 1, 8), linkGW)...)
+	dump = append(dump, rtMsg(4, rtfUp|rtfReject, rtaDst|rtaNetmask, sin(10, 0, 0, 0), []byte{5, 0, 0, 0, 255})...)
+	// Loopback is skipped.
+	dump = append(dump, rtMsg(1, rtfUp|rtfHost, rtaDst|rtaGateway, sin(127, 0, 0, 1), sin(127, 0, 0, 1))...)
+	// A host route to 10.0.0.5 via a gateway.
+	dump = append(dump, rtMsg(4, rtfUp|rtfHost|rtfGateway, rtaDst|rtaGateway, sin(10, 0, 0, 5), sin(192, 168, 1, 254))...)
+	// IPv6 default via a link-local gateway with the embedded scope ID.
+	dump = append(dump, rtMsg(4, rtfUp|rtfGateway, rtaDst|rtaGateway|rtaNetmask, sin6(), sin6(0xfe, 0x80, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1), nil)...)
+	// IPv6 2001:db8::/32 with a shortened mask; fe80::/64 is skipped.
+	dump = append(dump, rtMsg(4, rtfUp, rtaDst|rtaNetmask, sin6(0x20, 0x01, 0x0d, 0xb8), []byte{12, afInet6, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255})...)
+	dump = append(dump, rtMsg(4, rtfUp, rtaDst|rtaNetmask, sin6(0xfe, 0x80, 0, 4), []byte{16, afInet6, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255})...)
+	// A truncated message ends parsing without a panic.
+	dump = append(dump, 200, 0, 5, rtmGet)
+
+	got := parseRouteDump(dump, ifName)
+	sortRoutes(got)
+	want := []string{
+		"ipv4 0.0.0.0/0 192.168.1.1 en0 true",
+		"ipv6 ::/0 fe80::1 en0 true",
+		"ipv4 192.168.1.0/24  en0 false",
+		"ipv4 10.0.0.5/32 192.168.1.254 en0 false",
+		"ipv6 2001:db8::/32  en0 false",
+	}
+	var lines []string
+	for _, r := range got {
+		lines = append(lines, fmt.Sprintf("%s %s %s %s %v", r.Family, r.Destination, r.Gateway, r.Interface, r.Default))
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+	for i := range len(dump) {
+		_ = parseRouteDump(dump[:i], ifName) // any prefix parses without a panic
 	}
 }

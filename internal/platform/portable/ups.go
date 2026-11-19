@@ -1,6 +1,4 @@
-//go:build linux
-
-package linux
+package portable
 
 import (
 	"bufio"
@@ -36,21 +34,31 @@ var (
 )
 
 type upsCollector struct {
-	base
-	env  collector.Env
-	dial func(ctx context.Context, addr string) (net.Conn, error)
+	id, version string
+	env         collector.Env
+	dial        func(ctx context.Context, addr string) (net.Conn, error)
 }
 
-func newUPS(env collector.Env) *upsCollector {
+// NewUPS reads a Network UPS Tools server (D25). It works on every
+// platform: it only talks to upsd over TCP.
+func NewUPS(env collector.Env, id, version string) collector.Collector {
+	if env.Now == nil {
+		env.Now = time.Now
+	}
 	d := &net.Dialer{}
-	c := &upsCollector{env: env, dial: func(ctx context.Context, addr string) (net.Conn, error) { return d.DialContext(ctx, "tcp", addr) }}
-	c.base = base{collect: c.Collect}
-	return c
+	return &upsCollector{id: id, version: version, env: env,
+		dial: func(ctx context.Context, addr string) (net.Conn, error) { return d.DialContext(ctx, "tcp", addr) }}
 }
+
+func (c *upsCollector) Probe(ctx context.Context) map[core.Capability]core.CapabilityStatus {
+	return c.Collect(ctx).Status
+}
+
+func (*upsCollector) Close(context.Context) error { return nil }
 
 func (c *upsCollector) Descriptor() collector.Descriptor {
 	return collector.Descriptor{
-		ID: "linux.ups", Version: version, Source: "Network UPS Tools",
+		ID: c.id, Version: c.version, Source: "Network UPS Tools",
 		Capabilities: []core.Capability{core.CapPowerUPS},
 		Class:        collector.Sampler, DefaultInterval: 10 * time.Second, DefaultTimeout: 3 * time.Second,
 		MinInterval: 5 * time.Second,
@@ -72,7 +80,7 @@ func (c *upsCollector) Collect(ctx context.Context) collector.Result {
 	case len(list) == 0:
 		res.Status[core.CapPowerUPS] = core.CapabilityStatus{Availability: core.Unsupported, Reason: "The UPS server reports no UPS."}
 	default:
-		res.Status[core.CapPowerUPS] = available()
+		res.Status[core.CapPowerUPS] = Available()
 		res.Records = []core.Record{list}
 	}
 	return res

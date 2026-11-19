@@ -17,6 +17,7 @@ import (
 
 	"github.com/MichaelYagi/cockpit/internal/collector"
 	"github.com/MichaelYagi/cockpit/internal/core"
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 // maxRoutes bounds the routing table we report.
@@ -84,13 +85,13 @@ func (c *netConfigCollector) dns() (*core.DNSConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg := parseResolvConf(b)
+	cfg := portable.ParseResolvConf(b)
 	cfg.Resolver = "resolv.conf"
 	// systemd-resolved's stub listens on 127.0.0.53; its real upstream
 	// servers are in /run/systemd/resolve/resolv.conf.
 	if len(cfg.Nameservers) == 1 && cfg.Nameservers[0] == "127.0.0.53" {
 		if up, err := readFile(c.env.RunRoot, "systemd/resolve/resolv.conf"); err == nil {
-			u := parseResolvConf(up)
+			u := portable.ParseResolvConf(up)
 			cfg.Nameservers, cfg.Resolver = u.Nameservers, "systemd-resolved"
 			if len(cfg.Search) == 0 {
 				cfg.Search = u.Search
@@ -98,26 +99,6 @@ func (c *netConfigCollector) dns() (*core.DNSConfig, error) {
 		}
 	}
 	return &cfg, nil
-}
-
-func parseResolvConf(b []byte) core.DNSConfig {
-	var cfg core.DNSConfig
-	sc := bufio.NewScanner(bytes.NewReader(b))
-	for sc.Scan() {
-		f := strings.Fields(sc.Text())
-		if len(f) < 2 || strings.HasPrefix(f[0], "#") || strings.HasPrefix(f[0], ";") {
-			continue
-		}
-		switch f[0] {
-		case "nameserver":
-			if net.ParseIP(f[1]) != nil && len(cfg.Nameservers) < 16 {
-				cfg.Nameservers = append(cfg.Nameservers, f[1])
-			}
-		case "search", "domain":
-			cfg.Search = append(cfg.Search[:0], f[1:]...)
-		}
-	}
-	return cfg
 }
 
 // Route flags from <linux/route.h>.

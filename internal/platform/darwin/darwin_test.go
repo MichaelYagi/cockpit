@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -305,4 +306,40 @@ func TestRealDevices(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Every networked Mac, including a CI virtual machine, has a default
+// route and a resolver.
+func TestRealNetConfig(t *testing.T) {
+	for _, c := range collectors() {
+		if c.Descriptor().ID != "darwin.netconfig" {
+			continue
+		}
+		r := c.Collect(context.Background())
+		for cp, st := range r.Status {
+			t.Logf("%s: %s %s", cp, st.Availability, st.Reason)
+		}
+		var routes core.Routes
+		var dns *core.DNSConfig
+		for _, rec := range r.Records {
+			switch v := rec.(type) {
+			case core.Routes:
+				routes = v
+			case *core.DNSConfig:
+				dns = v
+			}
+		}
+		for _, rt := range routes {
+			t.Logf("route %+v", rt)
+		}
+		t.Logf("dns %+v", dns)
+		if !slices.ContainsFunc(routes, func(rt core.Route) bool { return rt.Default && rt.Gateway != "" && rt.Interface != "" }) {
+			t.Error("no default route with a gateway and interface")
+		}
+		if dns == nil || len(dns.Nameservers) == 0 {
+			t.Error("no nameservers")
+		}
+		return
+	}
+	t.Fatal("no darwin.netconfig collector")
 }

@@ -10,6 +10,10 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Routes, DNS and UPS on more platforms.** macOS now shows its routing
+  table and DNS servers on the Network screen, and macOS and Windows can
+  read a UPS through Network UPS Tools, as Linux does. DNS servers with an
+  interface zone (`fe80::1%en0`) are no longer dropped.
 - **Mac hardware inventory (D49).** On macOS, the Hardware screen lists
   memory modules, physical disks, PCI devices and USB devices instead of
   "Not collected on macOS yet". Apple Silicon Macs show their built-in

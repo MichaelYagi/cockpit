@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -581,4 +583,150 @@ func memoryModules(js []byte) (core.MemoryModules, error) {
 		}
 	}
 	return out, nil
+}
+
+// ---- routes: sysctl NET_RT_DUMP ----
+
+// struct rt_msghdr: the header before each route's socket addresses.
+const (
+	rtmType    = 3  // u_char rtm_type
+	rtmIndex   = 4  // u_short rtm_index
+	rtmFlags   = 8  // int rtm_flags
+	rtmAddrs   = 12 // int rtm_addrs
+	rtmHdrLen  = 92 // sizeof(struct rt_msghdr)
+	rtmGet     = 4  // RTM_GET, the type of dumped routes
+	maxRoutes  = 512
+	afInet     = 2
+	afInet6    = 30
+	rtaDst     = 0x1
+	rtaGateway = 0x2
+	rtaNetmask = 0x4
+
+	rtfUp        = 0x1
+	rtfGateway   = 0x2
+	rtfHost      = 0x4
+	rtfReject    = 0x8
+	rtfLLInfo    = 0x400
+	rtfBlackhole = 0x1000
+	rtfWasCloned = 0x20000
+	rtfIfScope   = 0x1000000
+)
+
+// addrBytes reads the address of a socket address of the given family
+// (4 bytes for IPv4, 16 for IPv6), zero-filling what the kernel left out,
+// as it does for netmasks. Netmasks may also lack the family, so the
+// caller passes the destination's.
+func addrBytes(sa []byte, family int) []byte {
+	off, n := 4, net.IPv4len // sockaddr_in: sin_addr at 4
+	if family == afInet6 {
+		off, n = 8, net.IPv6len // sockaddr_in6: sin6_addr at 8
+	}
+	ip := make([]byte, n)
+	if len(sa) > off {
+		copy(ip, sa[off:])
+	}
+	return ip
+}
+
+func saFamily(sa []byte) int {
+	if len(sa) < 2 {
+		return 0
+	}
+	return int(sa[1])
+}
+
+// routeAddrs splits the socket addresses after a header, by RTA_* bit;
+// each takes its sa_len rounded up to 4 bytes, and an empty one takes 4.
+func routeAddrs(b []byte, mask int) map[int][]byte {
+	out := map[int][]byte{}
+	for bit := 1; bit <= 0x80 && len(b) > 0; bit <<= 1 {
+		if mask&bit == 0 {
+			continue
+		}
+		l := int(b[0])
+		step := 4
+		if l > 0 {
+			step = (l + 3) &^ 3
+		}
+		l, step = min(l, len(b)), min(step, len(b))
+		out[bit] = b[:l]
+		b = b[step:]
+	}
+	return out
+}
+
+// routeIP turns route address bytes into an IP, clearing the scope ID
+// that macOS embeds in bytes 2–3 of IPv6 link-local addresses.
+func routeIP(b []byte) net.IP {
+	ip := net.IP(slices.Clone(b))
+	if len(ip) == net.IPv6len && ip[0] == 0xfe && ip[1]&0xc0 == 0x80 {
+		ip[2], ip[3] = 0, 0
+	}
+	return ip
+}
+
+// parseRouteDump parses NET_RT_DUMP. It keeps the routes netstat -rn
+// shows without -a: not ARP/neighbor entries, cloned host routes,
+// interface-scoped copies, reject routes, loopback or multicast routes.
+// ifName maps an interface index to its name.
+func parseRouteDump(b []byte, ifName func(int) string) core.Routes {
+	out := core.Routes{}
+	for len(b) >= 4 && len(out) < maxRoutes {
+		l := int(binary.LittleEndian.Uint16(b))
+		if l < 4 || l > len(b) {
+			break
+		}
+		msg := b[:l]
+		b = b[l:]
+		if len(msg) < rtmHdrLen || msg[rtmType] != rtmGet {
+			continue
+		}
+		flags := binary.LittleEndian.Uint32(msg[rtmFlags:])
+		if flags&rtfUp == 0 || flags&(rtfReject|rtfBlackhole|rtfLLInfo|rtfWasCloned|rtfIfScope) != 0 {
+			continue
+		}
+		addrs := routeAddrs(msg[rtmHdrLen:], int(binary.LittleEndian.Uint32(msg[rtmAddrs:])))
+		family := saFamily(addrs[rtaDst])
+		if family != afInet && family != afInet6 {
+			continue
+		}
+		dst := addrBytes(addrs[rtaDst], family)
+		bitsLen := len(dst) * 8
+		plen := bitsLen
+		if m, ok := addrs[rtaNetmask]; ok && flags&rtfHost == 0 {
+			var total int
+			if plen, total = net.IPMask(addrBytes(m, family)).Size(); total == 0 {
+				continue // not a contiguous mask
+			}
+		} else if !ok && flags&rtfHost == 0 {
+			plen = 0 // no netmask: the default route
+		}
+		ip := routeIP(dst).Mask(net.CIDRMask(plen, bitsLen))
+		iface := ifName(int(binary.LittleEndian.Uint16(msg[rtmIndex:])))
+		if ip == nil || ip.IsLoopback() || ip.IsMulticast() || strings.HasPrefix(iface, "lo") ||
+			ip.IsLinkLocalUnicast() && len(ip) == net.IPv6len && plen >= 64 {
+			continue
+		}
+		name := "ipv4"
+		if family == afInet6 {
+			name = "ipv6"
+		}
+		r := core.Route{Family: name, Destination: fmt.Sprintf("%s/%d", ip, plen), Interface: iface, Default: plen == 0}
+		if gw, ok := addrs[rtaGateway]; ok && flags&rtfGateway != 0 && saFamily(gw) == family {
+			r.Gateway = routeIP(addrBytes(gw, family)).String()
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// sortRoutes puts default routes first and IPv4 before IPv6, as Linux
+// lists them.
+func sortRoutes(rs core.Routes) {
+	sort.SliceStable(rs, func(i, j int) bool {
+		if rs[i].Default != rs[j].Default {
+			return rs[i].Default
+		}
+		return rs[i].Family < rs[j].Family
+	})
 }

@@ -5,10 +5,12 @@ package darwin
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -110,6 +112,36 @@ func memoryModulesFrom(ctx context.Context, r *collector.Result) {
 		r.Status[core.CapHardwareMemory] = portable.Available()
 		r.Records = append(r.Records, mods)
 	}
+}
+
+// ---- network configuration: routes and DNS ----
+
+func netConfig(r *collector.Result) {
+	raw, err := syscall.RouteRIB(syscall.NET_RT_DUMP, 0) //lint:ignore SA1019 the replacement (x/net/route) would be a new dependency for one call
+	if err != nil {
+		r.Status[core.CapNetworkRoutes] = portable.Status(err, "the routing table")
+	} else {
+		names := map[int]string{}
+		if ifs, err := net.Interfaces(); err == nil {
+			for _, i := range ifs {
+				names[i.Index] = i.Name
+			}
+		}
+		routes := parseRouteDump(raw, func(i int) string { return names[i] })
+		sortRoutes(routes)
+		r.Status[core.CapNetworkRoutes] = portable.Available()
+		r.Records = append(r.Records, routes)
+	}
+	// macOS keeps /etc/resolv.conf in step with the primary resolver.
+	b, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		r.Status[core.CapNetworkDNS] = portable.Status(err, "the resolver configuration (no network is connected)")
+		return
+	}
+	cfg := portable.ParseResolvConf(b)
+	cfg.Resolver = "resolv.conf"
+	r.Status[core.CapNetworkDNS] = portable.Available()
+	r.Records = append(r.Records, &cfg)
 }
 
 // ---- services (launchd, D48) ----
