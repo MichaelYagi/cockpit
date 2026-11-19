@@ -578,6 +578,76 @@ func (k *ioKitLib) disks() (core.BlockDevices, bool) {
 	return out, ok
 }
 
+// ownDict reads the given keys of a dictionary property of the entry.
+func (k *ioKitLib) ownDict(e uint32, prop string, keys ...string) map[string]any {
+	ref := k.cf.str(prop)
+	v := k.entryCreateProperty(e, ref, 0, 0)
+	k.cf.release(ref)
+	if v == 0 {
+		return map[string]any{}
+	}
+	defer k.cf.release(v)
+	if k.cf.getTypeID(v) != k.cf.dictTypeID() {
+		return map[string]any{}
+	}
+	return k.cf.dict(v, keys...)
+}
+
+// pciParent reads the model and vendor of the nearest IOPCIDevice above
+// the entry, at most four levels up; it is empty on Apple silicon.
+func (k *ioKitLib) pciParent(e uint32) map[string]any {
+	cur, owned := e, false
+	defer func() {
+		if owned {
+			k.objectRelease(cur)
+		}
+	}()
+	for range 4 {
+		var p uint32
+		if k.entryGetParent(cur, ioServicePlane, &p) != kernSuccess || p == 0 {
+			return map[string]any{}
+		}
+		if owned {
+			k.objectRelease(cur)
+		}
+		cur, owned = p, true
+		if k.objectConformsTo(cur, "IOPCIDevice") {
+			return k.props(cur, "model", "vendor-id")
+		}
+	}
+	return map[string]any{}
+}
+
+func (k *ioKitLib) className(e uint32) string {
+	buf := make([]byte, ioNameSize)
+	if k.objectGetClass(e, &buf[0]) != kernSuccess {
+		return ""
+	}
+	return cString(buf, ioNameSize)
+}
+
+var gpuStatKeys = []string{"Device Utilization %", "GPU Activity(%)", "In use system memory", "vramUsedBytes"}
+
+// gpus lists IOAccelerator entries, one per GPU.
+func (k *ioKitLib) gpus() (core.GPUs, bool) {
+	var out core.GPUs
+	ok := k.each("IOAccelerator", func(e uint32) {
+		props := k.props(e, "model", "gpu-core-count")
+		// On Intel Macs the model and vendor are on the PCI device the
+		// accelerator sits on; searching further up would find the Mac's
+		// own model ("MacBookPro16,1").
+		pci := k.pciParent(e)
+		if _, has := props["model"]; !has {
+			if m, ok := pci["model"]; ok {
+				props["model"] = m
+			}
+		}
+		vendor, haveVendor := propLE32(pci, "vendor-id")
+		out = append(out, gpuFrom(k.className(e), props, vendor, haveVendor, k.ownDict(e, "PerformanceStatistics", gpuStatKeys...)))
+	})
+	return out, ok
+}
+
 // ---- ServiceManagement: launchd jobs (D48) ----
 
 type smLib struct {

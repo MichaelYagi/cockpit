@@ -53,7 +53,7 @@ can be sent to webhooks.
 
 **Platforms.** Linux has everything above. macOS has CPU, memory, disks,
 network, processes, services, hardware inventory (memory, disks, PCI and
-USB devices), routes and DNS, UPS, batteries and Apple Silicon
+USB devices), GPUs, routes and DNS, UPS, batteries and Apple Silicon
 temperatures. Windows has identity, CPU, memory, disks, network, routes and DNS,
 processes, services, hardware inventory (processor, board, memory, disks,
 PCI and USB devices), GPUs, battery and UPS. Under WSL, Cockpit monitors the

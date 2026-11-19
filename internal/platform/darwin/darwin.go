@@ -38,7 +38,7 @@ var implemented = []core.Capability{
 	core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapPowerSupplies, core.CapSensorsThermal,
 	core.CapNetworkEndpoints, core.CapServicesLaunchd,
 	core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices, core.CapHardwareMemory,
-	core.CapNetworkRoutes, core.CapNetworkDNS, core.CapPowerUPS,
+	core.CapNetworkRoutes, core.CapNetworkDNS, core.CapPowerUPS, core.CapGPUDevices, core.CapGPUMetrics,
 }
 
 // Collectors returns the macOS collector set.
@@ -73,6 +73,8 @@ func Collectors(env collector.Env) []collector.Collector {
 		inventory("darwin.devices", "IOKit registry", now, []core.Capability{core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices},
 			func(r *collector.Result) { devices(r, iok, ioErr) }),
 		memoryModulesCollector(now),
+		withInterval(sampler("darwin.gpu", "IOKit IOAccelerator", 0, now, []core.Capability{core.CapGPUDevices, core.CapGPUMetrics},
+			func(r *collector.Result) { gpus(r, iok, ioErr) }), 5*time.Second),
 		withInterval(sampler("darwin.power", "IOKit power sources", 0, now, []core.Capability{core.CapPowerSupplies},
 			func(r *collector.Result) { power(r, iok, ioErr) }), 10*time.Second),
 		withInterval(sampler("darwin.thermal", "IOKit HID", 0, now, []core.Capability{core.CapSensorsThermal},

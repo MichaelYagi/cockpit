@@ -1354,3 +1354,22 @@ agent, which had no DNS data before.
 
 **Risk.** Tested on the owner's Windows 11 PC through WSL interop and on
 GitHub's Windows runner.
+
+## D53 — GPUs on macOS
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** This amends D36 and D16. A `darwin.gpu` collector reads
+IOKit `IOAccelerator` entries through purego every 5 seconds: the driver
+class, the model and core count (Apple silicon), the PCI vendor of the
+device below it (Intel Macs), and `Device Utilization %` and `In use
+system memory` from the driver's `PerformanceStatistics` dictionary,
+which Activity Monitor also uses. GPUs reporting either value have
+`metrics_source` `iokit`, a new enum value; total memory, temperature,
+power and clocks stay null. A driver without statistics, such as a
+virtual machine's paravirtual GPU, is listed with metrics `unsupported`.
+
+**Why.** The owner wants every platform as complete as it can be; this is
+the one GPU interface macOS offers without root or private frameworks.
+
+**Contract.** Additive: one enum value, only from macOS agents.

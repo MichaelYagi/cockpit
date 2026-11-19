@@ -101,7 +101,7 @@ type GPU struct {
 	FanPercent         *float64
 	FrequencyMHz       *float64
 	MaxFrequencyMHz    *float64
-	MetricsSource      string // "nvidia-smi", "amdgpu", "i915", "xe", or "" when no metrics
+	MetricsSource      string // "nvidia-smi", "amdgpu", "i915", "xe", "iokit" (macOS), or "" when no metrics
 	UUID               string // sensitive
 }
 
