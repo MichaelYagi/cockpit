@@ -51,7 +51,7 @@ var sectionCaps = [numSections][]core.Capability{
 	secBlockDevices:   {core.CapStorageDevices},
 	secSensors:        {core.CapSensorsThermal, core.CapSensorsFan},
 	secDiskHealth:     {core.CapStorageSMART},
-	secServices:       {core.CapServicesSystemd},
+	secServices:       {core.CapServicesSystemd, core.CapServicesLaunchd}, // Linux or macOS (D48)
 	secCPUInfo:        {core.CapHardwareCPU},
 	secPCI:            {core.CapHardwarePCI},
 	secUSB:            {core.CapHardwareUSB},

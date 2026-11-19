@@ -602,7 +602,7 @@ Unavailable data is reported with a reason, never as an error:
 | GPU busy % (Intel) | Needs perf events | Frequency and power are shown instead; busy % is not available to an unprivileged agent |
 | Memory modules (DIMMs) | SMBIOS tables are root-only | Expected without root |
 | Board / firmware, USB | Not exposed (VMs, containers, WSL) | Nothing; this is expected |
-| Services | Not running systemd | Nothing; other features still work |
+| Services | Not running systemd (Linux) | Nothing; other features still work. On macOS, launchd jobs are listed instead (D48) |
 | Batteries | None present | Expected on desktops, servers and VMs |
 | UPS | Off by default | Set `collection.ups.enabled: true` (see UPS monitoring) |
 | UPS | No server answered | Start `upsd` or check `collection.ups.address` |

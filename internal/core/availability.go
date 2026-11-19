@@ -54,6 +54,7 @@ const (
 	CapPowerSupplies      Capability = "power.supplies"
 	CapPowerUPS           Capability = "power.ups"
 	CapServicesSystemd    Capability = "services.systemd"
+	CapServicesLaunchd    Capability = "services.launchd" // macOS (D48)
 	CapHardwareCPU        Capability = "hardware.cpu"
 	CapHardwarePCI        Capability = "hardware.pci"
 	CapHardwareUSB        Capability = "hardware.usb"
@@ -75,7 +76,7 @@ func KnownCapabilities() []Capability {
 		CapStorageDevices, CapStorageFilesystems, CapStorageSMART,
 		CapNetworkInterfaces, CapNetworkThroughput,
 		CapSensorsThermal, CapSensorsFan,
-		CapProcessesList, CapContainers, CapServicesSystemd,
+		CapProcessesList, CapContainers, CapServicesSystemd, CapServicesLaunchd,
 		CapStorageZFS, CapPowerSupplies, CapPowerUPS,
 		CapHardwareCPU, CapHardwarePCI, CapHardwareUSB, CapHardwareBoard, CapHardwareMemory,
 		CapGPUDevices, CapGPUMetrics,

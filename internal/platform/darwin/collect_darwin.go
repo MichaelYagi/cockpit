@@ -47,6 +47,22 @@ func hardware(r *collector.Result) {
 	}
 }
 
+// ---- services (launchd, D48) ----
+
+func services(r *collector.Result, m *smLib, loadErr error) {
+	if loadErr != nil {
+		r.Status[core.CapServicesLaunchd] = portable.Unavailable(core.Unsupported, "Services need ServiceManagement, which could not be loaded: "+loadErr.Error())
+		return
+	}
+	jobs, ok := m.jobs()
+	if !ok {
+		r.Status[core.CapServicesLaunchd] = portable.Unavailable(core.TemporarilyUnavailable, "launchd did not return its job list.")
+		return
+	}
+	r.Status[core.CapServicesLaunchd] = portable.Available()
+	r.Records = append(r.Records, launchdServices(jobs))
+}
+
 // ---- power sources and temperatures ----
 
 func power(r *collector.Result, k *ioKitLib, loadErr error) {

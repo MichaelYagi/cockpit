@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,4 +211,40 @@ func TestRealPowerAndThermal(t *testing.T) {
 			t.Logf("%s: %+v", id, rec)
 		}
 	}
+}
+
+// launchd jobs come from ServiceManagement (D48); every Mac, including a
+// CI virtual machine, runs Apple daemons.
+func TestRealServices(t *testing.T) {
+	for _, c := range collectors() {
+		if c.Descriptor().ID != "darwin.services" {
+			continue
+		}
+		r := c.Collect(context.Background())
+		st := r.Status[core.CapServicesLaunchd]
+		if st.Availability != core.Available {
+			t.Fatalf("services: %s %s", st.Availability, st.Reason)
+		}
+		svcs := r.Records[0].(core.Services)
+		running, apple := 0, 0
+		for i, s := range svcs {
+			if s.ActiveState == "active" {
+				running++
+			}
+			if strings.HasPrefix(s.Name, "com.apple.") {
+				apple++
+			}
+			if i < 15 || strings.HasPrefix(s.SubState, "exited (") || strings.HasPrefix(s.SubState, "killed") {
+				if i < 40 {
+					t.Logf("%s | %s | %s | %s", s.Name, s.ActiveState, s.SubState, s.Description)
+				}
+			}
+		}
+		t.Logf("%d services, %d running, %d com.apple", len(svcs), running, apple)
+		if running == 0 || apple == 0 {
+			t.Errorf("implausible job list: %d services, %d running, %d com.apple", len(svcs), running, apple)
+		}
+		return
+	}
+	t.Fatal("no darwin.services collector")
 }

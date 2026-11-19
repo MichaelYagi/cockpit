@@ -35,7 +35,7 @@ var implemented = []core.Capability{
 	core.CapSystemIdentity, core.CapSystemUptime, core.CapCPUUsage, core.CapCPULoad, core.CapMemoryUsage,
 	core.CapStorageFilesystems, core.CapNetworkInterfaces, core.CapNetworkThroughput,
 	core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapPowerSupplies, core.CapSensorsThermal,
-	core.CapNetworkEndpoints,
+	core.CapNetworkEndpoints, core.CapServicesLaunchd,
 }
 
 // Collectors returns the macOS collector set.
@@ -52,6 +52,11 @@ func Collectors(env collector.Env) []collector.Collector {
 	if ioErr == nil {
 		iok, ioErr = loadIOKit(cf)
 	}
+	var sm *smLib
+	smErr := ioErr
+	if cf != nil {
+		sm, smErr = loadSM(cf)
+	}
 	return []collector.Collector{
 		sampler("darwin.system", "sysctl", time.Minute, now, []core.Capability{core.CapSystemIdentity, core.CapSystemUptime}, system),
 		sampler("darwin.cpu", "host_processor_info, sysctl", 0, now, []core.Capability{core.CapCPUUsage, core.CapCPULoad},
@@ -66,6 +71,8 @@ func Collectors(env collector.Env) []collector.Collector {
 			func(r *collector.Result) { power(r, iok, ioErr) }), 10*time.Second),
 		withInterval(sampler("darwin.thermal", "IOKit HID", 0, now, []core.Capability{core.CapSensorsThermal},
 			func(r *collector.Result) { thermal(r, iok, ioErr) }), 5*time.Second),
+		withInterval(sampler("darwin.services", "ServiceManagement (launchd)", 0, now, []core.Capability{core.CapServicesLaunchd},
+			func(r *collector.Result) { services(r, sm, smErr) }), 10*time.Second),
 		portable.NewEndpoints(env),
 		unsupported.Rest("darwin.unsupported", implemented, "Not collected on macOS yet."),
 	}

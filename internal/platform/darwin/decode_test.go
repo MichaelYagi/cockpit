@@ -172,3 +172,46 @@ func TestCPUInfo(t *testing.T) {
 		t.Errorf("intel %+v", c)
 	}
 }
+
+func TestLaunchdServices(t *testing.T) {
+	var jobs []launchdJob
+	for _, d := range []struct {
+		m    map[string]any
+		user bool
+	}{
+		{map[string]any{"Label": "com.apple.running", "PID": 412.0, "LastExitStatus": 0.0, "Program": "/usr/libexec/running"}, false},
+		{map[string]any{"Label": "com.example.exited", "LastExitStatus": float64(78 << 8)}, true},
+		{map[string]any{"Label": "com.example.killed", "LastExitStatus": 9.0}, true},
+		{map[string]any{"Label": "com.example.clean", "LastExitStatus": 0.0}, false},
+		{map[string]any{"Label": "com.example.never"}, false},
+		{map[string]any{"Label": "com.apple.running", "PID": 9.0}, true}, // duplicate label: first wins
+		{map[string]any{"PID": 1.0}, false},                              // no label: skipped
+	} {
+		if j, ok := launchdJobFrom(d.m, d.user); ok {
+			jobs = append(jobs, j)
+		}
+	}
+	got := launchdServices(jobs)
+	want := map[string][3]string{
+		"com.apple.running":  {"active", "running (pid 412)", "System daemon · /usr/libexec/running"},
+		"com.example.exited": {"inactive", "exited (status 78)", "User agent"},
+		"com.example.killed": {"inactive", "killed (signal 9)", "User agent"},
+		"com.example.clean":  {"inactive", "exited", "System daemon"},
+		"com.example.never":  {"inactive", "waiting", "System daemon"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d services: %+v", len(got), got)
+	}
+	for i, s := range got {
+		w, ok := want[s.Name]
+		if !ok || s.ActiveState != w[0] || s.SubState != w[1] || s.Description != w[2] || s.LoadState != "loaded" {
+			t.Errorf("%s: %+v, want %v", s.Name, s, w)
+		}
+		if i > 0 && got[i-1].Name > s.Name {
+			t.Error("not sorted")
+		}
+		if s.ActiveState == "failed" {
+			t.Errorf("%s reported failed", s.Name)
+		}
+	}
+}

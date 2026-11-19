@@ -245,3 +245,68 @@ func cpuInfo(arch string, str func(string) (string, bool), num func(string) (uin
 	}
 	return info
 }
+
+// launchdJob is one job from ServiceManagement's job list (D48).
+type launchdJob struct {
+	Label   string
+	PID     int64 // 0 when not running
+	Status  int64 // last wait status; meaningful when HasStatus
+	HasStat bool
+	Program string
+	User    bool // a user agent rather than a system daemon
+}
+
+// launchdJobFrom reads one job dictionary (keys Label, PID,
+// LastExitStatus, Program).
+func launchdJobFrom(d map[string]any, user bool) (launchdJob, bool) {
+	label, _ := d["Label"].(string)
+	if label == "" {
+		return launchdJob{}, false
+	}
+	j := launchdJob{Label: label, User: user}
+	if v, ok := d["PID"].(float64); ok && v > 0 {
+		j.PID = int64(v)
+	}
+	if v, ok := d["LastExitStatus"].(float64); ok {
+		j.Status, j.HasStat = int64(v), true
+	}
+	j.Program, _ = d["Program"].(string)
+	return j, true
+}
+
+// launchdServices maps launchd jobs onto services. A running job is
+// active; any other is inactive, with how it last ended. Jobs are never
+// "failed": many macOS jobs end with a non-zero status as a matter of
+// course, so that would raise findings for normal behavior.
+func launchdServices(jobs []launchdJob) core.Services {
+	seen := map[string]bool{}
+	out := core.Services{}
+	for _, j := range jobs {
+		if seen[j.Label] {
+			continue
+		}
+		seen[j.Label] = true
+		kind := "System daemon"
+		if j.User {
+			kind = "User agent"
+		}
+		desc := kind
+		if j.Program != "" {
+			desc += " · " + j.Program
+		}
+		s := core.Service{Name: j.Label, Description: desc, LoadState: "loaded", ActiveState: "inactive", SubState: "waiting"}
+		switch {
+		case j.PID > 0:
+			s.ActiveState, s.SubState = "active", "running (pid "+strconv.FormatInt(j.PID, 10)+")"
+		case j.HasStat && j.Status&0x7f != 0:
+			s.SubState = "killed (signal " + strconv.FormatInt(j.Status&0x7f, 10) + ")"
+		case j.HasStat && j.Status>>8 != 0:
+			s.SubState = "exited (status " + strconv.FormatInt((j.Status>>8)&0xff, 10) + ")"
+		case j.HasStat:
+			s.SubState = "exited"
+		}
+		out = append(out, s)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
+	return out
+}

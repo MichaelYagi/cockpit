@@ -154,8 +154,13 @@ paths:
     get:
       operationId: listServices
       tags: [machine]
-      summary: systemd services
-      description: Unit state from systemd over D-Bus, refreshed every 10 seconds. Counts cover all services even when `state` filters the items.
+      summary: Services (systemd on Linux, launchd on macOS)
+      description: >-
+        Unit state from systemd over D-Bus on Linux, or launchd jobs on macOS
+        (system daemons and this user's agents, D48), refreshed every 10
+        seconds. launchd jobs are `active` while running and `inactive`
+        otherwise, never `failed`. Counts cover all services even when
+        `state` filters the items.
       x-cockpit-scope: system:read
       parameters:
         - name: state

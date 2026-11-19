@@ -1180,3 +1180,39 @@ injected into the dashboard. The page inserts API text only as text, and
 a test rejects HTML insertion. The hint under the box says to tick it
 only on a trusted computer.
 
+## D48 — launchd services on macOS
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** This amends D36. A `darwin.services` collector lists launchd
+jobs through ServiceManagement's `SMCopyAllJobDictionaries`, called
+through purego, every 10 seconds. It reads both the system domain (daemons)
+and the agent user's domain (agents). Apple deprecated the function in
+macOS 10.10, but it is still the only public way to list jobs, and the
+call is read-only. It reports a new capability, `services.launchd`; the
+services section takes the better of `services.systemd` and
+`services.launchd`, so the API shape is unchanged. Each job becomes a
+service:
+
+- `name` is the job label, and `description` is "System daemon" or "User
+  agent" plus the program path when given.
+- `load_state` is `loaded`.
+- A job with a PID is `active`, with `sub_state` `running (pid N)`.
+- Any other job is `inactive`, with `sub_state` `waiting` (never ran),
+  `exited`, `exited (status N)` or `killed (signal N)`, decoded from
+  launchd's last wait status.
+- Jobs are never `failed`. Many macOS jobs end with a non-zero status
+  during normal operation, so the services health check would warn about
+  normal behavior. The status is still shown.
+
+If the framework fails to load, the capability is `unsupported`, with the
+reason.
+
+**Why.** The owner wants the Services screen on their Mac. Running
+`launchctl list` would parse command output, which principle 9 avoids
+when a library call exists.
+
+**Risk.** A future macOS could remove the deprecated function; the
+capability then reports `unsupported` instead of failing. It is tested on
+GitHub's macOS runner, not on the owner's Mac.
+

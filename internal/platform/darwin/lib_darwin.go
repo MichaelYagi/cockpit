@@ -22,6 +22,7 @@ const (
 	libSystemPath = "/usr/lib/libSystem.B.dylib"
 	cfPath        = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 	ioKitPath     = "/System/Library/Frameworks/IOKit.framework/IOKit"
+	smPath        = "/System/Library/Frameworks/ServiceManagement.framework/ServiceManagement"
 )
 
 // bind opens a library and registers each named symbol into its function
@@ -386,4 +387,61 @@ func (k *ioKitLib) temperatures() []thermalReading {
 		cf.release(ev)
 	}
 	return out
+}
+
+// ---- ServiceManagement: launchd jobs (D48) ----
+
+type smLib struct {
+	cf *cfLib
+
+	copyAllJobs func(domain uintptr) uintptr
+
+	systemDomain, userDomain uintptr // CFStringRef constants
+}
+
+func loadSM(cf *cfLib) (*smLib, error) {
+	if cf == nil {
+		return nil, errors.New("CoreFoundation is not loaded")
+	}
+	m := &smLib{cf: cf}
+	h, err := bind(smPath, map[string]any{
+		// Deprecated since macOS 10.10 but still the only public way to
+		// list launchd jobs; read-only.
+		"SMCopyAllJobDictionaries": &m.copyAllJobs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for name, dst := range map[string]*uintptr{"kSMDomainSystemLaunchd": &m.systemDomain, "kSMDomainUserLaunchd": &m.userDomain} {
+		sym, err := purego.Dlsym(h, name)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		// sym is the address of a CFStringRef global; read the reference.
+		*dst = **(**uintptr)(unsafe.Pointer(&sym))
+	}
+	return m, nil
+}
+
+// jobs lists the jobs of the system domain (daemons) and this user's
+// domain (agents). ok is false when neither could be read.
+func (m *smLib) jobs() (out []launchdJob, ok bool) {
+	for _, d := range []struct {
+		domain uintptr
+		user   bool
+	}{{m.systemDomain, false}, {m.userDomain, true}} {
+		arr := m.copyAllJobs(d.domain)
+		if arr == 0 {
+			continue
+		}
+		ok = true
+		n := m.cf.arrayCount(arr)
+		for i := int64(0); i < n; i++ {
+			if j, good := launchdJobFrom(m.cf.dict(m.cf.arrayAt(arr, i), "Label", "PID", "LastExitStatus", "Program"), d.user); good {
+				out = append(out, j)
+			}
+		}
+		m.cf.release(arr)
+	}
+	return out, ok
 }

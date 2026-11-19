@@ -41,7 +41,7 @@ See [SETUP](docs/SETUP.md) for configuration, remote access and services.
 6. **Network:** interfaces, addresses, throughput, errors, routes, DNS and
    endpoint checks.
 7. **Processes:** process list and usage, and containers (from cgroup v2).
-8. **Services:** systemd service state.
+8. **Services:** systemd services on Linux, launchd jobs on macOS.
 9. **Events:** health findings and system events over time.
 10. **API Access:** listeners, clients, request statistics and API keys
     (TUI only).
@@ -52,7 +52,7 @@ Batteries and UPS (Network UPS Tools) are included, and health findings
 can be sent to webhooks.
 
 **Platforms.** Linux has everything above. macOS has CPU, memory, disks,
-network, processes, batteries and Apple Silicon temperatures. Windows has
+network, processes, services, batteries and Apple Silicon temperatures. Windows has
 identity, CPU, memory, disks and network. Under WSL, Cockpit monitors the
 WSL virtual machine; Windows passes no CPU sensors into it.
 
