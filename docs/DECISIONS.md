@@ -737,7 +737,7 @@ already exist. Serving it from the same origin needs no CORS (D34).
 (Amended by D45: the page may also call machines listed in
 `api.web.machines`, which must allow its origin through CORS. Amended by
 D46: the page may call any address, and machines can be added in the
-browser.)
+browser. Amended by D47: **Remember me** keeps the key in the browser.)
 
 ## D36 — macOS system libraries through purego
 
@@ -1157,3 +1157,26 @@ of editing every machine's config.
 - Keys in `localStorage` last until removed, and anyone using that
   browser profile can use them.
 - `allowed_origins` restores the strict behavior for anyone who wants it.
+
+## D47 — Remember me in the web dashboard
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** This amends D35. The dashboard's sign-in has a **Remember
+me** checkbox, off by default. When it is ticked, the key is kept in that
+browser's `localStorage` instead of the tab's `sessionStorage`, so it
+survives closing the tab and is shared by the browser's tabs. **Sign
+out** removes the key from both. When signing in to another machine
+(D46), the box starts ticked, matching how those keys were already kept.
+Nothing else changes: no cookies, the key still goes only in the
+`Authorization` header, and the API is unchanged.
+
+**Why.** The owner wants the dashboard to stay signed in on their own
+computers.
+
+**Risk.** A remembered key lasts until sign out or the key is revoked.
+Anyone using that browser profile can use it, and so could a script
+injected into the dashboard. The page inserts API text only as text, and
+a test rejects HTML insertion. The hint under the box says to tick it
+only on a trusted computer.
+

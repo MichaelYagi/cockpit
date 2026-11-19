@@ -71,7 +71,9 @@ Threats:
 - **Web dashboard (D35).** The TCP listener serves static files at `/ui/`
   without a key. They contain no data. The page keeps the key the user
   enters in the tab's `sessionStorage` (gone when the tab closes; never in
-  cookies) and sends it as an `Authorization` header, so another site
+  cookies), or with **Remember me** (D47) in `localStorage` until sign
+  out, where anyone using that browser profile can use it. It sends the
+  key as an `Authorization` header, so another site
   cannot make requests with it. Keys for other machines added in the
   browser (D46) are kept in `localStorage` until the machine is removed,
   so anyone using that browser profile can use them. Responses carry a

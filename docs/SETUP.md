@@ -333,7 +333,9 @@ except API Access and Settings, updates live, and works at phone width.
 Number keys `1`–`9` switch screens.
 
 - The key stays in that browser tab only and is forgotten when the tab
-  closes. **Sign out** forgets it at once.
+  closes, unless you tick **Remember me**. Then it is kept in that browser
+  until you sign out. Only tick it on a computer you trust. **Sign out**
+  forgets the key at once.
 - From another computer, start the agent with `--lan` (see
   [remote access](#remote-access)) and open the address it prints. The browser warns about the certificate,
   since it comes from Cockpit's own CA: compare the fingerprint it shows

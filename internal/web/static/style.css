@@ -127,6 +127,7 @@ input[type="search"], input[type="password"], input[type="text"], select {
   min-width: 0;
 }
 input[type="search"] { width: 260px; max-width: 100%; }
+form.signin .checks { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
 
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }

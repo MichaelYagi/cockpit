@@ -296,11 +296,11 @@ function layout() {
       els.pick,
       h('div', { class: 'ident' }, els.host, els.os),
       h('div', { class: 'head-right' }, els.health, els.conn,
-        h('button', { class: 'ghost', type: 'button', onclick: () => signOut(getTarget() ? 'Signed out. The key was removed from this browser.' : 'Signed out. The key was removed from this tab.') }, 'Sign out'))),
+        h('button', { class: 'ghost', type: 'button', onclick: () => signOut('Signed out. The key was removed from this browser.') }, 'Sign out'))),
     els.nav,
     els.banner,
     els.main,
-    h('footer', null, els.footVer, "Read-only view. This machine's key is kept in this tab only; keys for other machines are remembered in this browser until you remove them."));
+    h('footer', null, els.footVer, 'Read-only view. Keys are forgotten when the tab closes unless remembered. Sign out forgets the key in use.'));
   updateHeader();
 }
 
@@ -370,6 +370,8 @@ function signIn(message) {
   const input = h('input', { type: 'password', id: 'key', name: 'key', autocomplete: 'off', spellcheck: 'false', placeholder: 'ckp_…', required: true, autofocus: true });
   const show = h('input', { type: 'checkbox', id: 'show' });
   show.addEventListener('change', () => (input.type = show.checked ? 'text' : 'password'));
+  const remember = h('input', { type: 'checkbox', id: 'remember' });
+  remember.checked = Boolean(getTarget());
   const msg = h('p', { class: 'signin-msg', role: 'status' }, message || '');
   if (message) msg.classList.add('warn');
   const button = h('button', { type: 'submit', class: 'primary' }, 'Connect');
@@ -379,14 +381,16 @@ function signIn(message) {
     h('p', { class: 'muted' }, `Enter an API key to view ${machineLabel(getTarget())}.`),
     h('label', { for: 'key' }, 'API key'),
     input,
-    h('label', { class: 'check', for: 'show' }, show, ' Show key'),
+    h('div', { class: 'checks' },
+      h('label', { class: 'check', for: 'show' }, show, ' Show key'),
+      h('label', { class: 'check', for: 'remember' }, remember, ' Remember me')),
     button,
     msg,
     h('p', { class: 'hint muted' },
       'Create a key in the terminal UI (API Access) or with ',
       h('code', null, 'cockpit keys create --scope all'),
       getTarget() ? ' on that machine' : '',
-      getTarget() ? '. The key is remembered in this browser until you remove the machine.' : '. The key is kept in this tab only and is forgotten when you close it.'));
+      '. Without Remember me, the key is forgotten when you close the tab. Only tick it on a computer you trust.'));
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const key = input.value.trim();
@@ -398,7 +402,7 @@ function signIn(message) {
     button.disabled = true;
     replace(msg, 'Checking…');
     msg.className = 'signin-msg muted';
-    setKey(key);
+    setKey(key, remember.checked);
     try {
       await get('/system');
       start();
