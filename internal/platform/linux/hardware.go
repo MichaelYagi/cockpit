@@ -425,14 +425,6 @@ func (c *usbCollector) Collect(context.Context) collector.Result {
 
 // ---- DMI: board, firmware and memory modules ----
 
-var chassisTypes = map[string]string{
-	"1": "Other", "2": "Unknown", "3": "Desktop", "4": "Low profile desktop", "5": "Pizza box", "6": "Mini tower",
-	"7": "Tower", "8": "Portable", "9": "Laptop", "10": "Notebook", "11": "Hand held", "12": "Docking station",
-	"13": "All in one", "14": "Sub notebook", "15": "Space-saving", "16": "Lunch box", "17": "Main server chassis",
-	"23": "Rack mount chassis", "24": "Sealed-case PC", "30": "Tablet", "31": "Convertible", "32": "Detachable",
-	"35": "Mini PC", "36": "Stick PC",
-}
-
 type dmiCollector struct {
 	base
 	env collector.Env
@@ -469,7 +461,7 @@ func (c *dmiCollector) Collect(context.Context) collector.Result {
 		Serial: attr("product_serial"), // usually root-only; never exposed (D9)
 	}
 	if ct := attr("chassis_type"); ct != "" {
-		b.ChassisType = chassisTypes[ct]
+		b.ChassisType = portable.ChassisTypes[ct]
 	}
 	res.Status[core.CapHardwareBoard] = available()
 	res.Records = append(res.Records, b)
@@ -500,7 +492,7 @@ func (c *dmiCollector) memoryModules() (core.MemoryModules, core.CapabilityStatu
 			denied = denied || os.IsPermission(err)
 			continue
 		}
-		if m, ok := parseSMBIOSMemory(raw); ok {
+		if m, ok := portable.SMBIOSMemory(raw); ok {
 			out = append(out, m)
 		}
 	}
@@ -512,73 +504,4 @@ func (c *dmiCollector) memoryModules() (core.MemoryModules, core.CapabilityStatu
 			Reason: "Reading memory module details requires root (SMBIOS tables are root-only)."}
 	}
 	return nil, core.CapabilityStatus{Availability: core.Unsupported, Reason: "No memory module entries are present in the firmware tables."}
-}
-
-var smbiosMemoryTypes = map[byte]string{
-	0x12: "DDR", 0x13: "DDR2", 0x18: "DDR3", 0x1A: "DDR4", 0x1B: "LPDDR", 0x1C: "LPDDR2", 0x1D: "LPDDR3",
-	0x1E: "LPDDR4", 0x22: "DDR5", 0x23: "LPDDR5",
-}
-
-// parseSMBIOSMemory decodes an SMBIOS type 17 (Memory Device) structure.
-// Empty slots (size 0) return ok=false.
-func parseSMBIOSMemory(b []byte) (core.MemoryModule, bool) {
-	var m core.MemoryModule
-	if len(b) < 0x15 || b[0] != 17 {
-		return m, false
-	}
-	n := int(b[1]) // formatted area length
-	if n > len(b) || n < 0x15 {
-		return m, false
-	}
-	word := func(off int) uint32 {
-		if off+2 > n {
-			return 0
-		}
-		return uint32(b[off]) | uint32(b[off+1])<<8
-	}
-	dword := func(off int) uint64 {
-		if off+4 > n {
-			return 0
-		}
-		return uint64(b[off]) | uint64(b[off+1])<<8 | uint64(b[off+2])<<16 | uint64(b[off+3])<<24
-	}
-	size := word(0x0C)
-	switch {
-	case size == 0 || size == 0xFFFF:
-		return m, false
-	case size == 0x7FFF:
-		m.SizeBytes = (dword(0x1C) & 0x7FFFFFFF) << 20
-	case size&0x8000 != 0:
-		m.SizeBytes = uint64(size&0x7FFF) << 10
-	default:
-		m.SizeBytes = uint64(size) << 20
-	}
-	// Strings follow the formatted area, NUL-terminated, 1-indexed.
-	var strs []string
-	for _, s := range bytes.Split(b[n:], []byte{0}) {
-		if len(s) == 0 {
-			break
-		}
-		strs = append(strs, strings.TrimSpace(string(s)))
-	}
-	str := func(off int) string {
-		if off >= n {
-			return ""
-		}
-		i := int(b[off])
-		if i == 0 || i > len(strs) {
-			return ""
-		}
-		return strs[i-1]
-	}
-	m.Locator = str(0x10)
-	m.Type = smbiosMemoryTypes[b[0x12]]
-	m.SpeedMTs = int(word(0x15))
-	if cs := int(word(0x20)); cs > 0 {
-		m.SpeedMTs = cs // configured speed, when present
-	}
-	m.Manufacturer = str(0x17)
-	m.Serial = str(0x18)
-	m.PartNumber = str(0x1A)
-	return m, true
 }

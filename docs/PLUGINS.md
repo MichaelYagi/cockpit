@@ -192,6 +192,9 @@ filesystems are always skipped.
 | `windows.memory` | `memory.usage` | `GlobalMemoryStatusEx` |
 | `windows.filesystems` | `storage.filesystems` | fixed drives: `GetDiskFreeSpaceExW`, `GetVolumeInformationW` |
 | `windows.network` | `network.interfaces`, `network.throughput` | `net.Interfaces`; counters from `GetIfEntry2Ex` |
+| `windows.processes` | `processes.list` (on demand) | `NtQuerySystemInformation(SystemProcessInformation)` (D50); owner and path through `OpenProcess`, `OpenProcessToken`, `QueryFullProcessImageName` |
+| `windows.hardware` | `hardware.cpu`, `hardware.board`, `hardware.memory_modules` | Registry (`CentralProcessor\0`, `System\BIOS`), `GetLogicalProcessorInformationEx`, CPUID (`x/sys/cpu`), SMBIOS from `GetSystemFirmwareTable('RSMB')` |
+| `windows.power` | `power.supplies` | `GetSystemPowerStatus`, every 10s |
 
 `darwin.unsupported` and `windows.unsupported` report every other
 capability as `unsupported` with a reason.

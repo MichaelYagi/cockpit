@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/MichaelYagi/cockpit/internal/core"
+	"github.com/MichaelYagi/cockpit/internal/platform/portable"
 )
 
 const x86CPUInfo = `processor	: 0
@@ -187,22 +188,22 @@ func smbios17(size uint16, ext uint32, memType byte, speed, configured uint16, s
 }
 
 func TestParseSMBIOSMemory(t *testing.T) {
-	m, ok := parseSMBIOSMemory(smbios17(16384, 0, 0x1A, 3200, 3000, "DIMM_A1", "Kingston", "FAKE-DIMM-SN", "KF432C16BB/16"))
+	m, ok := portable.SMBIOSMemory(smbios17(16384, 0, 0x1A, 3200, 3000, "DIMM_A1", "Kingston", "FAKE-DIMM-SN", "KF432C16BB/16"))
 	if !ok || m.SizeBytes != 16<<30 || m.Type != "DDR4" || m.SpeedMTs != 3000 || m.Locator != "DIMM_A1" || m.Manufacturer != "Kingston" ||
 		m.PartNumber != "KF432C16BB/16" || m.Serial != "FAKE-DIMM-SN" {
 		t.Errorf("%+v", m)
 	}
-	if m, ok := parseSMBIOSMemory(smbios17(0x7FFF, 65536, 0x22, 4800, 0, "A", "B", "C", "D")); !ok || m.SizeBytes != 64<<30 || m.Type != "DDR5" || m.SpeedMTs != 4800 {
+	if m, ok := portable.SMBIOSMemory(smbios17(0x7FFF, 65536, 0x22, 4800, 0, "A", "B", "C", "D")); !ok || m.SizeBytes != 64<<30 || m.Type != "DDR5" || m.SpeedMTs != 4800 {
 		t.Errorf("extended %+v", m)
 	}
-	if m, ok := parseSMBIOSMemory(smbios17(0x8000|512, 0, 0x18, 1600, 0, "A", "B", "C", "D")); !ok || m.SizeBytes != 512<<10 {
+	if m, ok := portable.SMBIOSMemory(smbios17(0x8000|512, 0, 0x18, 1600, 0, "A", "B", "C", "D")); !ok || m.SizeBytes != 512<<10 {
 		t.Errorf("KB unit %+v", m)
 	}
-	if _, ok := parseSMBIOSMemory(smbios17(0, 0, 0x1A, 0, 0, "EMPTY", "", "", "")); ok {
+	if _, ok := portable.SMBIOSMemory(smbios17(0, 0, 0x1A, 0, 0, "EMPTY", "", "", "")); ok {
 		t.Error("empty slot reported")
 	}
 	for _, bad := range [][]byte{nil, {17}, {16, 0x22}, append([]byte{17, 0xFF}, make([]byte, 30)...)} {
-		if _, ok := parseSMBIOSMemory(bad); ok {
+		if _, ok := portable.SMBIOSMemory(bad); ok {
 			t.Errorf("accepted %v", bad)
 		}
 	}

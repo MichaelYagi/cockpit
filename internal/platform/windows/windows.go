@@ -1,7 +1,8 @@
 //go:build windows
 
 // Package windows collects Windows metrics without cgo (D32): kernel32
-// and the IP helper API through golang.org/x/sys/windows. There is no load
+// and the IP helper API through golang.org/x/sys/windows, the registry,
+// SMBIOS and NtQuerySystemInformation for processes. There is no load
 // average on Windows; sensors and disk health are not collected yet.
 package windows
 
@@ -36,7 +37,8 @@ var (
 var implemented = []core.Capability{
 	core.CapSystemIdentity, core.CapSystemUptime, core.CapCPUUsage, core.CapCPULoad, core.CapMemoryUsage,
 	core.CapStorageFilesystems, core.CapNetworkInterfaces, core.CapNetworkThroughput, core.CapNetworkEndpoints,
-	core.CapPowerUPS,
+	core.CapPowerUPS, core.CapProcessesList, core.CapHardwareCPU, core.CapHardwareBoard, core.CapHardwareMemory,
+	core.CapPowerSupplies,
 }
 
 // Collectors returns the Windows collector set.
@@ -51,6 +53,10 @@ func Collectors(env collector.Env) []collector.Collector {
 		sampler("windows.memory", "kernel32", 0, now, []core.Capability{core.CapMemoryUsage}, memory),
 		sampler("windows.filesystems", "kernel32", 10*time.Second, now, []core.Capability{core.CapStorageFilesystems}, drives),
 		sampler("windows.network", "iphlpapi", 0, now, []core.Capability{core.CapNetworkInterfaces, core.CapNetworkThroughput}, network),
+		newProcesses(now),
+		inventory("windows.hardware", "registry, processor topology, SMBIOS", now,
+			[]core.Capability{core.CapHardwareCPU, core.CapHardwareBoard, core.CapHardwareMemory}, hardware),
+		withInterval(sampler("windows.power", "GetSystemPowerStatus", 0, now, []core.Capability{core.CapPowerSupplies}, power), 10*time.Second),
 		portable.NewUPS(env, "windows.ups", version),
 		portable.NewEndpoints(env),
 		unsupported.Rest("windows.unsupported", implemented, "Not collected on Windows yet."),
@@ -76,6 +82,22 @@ func sampler(id, source string, interval time.Duration, now func() time.Time, ca
 			return r
 		},
 	}
+}
+
+// inventory is a collector for data that rarely changes.
+func inventory(id, source string, now func() time.Time, caps []core.Capability, fill func(*collector.Result)) collector.Collector {
+	c := sampler(id, source, 5*time.Minute, now, caps, fill).(portable.Func)
+	c.Desc.Class = collector.Inventory
+	c.Desc.DefaultTimeout = 3 * time.Second
+	return c
+}
+
+// withInterval sets a sampler's interval and its minimum to the same
+// value, for data that changes slowly.
+func withInterval(c collector.Collector, d time.Duration) collector.Collector {
+	f := c.(portable.Func)
+	f.Desc.DefaultInterval, f.Desc.MinInterval = d, d
+	return f
 }
 
 func system(r *collector.Result) {
