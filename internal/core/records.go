@@ -44,6 +44,7 @@ type CPUCounters struct {
 	LogicalCores int
 	ModelName    string
 	Load         *LoadAverage // nil when unavailable
+	FrequencyMHz *float64     // average current clock across cores (D55); nil when unavailable
 }
 
 // MemoryStats is a raw memory sample.

@@ -4,6 +4,7 @@ package linux
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"path/filepath"
 	"runtime"
@@ -86,6 +87,28 @@ func (c *systemCollector) Collect(context.Context) collector.Result {
 
 // ---- cpu ----
 
+var cpuFreqMissing = core.CapabilityStatus{Availability: core.Unsupported,
+	Reason: "This system has no cpufreq driver (common in virtual machines and WSL), so the current clock is unknown."}
+
+// frequency averages scaling_cur_freq (kHz) over the online CPUs (D55).
+// CPUs without the file (offline, or no cpufreq) are left out.
+func (c *cpuCollector) frequency(cpus int) (float64, bool) {
+	var sum float64
+	n := 0
+	for i := range min(cpus, 4096) {
+		khz, err := readUint(c.env.SysRoot, fmt.Sprintf("devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", i))
+		if err != nil || khz == 0 {
+			continue
+		}
+		sum += float64(khz) / 1000
+		n++
+	}
+	if n == 0 {
+		return 0, false
+	}
+	return sum / float64(n), true
+}
+
 type cpuCollector struct {
 	base
 	env   collector.Env
@@ -101,7 +124,7 @@ func newCPU(env collector.Env) *cpuCollector {
 func (c *cpuCollector) Descriptor() collector.Descriptor {
 	return collector.Descriptor{
 		ID: "linux.cpu", Version: version, Source: "procfs",
-		Capabilities: []core.Capability{core.CapCPUUsage, core.CapCPULoad},
+		Capabilities: []core.Capability{core.CapCPUUsage, core.CapCPULoad, core.CapCPUFrequency},
 		Class:        collector.Sampler, DefaultInterval: 2 * time.Second, DefaultTimeout: time.Second,
 	}
 }
@@ -112,12 +135,14 @@ func (c *cpuCollector) Collect(context.Context) collector.Result {
 	if err != nil {
 		res.Status[core.CapCPUUsage] = status(err, "CPU statistics")
 		res.Status[core.CapCPULoad] = status(err, "CPU statistics")
+		res.Status[core.CapCPUFrequency] = status(err, "CPU statistics")
 		return res
 	}
 	total, per, err := parseCPUStat(b)
 	if err != nil {
 		res.Status[core.CapCPUUsage] = status(err, "CPU statistics")
 		res.Status[core.CapCPULoad] = status(err, "CPU statistics")
+		res.Status[core.CapCPUFrequency] = status(err, "CPU statistics")
 		return res
 	}
 	if c.model == "" {
@@ -127,6 +152,12 @@ func (c *cpuCollector) Collect(context.Context) collector.Result {
 	}
 	rec := &core.CPUCounters{Total: total, PerCore: per, LogicalCores: len(per), ModelName: c.model}
 	res.Status[core.CapCPUUsage] = available()
+	if mhz, ok := c.frequency(len(per)); ok {
+		rec.FrequencyMHz = &mhz
+		res.Status[core.CapCPUFrequency] = available()
+	} else {
+		res.Status[core.CapCPUFrequency] = cpuFreqMissing
+	}
 
 	if lb, err := readFile(c.env.ProcRoot, "loadavg"); err != nil {
 		res.Status[core.CapCPULoad] = status(err, "load average")

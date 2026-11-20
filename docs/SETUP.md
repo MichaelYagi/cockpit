@@ -29,13 +29,8 @@ Phase 3.
   Windows.
 - Go 1.27.4 to build (pinned in `go.mod`; the `go` command downloads it if
   needed). No C compiler or database server is needed.
-- Optional: `smartctl` from smartmontools 7.0 or newer, for disk health.
-  On macOS, install it with Homebrew (`brew install smartmontools`) or
-  MacPorts; on Windows, with the smartmontools installer (it goes to
-  `C:\Program Files\smartmontools`). Cockpit finds it there even when it
-  is not on `PATH` (D54). Reading disks needs root on macOS and an
-  administrator terminal on Windows; otherwise disk health shows
-  `permission_denied`.
+- Optional: `smartctl` from smartmontools 7.0 or newer, for disk health
+  (see [Disk health](#disk-health-smartctl)).
 
 ### macOS and Windows
 
@@ -608,7 +603,7 @@ Unavailable data is reported with a reason, never as an error:
 | Area | Typical reason | What to do |
 |---|---|---|
 | Temperatures, fans | No hwmon/thermal sensors (VMs, containers, WSL) | Nothing; this is expected |
-| Disk health | `smartctl` not installed | Install smartmontools 7.0+ (`install.sh` does this for the system service). Virtual disks in VMs and WSL have no SMART data even with it |
+| Disk health | `smartctl` not installed | Install smartmontools 7.0+ (see Disk health; `install.sh` does this for the system service). Virtual disks in VMs and WSL have no SMART data even with it |
 | Disk health | Permission denied | Reading SMART data needs raw device access; in system mode enable the SMART helper (see System service). On macOS run the agent as root, on Windows from an administrator terminal (D54) |
 | Disk health | Results more than 3 hours old | The SMART helper stopped running: `systemctl status cockpit-smart.timer` |
 | Memory pressure | Kernel without PSI (before 4.20, or `psi=0`) | Memory utilization is still checked |
@@ -643,6 +638,57 @@ collection:
 
 Excluded filesystems disappear from the API, the TUI, history and the
 storage health check. Changes need an agent restart.
+
+## Disk health (smartctl)
+
+Disk health (pass or fail, temperature, wear, power-on hours, reallocated
+and pending sectors) comes from `smartctl`, part of smartmontools 7.0 or
+newer. It is optional: without it, disk health shows `not_configured` and
+everything else works. Cockpit runs it once an hour, never wakes a
+sleeping disk, and only reads (D20, D54). The Storage screen shows the
+result, and the `disk_health` check raises a finding for a failing disk.
+
+**Install it.**
+
+| System | Command |
+|---|---|
+| Debian, Ubuntu | `sudo apt install smartmontools` |
+| Fedora, RHEL | `sudo dnf install smartmontools` |
+| Arch | `sudo pacman -S smartmontools` |
+| openSUSE | `sudo zypper install smartmontools` |
+| Alpine | `sudo apk add smartmontools` |
+| macOS (Homebrew) | `brew install smartmontools` |
+| macOS (MacPorts) | `sudo port install smartmontools` |
+| Windows | The installer from [smartmontools.org](https://www.smartmontools.org/), or `choco install smartmontools` |
+
+`deploy/install.sh` installs it for you on Linux. Cockpit finds `smartctl`
+on `PATH` and also where Homebrew (`/opt/homebrew`, `/usr/local`),
+MacPorts (`/opt/local/sbin`) and the Windows installer
+(`C:\Program Files\smartmontools\bin`) put it, so it works for a
+launchd agent or Windows service whose `PATH` lacks those folders.
+Restart the agent after installing.
+
+**Give it access to the disks.** Reading SMART data needs raw disk access:
+
+- **Linux:** the system service's SMART helper runs `smartctl` as root
+  hourly, so the agent itself stays unprivileged (see System service). A
+  user-mode agent shows `permission_denied`.
+- **macOS:** run the agent as root, for example `sudo cockpit agent`.
+- **Windows:** run the agent from an administrator terminal.
+
+Without access, disk health shows `permission_denied` with the reason.
+
+**Check it.** Open the Storage
+screen, or ask the API:
+
+```sh
+curl -s -H "Authorization: Bearer $COCKPIT_API_KEY" \
+  http://127.0.0.1:7878/api/v1/storage | jq '.disk_health'
+```
+
+**Virtual disks have no SMART data.** Virtual machines, cloud servers and
+WSL show `unsupported`. Under WSL, the physical disks belong to Windows:
+run the Windows build of Cockpit as administrator to see their health.
 
 ## UPS monitoring
 

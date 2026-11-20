@@ -10,6 +10,7 @@ type CPUMetrics struct {
 	LogicalCores        int
 	ModelName           string
 	Load                *LoadAverage
+	FrequencyMHz        *float64 // average current clock (D55)
 }
 
 // MemoryMetrics is the derived memory section.

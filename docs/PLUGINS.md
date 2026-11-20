@@ -127,7 +127,7 @@ report and the TUI's Performance screen.
 ## 4. Capabilities
 
 Dotted identifiers: `system.identity`, `system.uptime`, `cpu.usage`,
-`cpu.load`, `cpu.frequency` (not collected yet), `memory.usage`, `memory.pressure`,
+`cpu.load`, `cpu.frequency` (Linux with cpufreq, D55), `memory.usage`, `memory.pressure`,
 `storage.devices`, `storage.filesystems`, `storage.smart`,
 `network.interfaces`, `network.throughput`, `sensors.thermal`,
 `sensors.fan`, later `gpu.*`, `services.systemd`, `services.launchd`, `services.windows`, `processes.list`.

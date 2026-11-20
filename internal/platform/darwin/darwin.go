@@ -39,7 +39,7 @@ var implemented = []core.Capability{
 	core.CapNetworkEndpoints, core.CapServicesLaunchd,
 	core.CapHardwarePCI, core.CapHardwareUSB, core.CapStorageDevices, core.CapHardwareMemory,
 	core.CapNetworkRoutes, core.CapNetworkDNS, core.CapPowerUPS, core.CapGPUDevices, core.CapGPUMetrics,
-	core.CapStorageSMART,
+	core.CapStorageSMART, core.CapCPUFrequency,
 }
 
 // Collectors returns the macOS collector set.
@@ -63,8 +63,13 @@ func Collectors(env collector.Env) []collector.Collector {
 	}
 	return []collector.Collector{
 		sampler("darwin.system", "sysctl", time.Minute, now, []core.Capability{core.CapSystemIdentity, core.CapSystemUptime}, system),
-		sampler("darwin.cpu", "host_processor_info, sysctl", 0, now, []core.Capability{core.CapCPUUsage, core.CapCPULoad},
-			func(r *collector.Result) { cpu(r, sys, sysErr) }),
+		sampler("darwin.cpu", "host_processor_info, sysctl", 0, now, []core.Capability{core.CapCPUUsage, core.CapCPULoad, core.CapCPUFrequency},
+			func(r *collector.Result) {
+				cpu(r, sys, sysErr)
+				// D55: only powermetrics, as root, reports the current clock.
+				r.Status[core.CapCPUFrequency] = portable.Unavailable(core.Unsupported,
+					"macOS reports the current CPU clock only to root (powermetrics); the rated speed is on the Hardware screen.")
+			}),
 		sampler("darwin.memory", "sysctl", 0, now, []core.Capability{core.CapMemoryUsage}, memory),
 		sampler("darwin.filesystems", "getfsstat", 10*time.Second, now, []core.Capability{core.CapStorageFilesystems},
 			func(r *collector.Result) { filesystems(r, env.Filesystems) }),

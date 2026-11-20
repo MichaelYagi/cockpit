@@ -71,6 +71,23 @@ func TestCPU(t *testing.T) {
 	}
 }
 
+// The current clock is the average of the CPUs that report one (D55).
+func TestCPUFrequency(t *testing.T) {
+	files := map[string]string{"proc/stat": procStatFixture}
+	r := newCPU(env(tree(t, files))).Collect(context.Background())
+	wantStatus(t, r, core.CapCPUFrequency, core.Unsupported)
+	if record[*core.CPUCounters](t, r).FrequencyMHz != nil {
+		t.Error("frequency without cpufreq")
+	}
+	files["sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"] = "3600000\n"
+	files["sys/devices/system/cpu/cpu1/cpufreq/scaling_cur_freq"] = "4200000\n"
+	r = newCPU(env(tree(t, files))).Collect(context.Background())
+	wantStatus(t, r, core.CapCPUFrequency, core.Available)
+	if f := record[*core.CPUCounters](t, r).FrequencyMHz; f == nil || *f != 3900 {
+		t.Errorf("frequency %v", f)
+	}
+}
+
 func TestCPUWithoutLoadAvg(t *testing.T) {
 	root := tree(t, map[string]string{"proc/stat": procStatFixture})
 	r := newCPU(env(root)).Collect(context.Background())

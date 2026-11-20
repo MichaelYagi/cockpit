@@ -267,6 +267,7 @@ type CPUMetrics struct {
 	WindowSeconds       float64      `json:"window_seconds"`
 	LogicalCores        int          `json:"logical_cores"`
 	LoadAverage         *LoadAverage `json:"load_average"`
+	FrequencyMHz        *float64     `json:"frequency_mhz"` // average current clock; Linux with cpufreq only
 }
 
 // LoadAverage is the run-queue average (Linux and macOS only).

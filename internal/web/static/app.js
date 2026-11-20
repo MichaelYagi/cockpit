@@ -469,6 +469,7 @@ function Overview(el) {
     cpuChart.set([{ name: 'CPU', color: 0, points: livePoints(state.live.cpu) }], range);
     replace(box.cpu.body, c.error || c.warn, c.data ? h('p', { class: 'muted' },
       `${c.data.logical_cores} logical cores`,
+      c.data.frequency_mhz != null ? ` · ${(c.data.frequency_mhz / 1000).toFixed(2)} GHz` : '',
       c.data.load_average ? ` · load ${c.data.load_average['1m'].toFixed(2)} ${c.data.load_average['5m'].toFixed(2)} ${c.data.load_average['15m'].toFixed(2)}` : '') : null);
     // Memory
     const mm = m ? section(m.memory, 'Memory') : {};

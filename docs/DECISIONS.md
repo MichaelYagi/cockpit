@@ -1398,3 +1398,24 @@ Linux (`internal/platform/portable`).
 **Risk.** CI installs smartmontools on the macOS and Windows runners,
 whose virtual disks may report no SMART data; real disks are not tested
 there.
+
+## D55 — Current CPU clock
+
+**Status:** Accepted (2026-11-19)
+
+**Decision.** The CPU section of `/metrics` gains `frequency_mhz`: the
+average current clock of the CPUs that report one, or null. On Linux,
+`linux.cpu` reads `/sys/devices/system/cpu/cpuN/cpufreq/scaling_cur_freq`
+with each sample and reports the `cpu.frequency` capability, `unsupported`
+when no CPU has cpufreq (most virtual machines and WSL). It is not taken
+from `/proc/cpuinfo`, whose "cpu MHz" is a fixed value under hypervisors.
+
+macOS reports the capability `unsupported`: the current clock is only
+available to root through `powermetrics`, on Intel and Apple silicon
+alike, and `hw.cpufrequency` is the rated speed already shown as the
+processor's maximum. Windows does not collect it yet.
+
+**Why.** The owner asked for the current clock where the system provides
+it.
+
+**Contract.** Additive: one nullable field.
