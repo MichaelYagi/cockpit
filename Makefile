@@ -1,4 +1,6 @@
-GO       ?= go
+# go from PATH, or the per-user install in ~/.local/go, which a
+# non-login shell (wsl make windows from PowerShell) does not have on PATH.
+GO       ?= $(shell command -v go 2>/dev/null || echo $(HOME)/.local/go/bin/go)
 PKG      := ./...
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -s -w -X github.com/MichaelYagi/cockpit/internal/buildinfo.Version=$(VERSION)
@@ -6,12 +8,18 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 
 export CGO_ENABLED ?= 0
 
-.PHONY: all build fmt fmt-check vet lint test test-race test-integration cross vuln examples check dist clean
+.PHONY: all build windows fmt fmt-check vet lint test test-race test-integration cross vuln examples check dist clean
 
 all: check build
 
 build:
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/cockpit ./cmd/cockpit
+
+# The Windows executable, built from Linux, macOS or WSL:
+# make windows [WINDOWS_ARCH=arm64]
+WINDOWS_ARCH ?= amd64
+windows:
+	GOOS=windows GOARCH=$(WINDOWS_ARCH) $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/cockpit.exe ./cmd/cockpit
 
 fmt:
 	gofmt -w .

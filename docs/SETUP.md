@@ -45,7 +45,18 @@ which `--socket` also accepts. The system service, the SMART helper and
 
 ```sh
 make build          # produces bin/cockpit
+make windows        # produces bin/cockpit.exe (WINDOWS_ARCH=arm64 for ARM)
 make check          # gofmt, vet, staticcheck, race tests, cross-compile
+```
+
+Both stamp the version (`git describe`) shown by `cockpit version` and
+in the dashboards; a plain `go build` reports `dev`. On a Windows PC with
+WSL, build from PowerShell and run the result there:
+
+```powershell
+cd C:\src\cockpit          # your checkout, as Windows sees it
+wsl make windows
+.\bin\cockpit.exe agent
 ```
 
 ## Quick start (user mode)
