@@ -357,7 +357,7 @@ func (a *aggregator) derive(s section, rec core.Record, at time.Time) any {
 }
 
 func (a *aggregator) cpu(cur *core.CPUCounters, at time.Time) core.CPUMetrics {
-	m := core.CPUMetrics{LogicalCores: cur.LogicalCores, ModelName: cur.ModelName}
+	m := core.CPUMetrics{LogicalCores: cur.LogicalCores, ModelName: cur.ModelName, FrequencyMHz: cur.FrequencyMHz}
 	if cur.Load != nil {
 		l := *cur.Load
 		m.Load = &l

@@ -205,7 +205,7 @@ func (h *Resources) blockDevices(v *core.BlockDevices) *[]apiv1.BlockDevice {
 
 func cpuMetrics(v *core.CPUMetrics) *apiv1.CPUMetrics {
 	out := &apiv1.CPUMetrics{UsagePercent: v.UsagePercent, PerCoreUsagePercent: v.PerCoreUsagePercent,
-		WindowSeconds: v.WindowSeconds, LogicalCores: v.LogicalCores}
+		WindowSeconds: v.WindowSeconds, LogicalCores: v.LogicalCores, FrequencyMHz: v.FrequencyMHz}
 	if v.Load != nil {
 		out.LoadAverage = &apiv1.LoadAverage{One: v.Load.One, Five: v.Load.Five, Fifteen: v.Load.Fifteen}
 	}

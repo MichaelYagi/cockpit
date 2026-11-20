@@ -10,6 +10,11 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **Current CPU clock on Linux (D55).** The CPU panel in the TUI and the
+  web dashboard shows the average current clock, and `/metrics` gains
+  `cpu.frequency_mhz`, read from cpufreq. It is null where the system has
+  no cpufreq driver (most virtual machines and WSL), and on macOS and
+  Windows.
 - **Disk health on macOS and Windows (D54).** With smartmontools
   installed, macOS and Windows report disk health (pass or fail,
   temperature, wear, reallocated and pending sectors) and the disk health

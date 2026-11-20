@@ -1589,7 +1589,7 @@ components:
     CPUMetrics:
       type: object
       additionalProperties: false
-      required: [usage_percent, per_core_usage_percent, window_seconds, logical_cores, load_average]
+      required: [usage_percent, per_core_usage_percent, window_seconds, logical_cores, load_average, frequency_mhz]
       properties:
         usage_percent:
           type: [number, "null"]
@@ -1601,6 +1601,13 @@ components:
           items: { type: number, minimum: 0, maximum: 100 }
         window_seconds: { type: number, minimum: 0 }
         logical_cores: { type: integer, minimum: 0 }
+        frequency_mhz:
+          type: [number, "null"]
+          minimum: 0
+          description: >-
+            Average current clock across cores (D55), from cpufreq on Linux.
+            Null where the system does not report it (macOS, Windows,
+            virtual machines and WSL without cpufreq).
         load_average:
           description: Linux and macOS only; null elsewhere.
           anyOf:

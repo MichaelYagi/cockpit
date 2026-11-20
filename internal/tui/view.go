@@ -450,6 +450,9 @@ func (m *Model) cpuLines(inner int) []string {
 	if d.LoadAverage != nil {
 		out = append(out, kv(m.st, "load", fmt.Sprintf("%.2f  %.2f  %.2f", d.LoadAverage.One, d.LoadAverage.Five, d.LoadAverage.Fifteen)+m.st.muted.Render("  1m 5m 15m")))
 	}
+	if d.FrequencyMHz != nil {
+		out = append(out, kv(m.st, "clock", fmt.Sprintf("%.2f GHz", *d.FrequencyMHz/1000)))
+	}
 	if len(d.PerCoreUsagePercent) > 0 {
 		var cells strings.Builder
 		for _, c := range d.PerCoreUsagePercent {
