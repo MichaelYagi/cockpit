@@ -10,6 +10,8 @@ its own promise: `/api/v1` responses only ever gain fields and endpoints.
 
 ### Changed
 
+- **`make windows`** builds `bin/cockpit.exe` with the version stamped,
+  from Linux, macOS or WSL (`wsl make windows` from PowerShell works too).
 - **Current CPU clock on Linux (D55).** The CPU panel in the TUI and the
   web dashboard shows the average current clock, and `/metrics` gains
   `cpu.frequency_mhz`, read from cpufreq. It is null where the system has
